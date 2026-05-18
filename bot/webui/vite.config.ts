@@ -3,12 +3,21 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
+  const env = loadEnv(mode, path.resolve(__dirname, ".."), "");
   const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
   const wsTarget = target.replace(/^http/, "ws");
 
   return {
     plugins: [react()],
+    define: {
+      // Polyfill process for Deepgram SDK which checks typeof process !== "undefined"
+      // before accessing process.env in browser environments
+      "process": "{}",
+      "process.env": {
+        DEEPGRAM_ACCESS_TOKEN: env.VITE_DEEPGRAM_API_KEY,
+        DEEPGRAM_API_KEY: env.VITE_DEEPGRAM_API_KEY,
+      },
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

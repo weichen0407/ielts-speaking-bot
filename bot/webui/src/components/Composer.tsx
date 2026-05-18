@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Mic } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -105,6 +105,16 @@ export function Composer({
             Enter to send · Shift+Enter for newline
           </span>
           <span className="sm:hidden" aria-hidden />
+          <Button
+            type="button"
+            size="icon"
+            disabled={disabled}
+            aria-label="Start voice input"
+            className="h-9 w-9 rounded-full shadow-sm"
+            onClick={() => {}}
+          >
+            <Mic className="h-4 w-4" />
+          </Button>
           <Button
             type="submit"
             size="icon"

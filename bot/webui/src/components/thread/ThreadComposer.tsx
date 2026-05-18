@@ -20,6 +20,7 @@ import {
   History,
   ImageIcon,
   Loader2,
+  Mic,
   Plus,
   RotateCw,
   Sparkles,
@@ -40,6 +41,7 @@ import {
   MAX_IMAGES_PER_MESSAGE,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
+import { useVoiceInput } from "@/hooks/useVoiceInput";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import type { SlashCommand, GoalStateWsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -391,6 +393,7 @@ export function ThreadComposer({
   const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
+  const { transcript, isRecording, startRecording, stopRecording, clearTranscript } = useVoiceInput();
   const imageMode = controlledImageMode ?? uncontrolledImageMode;
   const setImageMode = useCallback(
     (enabled: boolean) => {
@@ -447,6 +450,13 @@ export function ThreadComposer({
     const id = requestAnimationFrame(() => el.focus());
     return () => cancelAnimationFrame(id);
   }, [disabled]);
+
+  // Transfer transcript to value when recording stops
+  useEffect(() => {
+    if (!isRecording && transcript) {
+      setValue(transcript);
+    }
+  }, [isRecording, transcript]);
 
   const readyImages = useMemo(
     () => images.filter((img): img is AttachedImage & { dataUrl: string } =>
@@ -635,13 +645,14 @@ export function ThreadComposer({
       : undefined;
     onSend(trimmed, payload, options);
     setValue("");
+    clearTranscript();
     setInlineError(null);
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
     setSlashMenuDismissed(false);
     resizeTextarea();
-  }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
+  }, [canSend, clear, clearTranscript, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlashMenu) {
@@ -789,9 +800,9 @@ export function ThreadComposer({
         ) : null}
         <textarea
           ref={textareaRef}
-          value={value}
+          value={isRecording ? transcript : value}
           onChange={(e) => {
-            setValue(e.target.value);
+            if (!isRecording) setValue(e.target.value);
             setSlashMenuDismissed(false);
           }}
           onInput={onInput}
@@ -852,6 +863,28 @@ export function ThreadComposer({
               )}
             >
               <Plus className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              disabled={disabled}
+              aria-label={isRecording ? "Stop voice input" : "Start voice input"}
+              className={cn(
+                "rounded-full hover:text-foreground",
+                isRecording
+                  ? "text-red-500 hover:text-red-600 animate-pulse"
+                  : "text-muted-foreground",
+                isHero
+                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                  : "h-7.5 w-7.5 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
+              )}
+              onClick={() => {
+                console.log("[ThreadComposer] Mic button clicked, isRecording:", isRecording);
+                isRecording ? stopRecording() : startRecording();
+              }}
+            >
+              <Mic className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
             </Button>
             <div ref={aspectControlRef} className="relative flex items-center gap-1">
               <Button
