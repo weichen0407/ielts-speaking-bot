@@ -37,6 +37,7 @@ class SubagentStatus:
     usage: dict = field(default_factory=dict)          # token usage
     stop_reason: str | None = None
     error: str | None = None
+    announce_result: bool = True  # whether this subagent will inject messages
 
 
 class _SubagentHook(AgentHook):
@@ -140,6 +141,8 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         origin_message_id: str | None = None,
+        extra_system_prompt: str | None = None,
+        announce_result: bool = True,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -151,11 +154,12 @@ class SubagentManager:
             label=display_label,
             task_description=task,
             started_at=time.monotonic(),
+            announce_result=announce_result,
         )
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id)
+            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -182,6 +186,8 @@ class SubagentManager:
         origin: dict[str, str],
         status: SubagentStatus,
         origin_message_id: str | None = None,
+        extra_system_prompt: str | None = None,
+        announce_result: bool = True,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -192,7 +198,7 @@ class SubagentManager:
 
         try:
             tools = self._build_tools()
-            system_prompt = self._build_subagent_prompt()
+            system_prompt = self._build_subagent_prompt(extra_system_prompt=extra_system_prompt)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -223,27 +229,31 @@ class SubagentManager:
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
-                await self._announce_result(
-                    task_id, label, task,
-                    self._format_partial_progress(result),
-                    origin, "error", origin_message_id,
-                )
+                if announce_result:
+                    await self._announce_result(
+                        task_id, label, task,
+                        self._format_partial_progress(result),
+                        origin, "error", origin_message_id,
+                    )
             elif result.stop_reason == "error":
-                await self._announce_result(
-                    task_id, label, task,
-                    result.error or "Error: subagent execution failed.",
-                    origin, "error", origin_message_id,
-                )
+                if announce_result:
+                    await self._announce_result(
+                        task_id, label, task,
+                        result.error or "Error: subagent execution failed.",
+                        origin, "error", origin_message_id,
+                    )
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
                 logger.info("Subagent [{}] completed successfully", task_id)
-                await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
+                if announce_result:
+                    await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
 
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
             logger.exception("Subagent [{}] failed", task_id)
-            await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+            if announce_result:
+                await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
 
     async def _announce_result(
         self,
@@ -311,7 +321,7 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, extra_system_prompt: str | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
@@ -321,12 +331,15 @@ class SubagentManager:
             self.workspace,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
-        return render_template(
+        base = render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
             workspace=str(self.workspace),
             skills_summary=skills_summary or "",
         )
+        if extra_system_prompt:
+            base += "\n\n" + extra_system_prompt
+        return base
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""
@@ -348,4 +361,14 @@ class SubagentManager:
         return sum(
             1 for tid in tids
             if tid in self._running_tasks and not self._running_tasks[tid].done()
+        )
+
+    def get_announcing_count_by_session(self, session_key: str) -> int:
+        """Return the number of running subagents that will announce results."""
+        tids = self._session_tasks.get(session_key, set())
+        return sum(
+            1 for tid in tids
+            if tid in self._running_tasks
+            and not self._running_tasks[tid].done()
+            and self._task_statuses.get(tid, {}).announce_result
         )

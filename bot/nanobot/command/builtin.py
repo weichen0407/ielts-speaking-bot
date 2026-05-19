@@ -42,6 +42,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "square-pen",
     ),
     BuiltinCommandSpec(
+        "/freechat",
+        "Free chat",
+        "Start a new conversation with a random IELTS topic.",
+        "sparkles",
+    ),
+    BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
@@ -212,6 +218,183 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         content="New session started.",
         metadata=dict(ctx.msg.metadata or {})
     )
+
+
+async def cmd_freechat(ctx: CommandContext) -> OutboundMessage | None:
+    """Select a topic that hasn't been fully explored and start a conversation."""
+    import random
+    import re
+
+    loop = ctx.loop
+    topic_bank_path = loop.workspace / "topic_bank.md"
+
+    if not topic_bank_path.exists():
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Topic bank not found. Please ensure topic_bank.md exists in the workspace.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    try:
+        topic_content = topic_bank_path.read_text(encoding="utf-8")
+    except Exception as e:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"Failed to read topic bank: {e}",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Parse the new topic bank format with depth levels
+    # Structure: Topic: X | Question | Depth | Sub-topic
+    questions_by_topic = {}  # topic_name -> [(question, depth, sub_topic), ...]
+    current_topic = None
+    current_section = ""
+
+    for line in topic_content.split("\n"):
+        # Track section headers (###)
+        if line.startswith("### "):
+            current_section = line.replace("### ", "").strip()
+        # Track topic headers (#### Topic:)
+        elif line.startswith("#### Topic:"):
+            current_topic = line.replace("#### Topic:", "").strip()
+        # Parse question rows: | Question | Depth | Sub-topic |
+        elif line.startswith("|") and "|" in line[1:] and not line.startswith("|----"):
+            parts = [p.strip() for p in line.split("|")]
+            parts = [p for p in parts if p]  # Remove empty strings
+            if len(parts) >= 3:
+                question = parts[0]
+                try:
+                    depth = int(parts[1])
+                except ValueError:
+                    continue
+                sub_topic = parts[2] if len(parts) > 2 else ""
+
+                if question and "?" in question and current_topic:
+                    if current_topic not in questions_by_topic:
+                        questions_by_topic[current_topic] = []
+                    questions_by_topic[current_topic].append({
+                        "question": question,
+                        "depth": depth,
+                        "sub_topic": sub_topic,
+                    })
+
+    if not questions_by_topic:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No topics found in topic bank. Please add topics in the correct format.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Try to read profile to check exploration status
+    profile_data = {}
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    session_dir = loop.sessions._get_session_dir(session.key)
+    profile_path = session_dir / "notes" / "profile.md"
+
+    if profile_path.exists():
+        try:
+            profile_content = profile_path.read_text(encoding="utf-8")
+            # Parse exploration status from profile
+            # Look for lines like: | Favorite Sport | in_progress | 3 |
+            for line in profile_content.split("\n"):
+                if line.startswith("|") and "not_explored" in line or "in_progress" in line or "completed" in line:
+                    parts = [p.strip() for p in line.split("|")]
+                    parts = [p for p in parts if p]
+                    if len(parts) >= 4 and parts[0] not in ("Topic", "topic"):
+                        topic_name = parts[0]
+                        status = parts[1]
+                        try:
+                            max_depth = int(parts[2])
+                        except ValueError:
+                            max_depth = 0
+                        profile_data[topic_name] = {"status": status, "max_depth": max_depth}
+        except Exception:
+            pass
+
+    # Select a topic based on exploration status
+    # Priority: not_explored > in_progress with depth < 3
+    not_explored_topics = [t for t, data in profile_data.items()
+                          if data["status"] == "not_explored" or data["status"] == ""]
+    in_progress_topics = [t for t, data in profile_data.items()
+                         if data["status"] == "in_progress" and data["max_depth"] < 4]
+
+    candidates = not_explored_topics
+    if not candidates:
+        candidates = in_progress_topics
+
+    if not candidates:
+        # No prior data or all completed - pick random topic
+        candidates = list(questions_by_topic.keys())
+
+    if not candidates:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No available topics found.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Pick a random topic from candidates
+    selected_topic = random.choice(candidates)
+    questions = questions_by_topic[selected_topic]
+
+    # Get prior depth for this topic
+    prior_depth = 0
+    if selected_topic in profile_data:
+        prior_depth = profile_data[selected_topic].get("max_depth", 0)
+
+    # For new topics (prior_depth=0), always start with the first depth 1 question
+    # which is typically the simplest "do you X?" preference question
+    # For continuing topics, move to the next depth level
+    if prior_depth == 0:
+        # New topic - use the first (simplest) depth 1 question
+        depth_1_questions = [q for q in questions if q["depth"] == 1]
+        if depth_1_questions:
+            # Use the first one which is typically the simplest
+            question_data = depth_1_questions[0]
+        else:
+            question_data = random.choice(questions)
+    else:
+        # Continuing topic - find next depth level
+        next_depth = min(prior_depth + 1, 5)
+        suitable_questions = [q for q in questions if q["depth"] == next_depth]
+
+        # If no questions at exact depth, try nearby depths
+        if not suitable_questions:
+            for d in range(next_depth - 1, 0, -1):
+                suitable_questions = [q for q in questions if q["depth"] == d]
+                if suitable_questions:
+                    break
+
+        if not suitable_questions:
+            suitable_questions = [q for q in questions if q["depth"] == 1]
+
+        question_data = random.choice(suitable_questions)
+    question = question_data["question"]
+    topic = selected_topic
+
+    # Set session title to topic name
+    session.metadata["title"] = topic
+    loop.sessions.save(session)
+
+    # Rename session folder to topic name
+    loop.sessions.rename_session_dir(ctx.key, topic)
+
+    # Build a conversational prompt that tells the agent to start the discussion naturally
+    # The agent should ask the question in a natural, encouraging way
+    intro_prompt = f"""Let's have a casual conversation about {topic}.
+
+Please start by asking me this question in a natural, friendly way - as if you're genuinely interested in my answer:
+
+"{question}"
+
+After I respond, ask follow-up questions to go deeper into this topic (ask "why", "how long", "how often", etc.). Keep the conversation flowing naturally like a friendly chat, not an interview. Use a warm, encouraging tone.
+
+If I seem hesitant or give short answers, gently encourage me to share more. If I go deep into a topic, explore it further with reflective questions (depth 3-4 level questions).
+
+Remember: This is IELTS speaking practice, so help me express myself more fluently and with better vocabulary, but don't correct me directly - just model better language naturally in your responses."""
+
+    ctx.msg.content = intro_prompt
+    return None
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -634,6 +817,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
+    router.exact("/freechat", cmd_freechat)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

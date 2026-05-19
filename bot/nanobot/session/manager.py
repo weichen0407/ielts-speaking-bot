@@ -308,12 +308,103 @@ class SessionManager:
         return safe_filename(key.replace(":", "_"))
 
     def _get_session_path(self, key: str) -> Path:
-        """Get the file path for a session."""
-        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+        """Get the file path for a session's thread.jsonl."""
+        folder = self._get_session_dir(key)
+        return folder / "thread.jsonl"
+
+    def _get_session_dir(self, key: str) -> Path:
+        """Get the directory path for a session.
+
+        Checks session metadata for a custom folder name first.
+        """
+        # Try to get custom folder name from session metadata
+        if key in self._cache:
+            session = self._cache[key]
+            custom_folder = session.metadata.get("_session_folder")
+            if custom_folder:
+                return self.sessions_dir / custom_folder
+        return self.sessions_dir / self.safe_key(key)
+
+    def rename_session_dir(self, key: str, new_name: str) -> bool:
+        """Rename a session's folder to a new name and store mapping in metadata.
+
+        Returns True if renamed successfully.
+        """
+        # Always compute original path from key, don't check metadata
+        old_dir = self.sessions_dir / self.safe_key(key)
+        if not old_dir.exists():
+            logger.warning("rename_session_dir: old_dir does not exist: {}", old_dir)
+            return False
+
+        safe_name = safe_filename(new_name)
+        if not safe_name:
+            logger.warning("rename_session_dir: could not create safe filename from: {}", new_name)
+            return False
+
+        new_dir = self.sessions_dir / safe_name
+        if new_dir.exists():
+            suffix = 1
+            while new_dir.exists():
+                new_dir = self.sessions_dir / f"{safe_name}_{suffix}"
+                suffix += 1
+
+        try:
+            old_dir.rename(new_dir)
+            logger.info("Renamed session folder from {} to {}", old_dir.name, new_dir.name)
+
+            # Update metadata with new folder name
+            if key in self._cache:
+                session = self._cache[key]
+                session.metadata["_session_folder"] = new_dir.name
+                # Save immediately so subsequent operations use new path
+                self.save(session)
+
+            return True
+        except Exception as e:
+            logger.warning("Failed to rename session folder: {}", e)
+            return False
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
         return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
+
+    def _ensure_session_notes(self, key: str) -> Path:
+        """Ensure a session's notes directory exists and return its path.
+
+        Creates notes/vocab.md and notes/polisher.md if they don't exist.
+        """
+        notes_dir = self._get_session_dir(key) / "notes"
+        ensure_dir(notes_dir)
+        (notes_dir / "vocab.md").touch(exist_ok=True)
+        (notes_dir / "polisher.md").touch(exist_ok=True)
+        (notes_dir / "profile.md").touch(exist_ok=True)
+        return notes_dir
+
+    def get_session_notes(self, key: str) -> dict[str, str]:
+        """Read vocab.md and polisher.md from a session's notes directory."""
+        notes_dir = self._get_session_dir(key) / "notes"
+        vocab = ""
+        polisher = ""
+        vocab_path = notes_dir / "vocab.md"
+        polisher_path = notes_dir / "polisher.md"
+        if vocab_path.exists():
+            vocab = vocab_path.read_text(encoding="utf-8")
+        if polisher_path.exists():
+            polisher = polisher_path.read_text(encoding="utf-8")
+        return {"vocab": vocab, "polisher": polisher}
+
+    def _migrate_legacy_session(self, legacy_path: Path, new_dir: Path) -> None:
+        """Migrate a legacy flat .jsonl session to the new directory structure."""
+        try:
+            ensure_dir(new_dir)
+            new_path = new_dir / "thread.jsonl"
+            if new_path.exists():
+                logger.debug("New session already exists at {}, skipping legacy migration", new_path)
+                return
+            shutil.move(str(legacy_path), str(new_path))
+            logger.info("Migrated session from {} to {}", legacy_path, new_path)
+        except Exception:
+            logger.exception("Failed to migrate session from {} to {}", legacy_path, new_dir)
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -331,7 +422,7 @@ class SessionManager:
         session = self._load(key)
         if session is None:
             session = Session(key=key)
-
+        self._ensure_session_notes(key)
         self._cache[key] = session
         return session
 
@@ -341,11 +432,11 @@ class SessionManager:
         if not path.exists():
             legacy_path = self._get_legacy_session_path(key)
             if legacy_path.exists():
-                try:
-                    shutil.move(str(legacy_path), str(path))
-                    logger.info("Migrated session {} from legacy path", key)
-                except Exception:
-                    logger.exception("Failed to migrate session {}", key)
+                self._migrate_legacy_session(legacy_path, self._get_session_dir(key))
+            # Also check legacy flat format in sessions_dir
+            legacy_flat = self.sessions_dir / f"{self.safe_key(key)}.jsonl"
+            if legacy_flat.exists():
+                self._migrate_legacy_session(legacy_flat, self._get_session_dir(key))
 
         if not path.exists():
             return None
@@ -463,6 +554,9 @@ class SessionManager:
         write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
         the most recent writes.
         """
+        session_dir = self._get_session_dir(session.key)
+        ensure_dir(session_dir)
+        self._ensure_session_notes(session.key)
         path = self._get_session_path(session.key)
         tmp_path = path.with_suffix(".jsonl.tmp")
 
@@ -525,17 +619,17 @@ class SessionManager:
     def delete_session(self, key: str) -> bool:
         """Remove a session from disk and the in-memory cache.
 
-        Returns True if a JSONL file was found and unlinked.
+        Returns True if the session directory was found and removed.
         """
-        path = self._get_session_path(key)
+        session_dir = self._get_session_dir(key)
         self.invalidate(key)
-        if not path.exists():
+        if not session_dir.exists():
             return False
         try:
-            path.unlink()
+            shutil.rmtree(session_dir)
             return True
         except OSError as e:
-            logger.warning("Failed to delete session file {}: {}", path, e)
+            logger.warning("Failed to delete session directory {}: {}", session_dir, e)
             return False
 
     def read_session_file(self, key: str) -> dict[str, Any] | None:
@@ -590,16 +684,28 @@ class SessionManager:
         """
         sessions = []
 
-        for path in self.sessions_dir.glob("*.jsonl"):
-            fallback_key = path.stem.replace("_", ":", 1)
+        for session_dir in self.sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            thread_path = session_dir / "thread.jsonl"
+            if not thread_path.exists():
+                # Also check legacy flat .jsonl format for migration
+                legacy = self.sessions_dir / f"{session_dir.name}.jsonl"
+                if legacy.exists():
+                    self._migrate_legacy_session(legacy, session_dir)
+                    thread_path = session_dir / "thread.jsonl"
+                if not thread_path.exists():
+                    continue
+
+            fallback_key = session_dir.name.replace("_", ":", 1)
             try:
                 # Read the metadata line and a small preview for WebUI/session lists.
-                with open(path, encoding="utf-8") as f:
+                with open(thread_path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
-                            key = data.get("key") or path.stem.replace("_", ":", 1)
+                            key = data.get("key") or fallback_key
                             metadata = data.get("metadata", {})
                             title = metadata.get("title") if isinstance(metadata, dict) else None
                             preview = ""
@@ -625,7 +731,7 @@ class SessionManager:
                                 "updated_at": data.get("updated_at"),
                                 "title": title if isinstance(title, str) else "",
                                 "preview": preview,
-                                "path": str(path)
+                                "path": str(thread_path)
                             })
             except Exception:
                 repaired = self._repair(fallback_key)
@@ -647,7 +753,7 @@ class SessionManager:
                             ),
                             "",
                         ),
-                        "path": str(path)
+                        "path": str(thread_path)
                     })
                 continue
 

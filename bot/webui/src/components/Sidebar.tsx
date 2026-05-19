@@ -3,6 +3,7 @@ import {
   Menu,
   Search,
   Settings,
+  Sparkles,
   SquarePen,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -19,6 +20,7 @@ interface SidebarProps {
   activeKey: string | null;
   loading: boolean;
   onNewChat: () => void;
+  onFreeChat: () => void;
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onOpenSettings: () => void;
@@ -102,6 +104,14 @@ export function Sidebar(props: SidebarProps) {
         >
           <SquarePen className="h-3.5 w-3.5" />
           {t("sidebar.newChat")}
+        </Button>
+        <Button
+          onClick={props.onFreeChat}
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          variant="ghost"
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {t("sidebar.freeChat")}
         </Button>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

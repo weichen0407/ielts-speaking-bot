@@ -39,6 +39,7 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
+        session_notes: dict[str, str] | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
@@ -50,6 +51,12 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
+
+        if session_notes:
+            if session_notes.get("vocab"):
+                parts.append(f"# Vocabulary Notes\n\n{session_notes['vocab']}")
+            if session_notes.get("polisher"):
+                parts.append(f"# Polisher Notes\n\n{session_notes['polisher']}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -153,10 +160,15 @@ class ContextBuilder:
         current_role: str = "user",
         sender_id: str | None = None,
         session_summary: str | None = None,
+        session_notes: dict[str, str] | None = None,
         session_metadata: Mapping[str, Any] | None = None,
+        session_dir: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         extra = goal_state_runtime_lines(session_metadata)
+        if session_dir:
+            extra = list(extra) if extra else []
+            extra.append(f"Session Notes Directory: {session_dir}/notes/")
         runtime_ctx = self._build_runtime_context(
             channel,
             chat_id,
@@ -175,7 +187,7 @@ class ContextBuilder:
         else:
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary, session_notes=session_notes)},
             *history,
         ]
         if messages[-1].get("role") == current_role:

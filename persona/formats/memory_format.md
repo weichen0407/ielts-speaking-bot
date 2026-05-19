@@ -1,6 +1,6 @@
 # User Memory - Comprehensive Profile
 
-This file stores the user's comprehensive memory across all conversation sessions. Updated automatically by memory subagent.
+This file stores the user's comprehensive memory across all conversation sessions.
 
 ## Last Updated: [Timestamp]
 
@@ -248,7 +248,3 @@ This file stores the user's comprehensive memory across all conversation session
 1. [Topic] - [why suggested based on exploration status]
 2. [Topic] - [why suggested based on exploration status]
 3. [Topic] - [why suggested based on exploration status]
-
----
-
-*This file is automatically updated by nanobot. Last sync: [timestamp]*

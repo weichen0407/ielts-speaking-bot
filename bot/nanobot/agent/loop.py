@@ -38,7 +38,7 @@ from nanobot.session.goal_state import (
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.artifacts import generated_image_paths_from_messages
 from nanobot.utils.document import extract_documents
-from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import image_placeholder_text, safe_filename
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -143,6 +143,184 @@ class AgentLoop:
         """Return the current provider/model pair owned by this loop."""
         self._refresh_provider_snapshot()
         return LLMRuntime(self.provider, self.model)
+
+    SUBAGENTS_SPAWNED_KEY = "_session_subagents_spawned"
+    MESSAGE_COUNT_KEY = "_message_count"
+    TITLE_KEY = "title"
+    SUBAGENTS_TRIGGER_INTERVAL = 3  # Spawn subagents every N messages
+
+    def _load_subagent_prompt(self, filename: str) -> str | None:
+        """Load a subagent prompt file from workspace."""
+        path = self.workspace / filename
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        return None
+
+    def _generate_session_title(self, session: Session) -> str:
+        """Generate a short title from the first user message."""
+        for msg in session.messages:
+            if msg.get("role") == "user":
+                content = msg.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    # Take first 50 chars of first user message, clean it up
+                    title = content.strip()[:50]
+                    # Remove newlines and extra spaces
+                    title = " ".join(title.split())
+                    if len(content.strip()) > 50:
+                        title = title.rstrip(",.!?;") + "..."
+                    return title or "New Chat"
+        return "New Chat"
+
+    async def _apply_session_title(self, session: Session, _msg: InboundMessage) -> None:
+        """Generate and apply a title to the session, rename folder if needed."""
+        # Check if title already exists
+        if session.metadata.get(self.TITLE_KEY):
+            return
+
+        # Generate title from first user message
+        title = self._generate_session_title(session)
+        safe_name = safe_filename(title)
+
+        # Set title in metadata
+        session.metadata[self.TITLE_KEY] = title
+
+        # Save first at OLD path to ensure directory exists
+        # (before setting _session_folder which would change the path)
+        self.sessions.save(session)
+
+        # Rename folder to title-based name
+        renamed = self.sessions.rename_session_dir(session.key, title)
+        if renamed:
+            # Now set _session_folder so subsequent saves use new path
+            session.metadata["_session_folder"] = safe_name
+            self.sessions.save(session)
+            logger.info("Applied session title: {} -> {}", title, safe_name)
+        else:
+            logger.warning("Failed to rename session folder for: {}", title)
+
+    async def _spawn_session_subagents(self, session: Session, msg: InboundMessage) -> None:
+        """Spawn vocab, polisher, and memory subagents for the session."""
+        # Generate and apply session title if not already set
+        await self._apply_session_title(session, msg)
+
+        session_dir = str(self.sessions._get_session_dir(session.key))
+        workspace_str = str(self.workspace)
+
+        # Load all subagent prompts
+        vocab_prompt = self._load_subagent_prompt("subagents/vocab_subagent.md")
+        polisher_prompt = self._load_subagent_prompt("subagents/polisher_subagent.md")
+        memory_prompt = self._load_subagent_prompt("subagents/memory_subagent.md")
+
+        # Prepare task messages
+        vocab_task = (
+            f"Analyze the conversation history and update vocabulary suggestions.\n\n"
+            f"Session directory: {session_dir}/notes/\n"
+            f"Read: {session_dir}/thread.jsonl\n"
+            f"Write to: {session_dir}/notes/vocab.md"
+        )
+        polisher_task = (
+            f"Analyze recent user messages and show optimized versions with diff.\n\n"
+            f"Session directory: {session_dir}/notes/\n"
+            f"Read: {session_dir}/thread.jsonl\n"
+            f"Write to: {session_dir}/notes/polisher.md"
+        )
+        memory_task = (
+            f"Update user profile based on conversation.\n\n"
+            f"Session directory: {session_dir}/notes/\n"
+            f"Read: {session_dir}/thread.jsonl\n"
+            f"Write to: {session_dir}/notes/profile.md"
+        )
+
+        # Substitute placeholders in prompts
+        for prompt in [vocab_prompt, polisher_prompt, memory_prompt]:
+            if prompt:
+                prompt.replace("{{ session_dir }}", session_dir)
+                prompt.replace("{{ workspace }}", workspace_str)
+
+        # Spawn all three subagents
+        subagents_to_spawn = [
+            ("vocab", vocab_prompt, vocab_task),
+            ("polisher", polisher_prompt, polisher_task),
+            ("memory", memory_prompt, memory_task),
+        ]
+
+        msg_id = msg.metadata.get("message_id") if msg.metadata else None
+
+        for label, prompt, task in subagents_to_spawn:
+            if not prompt:
+                continue
+            prompt = prompt.replace("{{ session_dir }}", session_dir)
+            prompt = prompt.replace("{{ workspace }}", workspace_str)
+            try:
+                await self.subagents.spawn(
+                    task=task,
+                    label=label,
+                    origin_channel=msg.channel,
+                    origin_chat_id=msg.chat_id,
+                    session_key=session.key,
+                    origin_message_id=msg_id,
+                    extra_system_prompt=prompt,
+                    announce_result=False,  # Silent - only write to files
+                )
+                logger.info("Spawned {} subagent for session {}", label, session.key)
+            except Exception as e:
+                logger.warning("Failed to spawn {} subagent: {}", label, e)
+
+    async def _on_session_inactive(self, session_key: str) -> None:
+        """Called when a session becomes inactive (user switched to another session).
+        Spawns memory subagent to update user profile based on conversation.
+        """
+        if not session_key:
+            return
+
+        # Get the session and check if it has meaningful content
+        session = self.sessions.get_or_create(session_key)
+        if len(session.messages) < 2:  # Need at least a user msg + assistant response
+            return
+
+        # Check if this session already had memory subagent run recently
+        last_memory = session.metadata.get("_last_memory_update", 0)
+        import time
+        if time.time() - last_memory < 300:  # Skip if ran within last 5 minutes
+            return
+
+        session.metadata["_last_memory_update"] = time.time()
+
+        # Spawn memory subagent for this session
+        session_dir = str(self.sessions._get_session_dir(session_key))
+        workspace_str = str(self.workspace)
+        memory_prompt = self._load_subagent_prompt("subagents/memory_subagent.md")
+
+        if not memory_prompt:
+            return
+
+        # Build memory update task - write to user-level memory file
+        memory_task = (
+            f"Update user memory profile based on this conversation session.\n\n"
+            f"Session directory: {session_dir}\n"
+            f"Read: {session_dir}/thread.jsonl\n"
+            f"Write to: {workspace_str}/memory/MEMORY.md\n\n"
+            f"Also read: {workspace_str}/formats/memory_format.md for output format"
+        )
+
+        # Substitute placeholders
+        memory_prompt = memory_prompt.replace("{{ session_dir }}", session_dir)
+        memory_prompt = memory_prompt.replace("{{ workspace }}", workspace_str)
+
+        try:
+            await self.subagents.spawn(
+                task=memory_task,
+                label="memory",
+                origin_channel="system",
+                origin_chat_id="memory",
+                session_key=session_key,
+                origin_message_id=None,
+                extra_system_prompt=memory_prompt,
+                announce_result=False,  # Silent - only write to files
+            )
+            logger.info("Spawned memory subagent for inactive session {}", session_key)
+        except Exception as e:
+            logger.warning("Failed to spawn memory subagent for session {}: {}", session_key, e)
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
@@ -281,6 +459,8 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        # Track last active session for memory update triggers
+        self._last_active_session_key: str | None = None
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -588,6 +768,8 @@ class AgentLoop:
         pending_summary: str | None,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
+        session_notes = self.sessions.get_session_notes(session.key)
+        session_dir = str(self.sessions._get_session_dir(session.key))
         return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
@@ -596,6 +778,8 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
+            session_notes=session_notes,
+            session_dir=session_dir,
             session_metadata=session.metadata,
         )
 
@@ -723,11 +907,12 @@ class AgentLoop:
                     break
 
             # Block if nothing drained but sub-agents spawned in this dispatch
-            # are still running.  Keeps the runner loop alive so subsequent
-            # completions are injected in-order rather than dispatched separately.
+            # are still running and will announce results.
+            # Non-announcing subagents (announce_result=False) don't inject messages
+            # so we shouldn't wait for them.
             if (not items
                     and session is not None
-                    and self.subagents.get_running_count_by_session(session.key) > 0):
+                    and self.subagents.get_announcing_count_by_session(session.key) > 0):
                 try:
                     msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
                 except asyncio.TimeoutError:
@@ -853,9 +1038,17 @@ class AgentLoop:
                         effective_key,
                     )
                     continue
+            # Detect session switch: if last active session is different from current
+            if (self._last_active_session_key
+                    and self._last_active_session_key != effective_key
+                    and effective_key not in self._pending_queues):
+                # User switched to a different session - trigger memory update for previous
+                await self._on_session_inactive(self._last_active_session_key)
+
             # Compute the effective session key before dispatching
             # This ensures /stop command can find tasks correctly when unified session is enabled
             task = asyncio.create_task(self._dispatch(msg))
+            self._last_active_session_key = effective_key
             self._active_tasks.setdefault(effective_key, []).append(task)
             task.add_done_callback(
                 lambda t, k=effective_key: self._active_tasks.get(k, [])
@@ -1053,6 +1246,8 @@ class AgentLoop:
         history = session.get_history(**_hist_kwargs)
         current_role = "assistant" if is_subagent else "user"
 
+        session_notes = self.sessions.get_session_notes(key)
+        session_dir = str(self.sessions._get_session_dir(key))
         messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
@@ -1061,6 +1256,8 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
+            session_notes=session_notes,
+            session_dir=session_dir,
             session_metadata=session.metadata,
         )
         t_wall = time.time()
@@ -1245,7 +1442,26 @@ class AgentLoop:
         if self._restore_pending_user_turn(ctx.session):
             self.sessions.save(ctx.session)
 
+        # Spawn subagents on first message or every N messages
+        await self._maybe_spawn_periodic_subagents(ctx.session, msg)
+
         return "ok"
+
+    async def _maybe_spawn_periodic_subagents(self, session: Session, msg: InboundMessage) -> None:
+        """Spawn subagents on first message or every N messages."""
+        # Skip on /freechat command - subagents should only run on real conversation turns
+        raw = msg.content.strip().lower()
+        if raw == "/freechat":
+            return
+
+        current_count = session.metadata.get(self.MESSAGE_COUNT_KEY, 0) + 1
+        session.metadata[self.MESSAGE_COUNT_KEY] = current_count
+
+        should_spawn = current_count == 1  # First message
+        should_spawn = should_spawn or (current_count % self.SUBAGENTS_TRIGGER_INTERVAL == 0)
+
+        if should_spawn:
+            await self._spawn_session_subagents(session, msg)
 
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)

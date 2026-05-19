@@ -356,6 +356,20 @@ function Shell({
     }
   }, [createChat]);
 
+  const onFreeChat = useCallback(async () => {
+    try {
+      const chatId = await createChat();
+      const key = `websocket:${chatId}`;
+      setActiveKey(key);
+      setView("chat");
+      setMobileSidebarOpen(false);
+      // Send /freechat to the new session - the backend will pick a topic and ask the first question
+      client.sendMessage(chatId, "/freechat");
+    } catch (e) {
+      console.error("Failed to create free chat", e);
+    }
+  }, [createChat, client]);
+
   const onNewChat = useCallback(() => {
     setActiveKey(null);
     setView("chat");
@@ -473,6 +487,7 @@ function Shell({
     activeKey,
     loading,
     onNewChat,
+    onFreeChat,
     onSelect: onSelectChat,
     onRequestDelete: (key: string, label: string) =>
       setPendingDelete({ key, label }),
