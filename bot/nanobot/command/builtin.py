@@ -372,12 +372,9 @@ async def cmd_freechat(ctx: CommandContext) -> OutboundMessage | None:
     question = question_data["question"]
     topic = selected_topic
 
-    # Set session title to topic name
+    # Set session title to topic name (folder stays as UUID)
     session.metadata["title"] = topic
     loop.sessions.save(session)
-
-    # Rename session folder to topic name
-    loop.sessions.rename_session_dir(ctx.key, topic)
 
     # Build a conversational prompt that tells the agent to start the discussion naturally
     # The agent should ask the question in a natural, encouraging way

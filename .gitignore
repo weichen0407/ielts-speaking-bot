@@ -1,0 +1,16 @@
+# macOS system files
+.DS_Store
+**/.DS_Store
+
+# Session data (dynamically created)
+persona/sessions/*
+!persona/sessions/.gitkeep
+persona/session_index.jsonl
+persona/user_responses.jsonl
+persona/progress_bank.jsonl
+persona/progress.json
+persona/.cursor_*.json
+
+# WebUI build output
+bot/webui/dist/
+bot/webui/node_modules/

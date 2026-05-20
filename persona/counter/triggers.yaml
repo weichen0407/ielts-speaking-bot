@@ -5,11 +5,11 @@ triggers:
     enabled: true
     condition:
       kind: turn_count
-      every: 2
+      count: 2
       scope: session
     target:
       subagent: vocab_subagent
-      prompt_file: subagents/vocab_subagent.md
+      prompt_file: subagents/session/vocab_subagent.md
       silent: true
       task_template: |
         Analyze the conversation history and update vocabulary suggestions.
@@ -23,11 +23,11 @@ triggers:
     enabled: true
     condition:
       kind: turn_count
-      every: 10
+      count: 10
       scope: session
     target:
       subagent: memory_subagent
-      prompt_file: subagents/memory_subagent.md
+      prompt_file: subagents/session/memory_subagent.md
       silent: true
       task_template: |
         Update user memory profile based on this conversation session.
@@ -42,11 +42,11 @@ triggers:
     enabled: true
     condition:
       kind: turn_count
-      every: 3
+      count: 3
       scope: session
     target:
       subagent: polisher_subagent
-      prompt_file: subagents/polisher_subagent.md
+      prompt_file: subagents/session/polisher_subagent.md
       silent: true
       task_template: |
         Analyze recent user messages and show optimized versions with diff.
@@ -54,3 +54,44 @@ triggers:
         Session directory: {session_dir}/notes/
         Read: {session_dir}/thread.jsonl
         Write to: {session_dir}/notes/polisher.md
+
+  - id: progress_tracker
+    name: "Progress Tracker"
+    enabled: true
+    condition:
+      kind: file_line_count
+      count: 2
+      path: user_responses.jsonl
+    target:
+      subagent: progress_tracker_subagent
+      prompt_file: subagents/cross_session/progress_tracker_subagent.md
+      silent: true
+      depends_on: null
+      model: "gpt-4o-mini"
+      task_template: |
+        Analyze new user responses since last run and extract meaningful highlights for progress tracking.
+
+        Read: {workspace}/user_responses.jsonl
+        Call: save_progress_entries tool with analyzed entries
+        (Entries are processed from the last cursor position; user_responses.jsonl is NOT deleted)
+
+  - id: progress_organizer
+    name: "Progress Organizer"
+    enabled: true
+    condition:
+      kind: file_line_count
+      count: 0
+      path: progress_bank.jsonl
+    target:
+      subagent: progress_organizer_subagent
+      prompt_file: subagents/cross_session/progress_organizer_subagent.md
+      silent: true
+      depends_on: progress_tracker
+      model: "gpt-4o-mini"
+      task_template: |
+        Analyze new entries in {workspace}/progress_bank.jsonl from cursor position onward.
+
+        Read: {workspace}/progress_bank.jsonl
+        Read: {workspace}/progress.json (if exists)
+        Update: {workspace}/progress.json with refined merged state
+        (Entries are processed from the last cursor position; progress_bank.jsonl is NOT deleted)

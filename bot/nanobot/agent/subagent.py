@@ -38,6 +38,11 @@ class SubagentStatus:
     stop_reason: str | None = None
     error: str | None = None
     announce_result: bool = True  # whether this subagent will inject messages
+    completion_event: asyncio.Event = field(default=None)
+
+    def __post_init__(self):
+        if self.completion_event is None:
+            object.__setattr__(self, 'completion_event', asyncio.Event())
 
 
 class _SubagentHook(AgentHook):
@@ -145,8 +150,9 @@ class SubagentManager:
         origin_message_id: str | None = None,
         extra_system_prompt: str | None = None,
         announce_result: bool = True,
+        model: str | None = None,
     ) -> str:
-        """Spawn a subagent to execute a task in the background."""
+        """Spawn a subagent to execute a task in the background. Returns task_id."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
@@ -161,7 +167,7 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result)
+            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result, model)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -180,8 +186,8 @@ class SubagentManager:
         if self._on_status_change:
             self._on_status_change(task_id, display_label, "started", None, origin)
 
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        logger.info("Spawned subagent [{}]: {} (model={})", task_id, display_label, model)
+        return task_id
 
     async def _run_subagent(
         self,
@@ -193,6 +199,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         extra_system_prompt: str | None = None,
         announce_result: bool = True,
+        model: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -218,7 +225,7 @@ class SubagentManager:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
-                model=self.model,
+                model=model if model else self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=_SubagentHook(task_id, status),
@@ -262,6 +269,18 @@ class SubagentManager:
         finally:
             if self._on_status_change:
                 self._on_status_change(task_id, label, status.phase, status.error, origin)
+            status.completion_event.set()
+
+    async def wait_for_subagent(self, task_id: str) -> SubagentStatus:
+        """Wait for a subagent to complete and return its final status.
+
+        Used by counter trigger chaining to await one subagent before spawning the next.
+        """
+        status = self._task_statuses.get(task_id)
+        if not status:
+            raise ValueError(f"Unknown subagent task_id: {task_id}")
+        await status.completion_event.wait()
+        return status
 
     async def _announce_result(
         self,

@@ -1,5 +1,322 @@
 # Update Log
 
+## 2026-05-21 - Subagent Reorganization + Chained Triggers + Engineering Optimizations
+
+This update reorganizes subagents into `session/` and `cross_session/` directories, implements trigger chaining (progress_organizer fires after progress_tracker), adds per-subagent model selection, and applies engineering optimizations to reduce token usage.
+
+---
+
+## 1. Subagent Folder Reorganization
+
+### New Directory Structure
+```
+persona/subagents/
+  session/
+    vocab_subagent.md
+    polisher_subagent.md
+    memory_subagent.md
+  cross_session/
+    progress_tracker_subagent.md
+    progress_organizer_subagent.md   # NEW
+```
+
+### Changes
+- Moved session-level subagents (vocab, polisher, memory) to `persona/subagents/session/`
+- Moved cross-session subagents (progress_tracker) to `persona/subagents/cross_session/`
+- Created new `persona/subagents/cross_session/progress_organizer_subagent.md`
+- Updated `triggers.yaml` `prompt_file` paths to new directory structure
+
+---
+
+## 2. CounterTrigger Schema Enhancements
+
+### New Fields in `CounterTarget`
+
+**bot/nanobot/counter/types.py**
+- Added `depends_on: str | None` — trigger ID that must complete before this fires
+- Added `model: str | None` — override default model for this subagent (e.g., "gpt-4o-mini")
+
+### Unified `count` Field
+- Replaced deprecated `every` and `threshold` fields with unified `count` field
+- `triggers.yaml` updated: `every: 2` → `count: 2`, `every: 3` → `count: 3`, etc.
+
+---
+
+## 3. SubagentManager — Awaitable Completion Handle
+
+### New Features
+
+**bot/nanobot/agent/subagent.py**
+- Added `completion_event: asyncio.Event` to `SubagentStatus` — fires when subagent finishes
+- Added `wait_for_subagent(task_id)` method — awaits completion event, returns final status
+- `spawn()` now returns `task_id` (string) instead of human-readable message
+- `spawn()` accepts `model: str | None` parameter to override default model
+- `_run_subagent()` passes model to `AgentRunSpec`
+
+### Completion Event Flow
+```python
+# SubagentStatus
+completion_event: asyncio.Event  # set() when done
+
+# wait_for_subagent
+await status.completion_event.wait()
+return status
+```
+
+---
+
+## 4. Chained Trigger Execution
+
+### Same-Turn Trigger Chaining
+
+**bot/nanobot/agent/loop.py**
+- `_spawn_counter_subagent()` passes `model=trigger.target.model` to `spawn()`
+- Uses `_schedule_background(_chain_dependent_triggers(...))` for non-blocking chain execution
+- `_chain_dependent_triggers()` awaits `subagent_manager.wait_for_subagent(task_id)` then spawns dependent triggers
+
+### New Triggers
+
+**`progress_tracker`** — fires when `user_responses.jsonl` has ≥2 new lines
+- Uses `gpt-4o-mini` model
+- Analyzes user responses, extracts language highlights
+
+**`progress_organizer`** — fires only via `depends_on: progress_tracker` (never on its own)
+- Uses `gpt-4o-mini` model
+- Refines and merges highlights from `progress_bank.jsonl` into `progress.json`
+
+---
+
+## 5. Engineering Optimizations — Content-Only LLM Input
+
+### Problem
+Previously, LLM read `user_responses.jsonl` directly and saw all metadata fields (`session_uuid`, `round`, `topic`, `content`, `timestamp`). It only needed `content`, wasting tokens.
+
+### Solution
+Engineering layer extracts `content` before LLM call. LLM receives only content strings. After LLM returns highlights, engineering layer zips results with original `meta_info` using positional alignment.
+
+### Data Flow
+```
+user_responses.jsonl
+  └─> [Engineering: extract content] ──> LLM receives only content strings
+       └─> [Engineering: zip with meta] ──> progress_bank.jsonl ({category, intent, expression, content, meta})
+
+progress_bank.jsonl
+  └─> [Engineering: extract expression+content] ──> LLM refines expressions only
+       └─> [Engineering: zip with content+meta] ──> progress.json
+```
+
+### New Entry Formats
+
+**progress_bank.jsonl:**
+```json
+{
+  "category": "emotion",
+  "intent": "preference",
+  "expression": "be fond of",
+  "content": "I'm really fond of collecting vintage sneakers",
+  "meta": {
+    "session_uuid": "...",
+    "round": 4,
+    "topic": "hobbies",
+    "timestamp": "2026-05-21T..."
+  }
+}
+```
+
+**progress.json** (under categories):
+```json
+{
+  "expression": "be fond of",
+  "content": "I'm really fond of collecting vintage sneakers",
+  "meta": {
+    "session_uuid": "...",
+    "round": 4,
+    "topic": "hobbies",
+    "timestamp": "2026-05-21T..."
+  }
+}
+```
+
+### Files Changed
+
+**bot/nanobot/agent/tools/progress_bank.py**
+- Added `contents: list[str]` parameter — content strings extracted by engineering
+- `execute()` zips `contents[i]` with `entries[i]` and source `meta`
+
+**bot/nanobot/agent/tools/progress_organizer.py**
+- Added `contents: list[str]` parameter — expression strings for refinement
+- Reads full entries from `progress_bank.jsonl` to preserve `content` + `meta`
+
+**persona/subagents/cross_session/progress_tracker_subagent.md**
+- LLM receives `contents` via tool call — no file reading
+- Passes back same `contents` array for engineering alignment
+
+**persona/subagents/cross_session/progress_organizer_subagent.md**
+- LLM receives `contents` (expressions) via tool call — no file reading
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/agent/subagent.py | +completion_event, +wait_for_subagent, +model param, returns task_id |
+| bot/nanobot/agent/loop.py | chained triggers via _schedule_background, model override pass-through |
+| bot/nanobot/counter/types.py | +depends_on, +model fields, unified count |
+| bot/nanobot/counter/engine.py | trigger chaining support |
+| bot/nanobot/agent/tools/progress_bank.py | +contents param, new entry format with content+meta |
+| bot/nanobot/agent/tools/progress_organizer.py | +contents param, preserve content+meta |
+| persona/counter/triggers.yaml | new paths, +progress_tracker, +progress_organizer |
+| persona/subagents/session/ | new dir — vocab, polisher, memory subagents |
+| persona/subagents/cross_session/ | new dir — progress_tracker, progress_organizer subagents |
+
+---
+
+*Update created: 2026-05-21*
+
+## 2026-05-20 - Session Persistence: UUID, Round Tracking, and Session Index
+
+This update adds session UUID tracking, round tracking in messages (for indexing word/expression to original sentences), and a session index file for fast lookup.
+
+---
+
+## 1. Session UUID and Round Tracking
+
+### Backend Changes
+
+**bot/nanobot/session/manager.py**
+- Added `uuid` import
+- Added `_current_round: int = 0` field to `Session` dataclass (internal counter, not persisted)
+- Added `session_uuid` field to `Session` dataclass (stored in metadata)
+- Modified `get_or_create()` to generate UUID on session creation:
+  - Creates `session_uuid = str(uuid.uuid4())`
+  - Stores in `session.metadata["session_uuid"]`
+  - Calls `_update_session_index(session)` to update index
+- Modified `_load()` to extract `session_uuid` from metadata
+
+### Session Index Management
+
+**bot/nanobot/session/manager.py**
+- Added `_index_path` property returning `sessions_dir.parent / "session_index.jsonl"`
+- Added `_load_session_index()` - loads index from JSONL file, returns list of entries
+- Added `_save_session_index(index)` - atomically writes index to JSONL file
+- Added `_update_session_index(session)` - updates or creates index entry with:
+  - `session_uuid`: unique identifier
+  - `path`: session directory path
+  - `topic`: session topic/name
+  - `created_at`: ISO timestamp
+  - `updated_at`: ISO timestamp
+  - `total_rounds`: cumulative round count
+
+### Round Tracking in Messages
+
+**bot/nanobot/agent/loop.py**
+- Modified `_save_turn()` to track rounds:
+  - Initializes `current_round = session._current_round`
+  - Determines `prev_role` from last saved message (if any)
+  - On role switch (user↔assistant), increments `current_round`
+  - Adds `"round": current_round` field to each message entry
+  - Persists `session._current_round = current_round` after loop
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/session/manager.py | +45 lines: UUID, round field, session index management |
+| bot/nanobot/agent/loop.py | +18 lines: round tracking in _save_turn |
+
+---
+
+## 2. Cross-Session User Expressions Log
+
+### Purpose
+Global `user_expressions.jsonl` file that collects all user responses across sessions for later processing by a subagent (to be implemented).
+
+### File Location
+`sessions/user_expressions.jsonl` (alongside `session_index.jsonl`)
+
+### Entry Format
+```json
+{"session_uuid": "...", "round": 1, "topic": "...", "content": "...", "timestamp": "..."}
+```
+
+### Backend Changes
+
+**bot/nanobot/session/manager.py**
+- Added `_user_expressions_path` property returning `sessions_dir.parent / "user_expressions.jsonl"`
+- Added `append_user_expression(session, round_num, content, topic)` method that appends a JSON line to the file
+
+**bot/nanobot/agent/loop.py**
+- Modified `_save_turn()` to call `self.sessions.append_user_expression()` when processing user messages
+
+---
+
+## 3. Progress Tracker Subagent
+
+### Purpose
+Analyze user expressions in batches to extract meaningful language highlights (phrases, collocations, expressions) and store them in `progress_bank.jsonl` for tracking expression breadth and improvement over time.
+
+### Data Flow
+```
+user_expressions.jsonl (20 entries)
+    ↓
+progress_tracker subagent triggered (file_line_count condition)
+    ↓
+LLM: analyze 20 expressions → returns Array[20] of highlight arrays
+    ↓
+save_progress_entries tool: zip with source info, write to progress_bank.jsonl
+    ↓
+Clear user_expressions.jsonl
+```
+
+### New Condition Kind: file_line_count
+
+**bot/nanobot/counter/types.py**
+- Added `file_line_count` to `CounterCondition.kind`
+- Added `path` and `threshold` fields for file-based condition
+
+**bot/nanobot/counter/engine.py**
+- Added `file_line_count` handling in `check_triggers()`
+- Added `_fired_file_triggers` set to prevent re-firing until file is cleared
+- Added `reset_file_trigger()` method
+
+### New Tool: save_progress_entries
+
+**bot/nanobot/agent/tools/progress_bank.py** (new file)
+- `ProgressBankTool` with `save_progress_entries` function
+- Schema: `entries: Array[Array[{category, intent, expression}]]`
+- Reads source info from `user_expressions.jsonl` (positional alignment)
+- Writes flat entries to `progress_bank.jsonl` with source info attached
+- Clears `user_expressions.jsonl` after successful write
+
+### Progress Bank Format
+
+**progress_bank.jsonl** entries:
+```json
+{"category":"emotion","intent":"preference","expression":"be fond of","session_uuid":"...","round":4,"topic":"basketball"}
+```
+
+### Trigger Configuration
+
+**persona/counter/triggers.yaml**
+- Added `progress_tracker` trigger:
+  - `kind: file_line_count`
+  - `path: sessions/user_expressions.jsonl`
+  - `threshold: 20`
+
+### Subagent Prompt
+
+**persona/subagents/progress_tracker_subagent.md** (new file)
+- Reads `user_expressions.jsonl`
+- LLM outputs `save_progress_entries` with nested array format
+- Category taxonomy: emotion, description, experience, habit, opinion, goal, comparison, cause
+- Intent tags: positive, negative, preference, habit, frequency, reason, etc.
+- Positional alignment: `entries[i]` corresponds to line i of input file
+
+---
+
 ## 2026-05-20 - Counter Engine, Subagent Status Notifications, and Session Path Fix
 
 This update introduces a configurable counter-based trigger system for subagents, WebSocket notifications for subagent status, fixes session directory lookup for renamed sessions, and updates user memory profile.

@@ -40,7 +40,7 @@ from nanobot.session.goal_state import (
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.artifacts import generated_image_paths_from_messages
 from nanobot.utils.document import extract_documents
-from nanobot.utils.helpers import image_placeholder_text, safe_filename
+from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
@@ -171,31 +171,16 @@ class AgentLoop:
         return "New Chat"
 
     async def _apply_session_title(self, session: Session, _msg: InboundMessage) -> None:
-        """Generate and apply a title to the session, rename folder if needed."""
+        """Set session title in metadata (folder stays as UUID, topic stored in metadata["title"])."""
         # Check if title already exists
         if session.metadata.get(self.TITLE_KEY):
             return
 
-        # Generate title from first user message
+        # Generate title from first user message and store in metadata
         title = self._generate_session_title(session)
-        safe_name = safe_filename(title)
-
-        # Set title in metadata
         session.metadata[self.TITLE_KEY] = title
-
-        # Save first at OLD path to ensure directory exists
-        # (before setting _session_folder which would change the path)
         self.sessions.save(session)
-
-        # Rename folder to title-based name
-        renamed = self.sessions.rename_session_dir(session.key, title)
-        if renamed:
-            # Now set _session_folder so subsequent saves use new path
-            session.metadata["_session_folder"] = safe_name
-            self.sessions.save(session)
-            logger.info("Applied session title: {} -> {}", title, safe_name)
-        else:
-            logger.warning("Failed to rename session folder for: {}", title)
+        logger.info("Applied session title: {}", title)
 
     async def _spawn_counter_subagent(
         self,
@@ -204,7 +189,9 @@ class AgentLoop:
         trigger: CounterTrigger,
         session_dir: str,
     ) -> None:
-        """Spawn a single subagent from a counter trigger."""
+        """Spawn a counter subagent and immediately record its completion.
+        Dependent triggers are chained via a background task that waits for completion.
+        """
         prompt = self.counter_engine.load_prompt(trigger)
         if not prompt:
             return
@@ -216,7 +203,7 @@ class AgentLoop:
         msg_id = msg.metadata.get("message_id") if msg.metadata else None
 
         try:
-            await self.subagents.spawn(
+            task_id = await self.subagents.spawn(
                 task=task,
                 label=trigger.target.subagent,
                 origin_channel=msg.channel,
@@ -225,15 +212,49 @@ class AgentLoop:
                 origin_message_id=msg_id,
                 extra_system_prompt=prompt,
                 announce_result=not trigger.target.silent,
+                model=trigger.target.model,
             )
             self.counter_engine.record_trigger(session.metadata, trigger.id)
             logger.info(
-                "Spawned counter subagent [{}] for session {}",
+                "Counter subagent [{}] spawned for session {}, chaining dependents in background",
                 trigger.id,
                 session.key,
             )
+            # Chain dependent triggers in the background — does NOT block the user response
+            self._schedule_background(
+                self._chain_dependent_triggers(session, msg, trigger.id, session_dir, task_id),
+            )
         except Exception as e:
             logger.warning("Failed to spawn counter subagent [{}]: {}", trigger.id, e)
+
+    async def _chain_dependent_triggers(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        completed_trigger_id: str,
+        session_dir: str,
+        task_id: str,
+    ) -> None:
+        """Wait for a subagent to complete, then spawn any dependent triggers."""
+        try:
+            await self.subagents.wait_for_subagent(task_id)
+            logger.info(
+                "Subagent [{}] completed, checking for dependent triggers of {}",
+                task_id,
+                completed_trigger_id,
+            )
+            chained = [
+                t for t in self.counter_engine._triggers
+                if t.target.depends_on == completed_trigger_id
+            ]
+            for trigger in chained:
+                await self._spawn_counter_subagent(session, msg, trigger, session_dir)
+        except Exception as e:
+            logger.warning(
+                "Failed to chain dependent triggers after [{}]: {}",
+                completed_trigger_id,
+                e,
+            )
 
     async def _on_session_inactive(self, session_key: str) -> None:
         """Called when a session becomes inactive (user switched to another session).
@@ -1539,6 +1560,10 @@ class AgentLoop:
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
         )
+        logger.info(
+            "_state_build: user_persisted_early={}, history_len={}, initial_messages_len={}",
+            ctx.user_persisted_early, len(ctx.history), len(ctx.initial_messages),
+        )
 
         if ctx.on_progress is None:
             ctx.on_progress = await self._build_bus_progress_callback(ctx.msg)
@@ -1576,6 +1601,29 @@ class AgentLoop:
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
+        logger.info(
+            "_state_save: save_skip={}, all_messages_len={}, history_len={}, user_persisted_early={}",
+            ctx.save_skip, len(ctx.all_messages), len(ctx.history), ctx.user_persisted_early,
+        )
+
+        # When user message was persisted early, we still need to call append_user_expression
+        # for it (the for loop below skips it via save_skip). Extract user content from
+        # initial_messages (index 1 + len(history) = user message position).
+        if ctx.user_persisted_early and ctx.initial_messages:
+            user_msg_idx = 1 + len(ctx.history)
+            if user_msg_idx < len(ctx.initial_messages):
+                user_entry = ctx.initial_messages[user_msg_idx]
+                if user_entry.get("role") == "user":
+                    user_content = user_entry.get("content") or ""
+                    if isinstance(user_content, list):
+                        # Handle content blocks (e.g., text + image references)
+                        user_content = " ".join(
+                            b.get("text", "") for b in user_content if b.get("type") == "text"
+                        )
+                    self.sessions.append_user_expression(
+                        ctx.session, ctx.session._current_round, user_content,
+                    )
+
         skip_msgs = ctx.all_messages[ctx.save_skip:]
         ctx.generated_media = generated_image_paths_from_messages(skip_msgs)
         mt = self.tools.get("message")
@@ -1665,10 +1713,34 @@ class AgentLoop:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        # Initialize round tracking: start from current session round
+        current_round = session._current_round
+        prev_role: str | None = None
+        # Determine previous role from last saved message (if any)
+        if session.messages:
+            prev_role = session.messages[-1].get("role")
+
         last_assistant_idx: int | None = None
+        logger.info(
+            "_save_turn ENTRY: skip={}, messages_len={}, history_len={}, user_persisted_early={}",
+            skip, len(messages), len(session.messages) if hasattr(session, 'messages') else 0,
+            session._current_round if hasattr(session, '_current_round') else 0,
+        )
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+
+            # Increment round on role switch (user <-> assistant)
+            if prev_role is not None and role != prev_role:
+                current_round += 1
+            prev_role = role
+
+            logger.info(
+                "_save_turn processing: role={}, content={}",
+                role,
+                str(content)[:50] if content else "",
+            )
+
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
@@ -1693,10 +1765,22 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
+                # Skip round 0 — this is the implicit freechat prompt, not a real user reply
+                if current_round > 0:
+                    self.sessions.append_user_expression(session, current_round, entry["content"])
+                logger.info(
+                    "append_user_expression called: session={}, round={}, content_len={}",
+                    session.key,
+                    current_round,
+                    len(entry["content"]) if isinstance(entry["content"], str) else 0,
+                )
             entry.setdefault("timestamp", datetime.now().isoformat())
+            entry["round"] = current_round
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
+        # Persist updated round to session
+        session._current_round = current_round
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()

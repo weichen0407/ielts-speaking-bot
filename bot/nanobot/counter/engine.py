@@ -79,16 +79,56 @@ class CounterEngine:
                 continue
 
             cond = trigger.condition
+
+            if cond.kind == "file_line_count":
+                file_path = self.workspace / cond.path
+                if not file_path.exists():
+                    continue
+
+                resolved_count = cond.resolved_count()
+                # Skip triggers with count <= 0 — they only fire via depends_on chain
+                if resolved_count <= 0:
+                    continue
+
+                # Read unprocessed line count using cursor
+                cursor_offset = self._read_cursor(trigger.id)
+                with open(file_path, encoding="utf-8") as f:
+                    total_lines = sum(1 for _ in f)
+                unprocessed = total_lines - cursor_offset
+
+                logger.info(
+                    "file_line_count check: trigger_id={}, path={}, total={}, cursor={}, unprocessed={}, count={}",
+                    trigger.id, file_path, total_lines, cursor_offset, unprocessed, resolved_count,
+                )
+
+                # Fire whenever unprocessed lines reach the threshold (repeatable)
+                if unprocessed >= resolved_count:
+                    firing.append(trigger)
+                continue
+
             if cond.kind != "turn_count":
                 continue
 
             last_triggered = session_metadata.get(f"{_LAST_TRIGGER_KEY_PREFIX}{trigger.id}", 0)
+            count = cond.resolved_count()
 
-            # Fire on first eligible turn (turn_count == every) and every `every` turns thereafter
-            if turn_count > 0 and turn_count % cond.every == 0 and turn_count > last_triggered:
+            # Fire on first eligible turn and every N turns thereafter
+            if turn_count > 0 and turn_count % count == 0 and turn_count > last_triggered:
                 firing.append(trigger)
 
         return firing
+
+    def _read_cursor(self, trigger_id: str) -> int:
+        """Read the cursor offset for a file_line_count trigger from the cursor file."""
+        import json
+        cursor_path = self.workspace / f".cursor_{trigger_id}.json"
+        if cursor_path.exists():
+            try:
+                data = json.loads(cursor_path.read_text(encoding="utf-8"))
+                return data.get("offset", 0)
+            except (json.JSONDecodeError, IOError):
+                return 0
+        return 0
 
     def record_trigger(self, session_metadata: dict[str, Any], trigger_id: str) -> None:
         """Record that a trigger fired at the current turn count."""

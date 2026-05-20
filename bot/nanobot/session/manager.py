@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -79,11 +80,13 @@ class Session:
     """A conversation session."""
 
     key: str  # channel:chat_id
+    session_uuid: str = ""  # Unique identifier for this session
     messages: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
+    _current_round: int = 0  # Internal counter for round tracking (not persisted)
 
     @staticmethod
     def _annotate_message_time(message: dict[str, Any], content: Any) -> Any:
@@ -318,24 +321,48 @@ class SessionManager:
         Checks session metadata for a custom folder name first.
         Falls back to searching through session directories if key doesn't match folder name.
         """
+        import traceback
+        # Log all callers with stack trace
+        logger.debug(
+            "_get_session_dir({}) called from:\n{}",
+            key,
+            "".join(traceback.format_stack()[-5:-1]),
+        )
+
         # Try to get custom folder name from session metadata (if session is cached)
         if key in self._cache:
             session = self._cache[key]
             custom_folder = session.metadata.get("_session_folder")
             if custom_folder:
-                return self.sessions_dir / custom_folder
+                result = self.sessions_dir / custom_folder
+                logger.debug(
+                    "_get_session_dir({}): cache hit, custom_folder={}, path={}",
+                    key, custom_folder, result,
+                )
+                return result
 
         # Try the expected path first
         expected_path = self.sessions_dir / self.safe_key(key)
         if expected_path.exists():
+            logger.debug("_get_session_dir({}): expected_path exists={}", key, expected_path)
             return expected_path
+
+        # For websocket:{uuid} keys, try the UUID folder directly before fallback search
+        if key.startswith("websocket:"):
+            uuid_part = key[len("websocket:") :]
+            uuid_path = self.sessions_dir / uuid_part
+            if uuid_path.exists():
+                logger.debug("_get_session_dir({}): found UUID folder={}", key, uuid_path)
+                return uuid_path
 
         # Fallback: search through session directories to find the one with matching key
         found_dir = self._find_session_dir_by_key(key)
         if found_dir:
+            logger.debug("_get_session_dir({}): found via fallback={}", key, found_dir)
             return found_dir
 
         # Return expected path even if it doesn't exist (will be created by caller)
+        logger.debug("_get_session_dir({}): returning expected_path (does not exist yet)={}", key, expected_path)
         return expected_path
 
     def _find_session_dir_by_key(self, key: str) -> Path | None:
@@ -362,8 +389,8 @@ class SessionManager:
 
         Returns True if renamed successfully.
         """
-        # Always compute original path from key, don't check metadata
-        old_dir = self.sessions_dir / self.safe_key(key)
+        # Use _get_session_dir which has fallback search logic
+        old_dir = self._get_session_dir(key)
         if not old_dir.exists():
             logger.warning("rename_session_dir: old_dir does not exist: {}", old_dir)
             return False
@@ -405,7 +432,15 @@ class SessionManager:
 
         Creates notes/vocab.md and notes/polisher.md if they don't exist.
         """
-        notes_dir = self._get_session_dir(key) / "notes"
+        import traceback
+        session_dir = self._get_session_dir(key)
+        logger.info(
+            "_ensure_session_notes({}): session_dir={}",
+            key,
+            session_dir,
+        )
+        logger.debug("  notes from:\n{}", "".join(traceback.format_stack()[-5:-1]))
+        notes_dir = session_dir / "notes"
         ensure_dir(notes_dir)
         (notes_dir / "vocab.md").touch(exist_ok=True)
         (notes_dir / "polisher.md").touch(exist_ok=True)
@@ -475,9 +510,24 @@ class SessionManager:
 
         session = self._load(key)
         if session is None:
-            session = Session(key=key)
-        self._ensure_session_notes(key)
+            # For websocket sessions, derive session_uuid from the key (websocket:{uuid})
+            # This ensures the folder name matches the chatId known to the WebUI
+            if key.startswith("websocket:"):
+                session_uuid = key[len("websocket:") :]
+            else:
+                session_uuid = str(uuid.uuid4())
+            session = Session(key=key, session_uuid=session_uuid)
+            # Store session_uuid in metadata for persistence
+            session.metadata["session_uuid"] = session.session_uuid
+            # Use UUID as folder name (topic stored in metadata["title"] separately)
+            session.metadata["_session_folder"] = session.session_uuid
+        else:
+            # Ensure _session_folder is set (for existing sessions loaded from disk)
+            if "_session_folder" not in session.metadata:
+                session.metadata["_session_folder"] = session.session_uuid
+        # Cache BEFORE _ensure_session_notes so _get_session_dir can find the session metadata
         self._cache[key] = session
+        self._ensure_session_notes(key)
         return session
 
     def _load(self, key: str) -> Session | None:
@@ -518,8 +568,17 @@ class SessionManager:
                     else:
                         messages.append(data)
 
+            session_uuid = metadata.get("session_uuid", "")
+            if not session_uuid:
+                session_uuid = str(uuid.uuid4())
+                metadata["session_uuid"] = session_uuid
+            # Ensure _session_folder is set (for existing sessions loaded from disk)
+            if "_session_folder" not in metadata:
+                metadata["_session_folder"] = session_uuid
+
             return Session(
                 key=key,
+                session_uuid=session_uuid,
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 updated_at=updated_at or datetime.now(),
@@ -609,6 +668,14 @@ class SessionManager:
         the most recent writes.
         """
         session_dir = self._get_session_dir(session.key)
+        logger.info(
+            "save({}): _session_folder={}, session_dir={}",
+            session.key,
+            session.metadata.get("_session_folder"),
+            session_dir,
+        )
+        import traceback
+        logger.debug("save() called from:\n{}", "".join(traceback.format_stack()))
         ensure_dir(session_dir)
         self._ensure_session_notes(session.key)
         path = self._get_session_path(session.key)
@@ -649,6 +716,8 @@ class SessionManager:
             raise
 
         self._cache[session.key] = session
+        # Always update index on save so title changes are reflected
+        self._update_session_index(session)
 
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.
@@ -665,6 +734,183 @@ class SessionManager:
             except Exception:
                 logger.warning("Failed to flush session {}", key, exc_info=True)
         return flushed
+
+    # ─── Session Index ───────────────────────────────────────────────────────────
+
+    @property
+    def _index_path(self) -> Path:
+        """Path to the session index file."""
+        return self.sessions_dir.parent / "session_index.jsonl"
+
+    def _load_session_index(self) -> list[dict[str, Any]]:
+        """Load the session index from disk."""
+        index_path = self._index_path
+        if not index_path.exists():
+            return []
+        try:
+            with open(index_path, encoding="utf-8") as f:
+                return [json.loads(line) for line in f if line.strip()]
+        except Exception:
+            logger.warning("Failed to load session index from {}", index_path)
+            return []
+
+    def _save_session_index(self, index: list[dict[str, Any]]) -> None:
+        """Save the session index to disk."""
+        index_path = self._index_path
+        try:
+            with open(index_path, "w", encoding="utf-8") as f:
+                for entry in index:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            logger.warning("Failed to save session index to {}", index_path)
+
+    def _update_session_index(self, session: Session) -> None:
+        """Update the session index entry for a session."""
+        if not session.session_uuid:
+            return  # Skip if no session_uuid
+
+        index = self._load_session_index()
+
+        # Find existing entry by session_uuid
+        entry_idx = None
+        for i, entry in enumerate(index):
+            if entry.get("session_uuid") == session.session_uuid:
+                entry_idx = i
+                break
+
+        # Build entry
+        # title is set by freechat command (the topic); _session_folder is the UUID folder name
+        topic = session.metadata.get("title", "") or session.metadata.get("_session_folder", "")
+        logger.debug(
+            "_update_session_index: session_uuid={}, title={}, _session_folder={}, topic={}",
+            session.session_uuid,
+            session.metadata.get("title", ""),
+            session.metadata.get("_session_folder", ""),
+            topic,
+        )
+        session_dir = self._get_session_dir(session.key)
+        relative_path = str(session_dir.relative_to(self.sessions_dir.parent))
+
+        # Count rounds from messages
+        rounds = 0
+        if session.messages:
+            rounds = session.messages[-1].get("round", 0)
+
+        entry = {
+            "session_uuid": session.session_uuid,
+            "path": relative_path,
+            "topic": topic,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "total_rounds": rounds,
+        }
+
+        if entry_idx is not None:
+            index[entry_idx] = entry
+        else:
+            index.append(entry)
+
+        self._save_session_index(index)
+
+    # ─── User Expressions (Cross-Session) ────────────────────────────────────────
+
+    @property
+    def _responses_path(self) -> Path:
+        """Path to the user responses file (cross-session)."""
+        return self.sessions_dir.parent / "user_responses.jsonl"
+
+    def append_user_expression(
+        self,
+        session: Session,
+        round_num: int,
+        content: str,
+        topic: str = "",
+    ) -> None:
+        """Append a user expression to the cross-session expressions file."""
+        logger.info(
+            "append_user_expression CALLED: key={}, session_uuid={}, metadata={}",
+            session.key,
+            session.session_uuid,
+            session.metadata,
+        )
+        session_uuid = session.session_uuid or session.metadata.get("session_uuid", "")
+        if not session_uuid:
+            logger.warning(
+                "append_user_expression: no session_uuid for key={}, metadata={}",
+                session.key,
+                session.metadata,
+            )
+            return
+        entry = {
+            "session_uuid": session_uuid,
+            "round": round_num,
+            "topic": topic or session.metadata.get("_session_folder", ""),
+            "content": content,
+            "timestamp": datetime.now().isoformat(),
+        }
+        try:
+            with open(self._responses_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            logger.info(
+                "append_user_expression: wrote to {}, session_uuid={}, round={}, content_len={}",
+                self._responses_path,
+                session_uuid,
+                round_num,
+                len(content),
+            )
+        except Exception:
+            logger.warning("Failed to append user expression to {}", self._responses_path)
+
+    # ─── Progress Bank ─────────────────────────────────────────────────────────────
+
+    @property
+    def _progress_bank_path(self) -> Path:
+        """Path to the progress bank file (cross-session user highlights)."""
+        return self.sessions_dir.parent / "progress_bank.jsonl"
+
+    def append_progress_entry(self, entry: dict) -> int:
+        """Append a single progress entry to the progress bank.
+
+        Returns the number of entries written (1).
+        """
+        try:
+            with open(self._progress_bank_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            return 1
+        except Exception:
+            logger.warning("Failed to append progress entry to {}", self._progress_bank_path)
+            return 0
+
+    def append_progress_entries(self, entries: list[dict]) -> int:
+        """Append multiple progress entries to the progress bank.
+
+        Returns the number of entries written.
+        """
+        if not entries:
+            return 0
+        try:
+            with open(self._progress_bank_path, "a", encoding="utf-8") as f:
+                for entry in entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            return len(entries)
+        except Exception:
+            logger.warning("Failed to append {} progress entries to {}", len(entries), self._progress_bank_path)
+            return 0
+
+    def clear_responses(self) -> bool:
+        """Clear the user expressions file.
+
+        Returns True if the file was deleted or didn't exist.
+        """
+        path = self._responses_path
+        if not path.exists():
+            return True
+        try:
+            path.unlink()
+            return True
+        except Exception:
+            logger.warning("Failed to clear user expressions at {}", path)
+            return False
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
