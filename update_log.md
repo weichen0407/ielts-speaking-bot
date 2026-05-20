@@ -1,6 +1,114 @@
 # Update Log
 
-## 2026-05-19 - Free Chat, Session Memory System, and Subagent Refactor
+## 2026-05-20 - Counter Engine, Subagent Status Notifications, and Session Path Fix
+
+This update introduces a configurable counter-based trigger system for subagents, WebSocket notifications for subagent status, fixes session directory lookup for renamed sessions, and updates user memory profile.
+
+---
+
+## 1. Counter Engine (Configurable Subagent Triggers)
+
+### New Files
+
+**bot/nanobot/counter/** (new package)
+- `__init__.py` - Package init
+- `types.py` - Dataclasses for `CounterTrigger`, `CounterCondition`, `CounterTarget`
+- `engine.py` - `CounterEngine` class that loads triggers from YAML and evaluates conditions
+
+**persona/counter/triggers.yaml** (new file)
+- YAML configuration for count-based trigger system
+- Three default triggers:
+  - `vocab_analysis`: every 2 turns, silent
+  - `polish_feedback`: every 3 turns, silent
+  - `memory_update`: every 10 turns, silent
+
+### Backend Changes
+
+**bot/nanobot/agent/loop.py**
+- Replaced hardcoded `_spawn_session_subagents()` with `CounterEngine`-based approach
+- `_spawn_counter_subagent()` spawns a single subagent from a counter trigger
+- `counter_engine: CounterEngine` initialized in `__init__`
+- `_maybe_spawn_periodic_subagents()` now uses `counter_engine.check_triggers()` instead of hardcoded interval
+- Added `_on_subagent_status_change()` callback that broadcasts subagent status via message bus
+- Added `on_status_change` parameter to `SubagentManager.__init__`
+
+**bot/nanobot/agent/subagent.py**
+- Added `on_status_change` callback to notify when subagents start/complete/fail
+- Fires callback on task start and in `finally` block on completion/error
+
+---
+
+## 2. Subagent Status Notifications via WebSocket
+
+### Backend
+
+**bot/nanobot/channels/websocket.py**
+- Added `send_subagent_status()` method to broadcast subagent status events
+- Handles `_subagent_status` metadata and forwards to `send_subagent_status()`
+- Sends `subagent_status` event with: `task_id`, `label`, `phase` (started/done/error), `error`
+
+### Frontend
+
+**bot/webui/src/lib/types.ts**
+- Added `subagent_status` event type to `InboundEvent`
+
+**bot/webui/src/lib/nanobot-client.ts**
+- Added `onSubagentStatus()` handler registration
+- Routes `subagent_status` events to registered handlers
+
+**bot/webui/src/App.tsx**
+- Added `subagentToasts` state to display subagent status notifications
+- `useEffect` subscribes to `client.onSubagentStatus()` events
+- Shows toast notifications: "vocab subagent running...", "vocab subagent completed", etc.
+- Toasts auto-dismiss after 3 seconds
+- Styled with color-coded borders: blue (started), green (done), red (error)
+
+---
+
+## 3. Session Directory Path Fix
+
+**bot/nanobot/session/manager.py**
+- Fixed `_get_session_dir()` to handle renamed sessions:
+  - First tries cached metadata for custom folder name
+  - Then tries expected path via `safe_key(key)`
+  - Falls back to scanning all session directories to find matching key in metadata
+- Added `_find_session_dir_by_key()` helper method for directory search
+- This fixes the issue where clicking a renamed session (e.g., "Collecting") would create a new blank session
+
+---
+
+## 4. User Memory Updates
+
+**persona/memory/MEMORY.md**
+- Updated Music section with user's actual preferences:
+  - Likes "We Believe" (anthemic track)
+  - Fan of David Tao (陶喆) - Mandopop/R&B artist
+  - Vocabulary notes: casual language, needs descriptive alternatives
+  - Grammar notes: lowercase "i", filler "emm", short sentences
+- Updated IELTS-Specific Patterns:
+  - Vocabulary Gaps: "like" alternatives, casual slang upgrades
+  - Grammar Issues: capitalization, fillers, sentence variety, run-on sentences, articles
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/agent/loop.py | +162/-99 lines: CounterEngine integration, status callbacks |
+| bot/nanobot/agent/subagent.py | +8 lines: on_status_change callback |
+| bot/nanobot/channels/websocket.py | +36 lines: send_subagent_status |
+| bot/nanobot/session/manager.py | +36 lines: session directory fallback search |
+| bot/nanobot/counter/ | new package: types.py, engine.py |
+| bot/webui/src/App.tsx | +47 lines: subagent toast notifications |
+| bot/webui/src/lib/nanobot-client.ts | +16 lines: onSubagentStatus handler |
+| bot/webui/src/lib/types.ts | +8 lines: subagent_status event type |
+| persona/counter/triggers.yaml | new file: counter trigger configuration |
+| persona/memory/MEMORY.md | updated: user preferences and IELTS patterns |
+
+---
+
+*Update created: 2026-05-20*
 
 This update adds Free Chat button to web UI, implements cross-session memory tracking, refactors subagent system for silent file-only output, and redesigns the topic bank.
 

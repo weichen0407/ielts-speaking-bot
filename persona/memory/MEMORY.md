@@ -19,12 +19,12 @@ This file stores the user's comprehensive memory across all conversation session
 - **Last Discussed**: [date]
 
 ### Music
-- **Status**: not_explored | briefly_mentioned | well_explored
-- **Depth Level**: 1-5
-- **Key Facts**: [music preferences, instruments, habits]
-- **Vocabulary Notes**: [words/phrases user used]
-- **Grammar Patterns**: [patterns observed]
-- **Last Discussed**: [date]
+- **Status**: briefly_mentioned
+- **Depth Level**: 1
+- **Key Facts**: Likes "We Believe" (anthemic track); is a fan of David Tao (陶喆) — Mandopop/R&B artist
+- **Vocabulary Notes**: Uses casual/simple language ("i like", "super cool", "do you know him?"); needs practice with descriptive music vocabulary
+- **Grammar Patterns**: Short simple sentences; filler "emm"; lowercase "i"; lacks sentence variety and linking
+- **Last Discussed**: 2026-05-20
 
 ### Collecting
 - **Status**: not_explored | briefly_mentioned | well_explored
@@ -229,25 +229,30 @@ This file stores the user's comprehensive memory across all conversation session
 
 ### IELTS-Specific Patterns
 **Vocabulary Gaps**:
-- [word/phrase confusion 1]
-- [word/phrase confusion 2]
+- Overuse of "like" — needs alternatives: ==admire==, ==appreciate==, ==enjoy==, ==be fond of==, ==be into==
+- Casual slang ("super cool") — needs descriptive alternatives: ==remarkable==, ==impressive==, ==uplifting==, ==captivating==
+- Simple "do you know?" — can upgrade to: ==are you familiar with==, ==have you heard of==
 
 **Grammar Issues**:
-- [grammar pattern issue 1]
-- [grammar pattern issue 2]
+- Lowercase "i" — must capitalize "I" in IELTS writing and speaking (observed in ALL 3 messages this session)
+- Filler "emm" — replace with natural pauses or discourse markers like "Well,", "Let me think,", "To be honest,"
+- Short, disconnected sentences — needs practice with ==complex structures== (because, which, although)
+- Run-on sentences without punctuation — e.g., "itis" (no space), "do you know him?" attached without period
+- Missing articles — e.g., "good one" → "==a good one=="
+- Casual/weak vocabulary — "super cool", "good one" — needs descriptive alternatives: ==uplifting==, ==remarkable==, ==captivating==, ==soulful==
 
 **Hesitation Topics** (low confidence areas):
-- [topic user hesitates on]
-- [topic user avoids]
+- Describing music in detail (genre, style, why it appeals)
+- Expressing opinions with depth and reasoning
 
 **Confident Topics**:
-- [topic user speaks fluently about]
-- [topic user enjoys discussing]
+- Music preferences (initiates and responds naturally)
+- David Tao / Mandopop (shows genuine interest and knowledge)
 
 ### Suggested Next Topics (for future sessions)
-1. [Topic] - [why suggested based on exploration status]
-2. [Topic] - [why suggested based on exploration status]
-3. [Topic] - [why suggested based on exploration status]
+1. **Music (continue)** — Ask depth 2-3 questions: "Why does David Tao's music appeal to you?", "How does music affect your mood?" to build vocabulary depth
+2. **Hobbies & Interests (other)** — Explore collecting, cooking, or favorite sport to diversify vocabulary
+3. **Food & Eating Habits** — A relatable everyday topic that encourages descriptive language practice
 
 ---
 

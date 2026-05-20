@@ -311,6 +311,10 @@ function Shell({
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [subagentToasts, setSubagentToasts] = useState<
+    Array<{ taskId: string; label: string; phase: string }>
+  >([]);
+  const subagentTimers = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     try {
@@ -431,6 +435,26 @@ function Shell({
       onModelNameChange(modelName);
     });
   }, [client, onModelNameChange]);
+
+  useEffect(() => {
+    return client.onSubagentStatus((ev) => {
+      setSubagentToasts((prev) => {
+        const others = prev.filter((t) => t.taskId !== ev.task_id);
+        if (ev.phase === "started") {
+          return [...others, { taskId: ev.task_id, label: ev.label, phase: "started" }];
+        }
+        // done or error: update then schedule removal
+        const updated = [...others, { taskId: ev.task_id, label: ev.label, phase: ev.phase }];
+        const timer = window.setTimeout(() => {
+          setSubagentToasts((p) => p.filter((t) => t.taskId !== ev.task_id));
+        }, 3_000);
+        const existing = subagentTimers.current.get(ev.task_id);
+        if (existing) clearTimeout(existing);
+        subagentTimers.current.set(ev.task_id, timer);
+        return updated;
+      });
+    });
+  }, [client]);
 
   useEffect(() => {
     return client.onStatus((status) => {
@@ -615,6 +639,29 @@ function Shell({
             className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
           >
             {restartToast}
+          </div>
+        ) : null}
+        {subagentToasts.length > 0 ? (
+          <div className="fixed right-4 top-4 z-50 flex flex-col gap-2">
+            {subagentToasts.map((t) => (
+              <div
+                key={t.taskId}
+                role="status"
+                className={`rounded-lg border px-4 py-2 text-sm font-medium shadow-lg transition-all ${
+                  t.phase === "started"
+                    ? "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
+                    : t.phase === "error"
+                      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+                      : "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
+                }`}
+              >
+                {t.phase === "started"
+                  ? `${t.label} subagent running...`
+                  : t.phase === "error"
+                    ? `${t.label} subagent failed`
+                    : `${t.label} subagent completed`}
+              </div>
+            ))}
           </div>
         ) : null}
       </div>

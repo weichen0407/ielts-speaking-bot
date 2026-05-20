@@ -1629,6 +1629,7 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
                 or msg.metadata.get("_goal_state_sync")
+                or msg.metadata.get("_subagent_status")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
@@ -1637,6 +1638,15 @@ class WebSocketChannel(BaseChannel):
         if msg.metadata.get("_goal_state_sync"):
             blob = msg.metadata.get("goal_state")
             await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+            return
+        if msg.metadata.get("_subagent_status"):
+            await self.send_subagent_status(
+                msg.chat_id,
+                task_id=msg.metadata.get("task_id", ""),
+                label=msg.metadata.get("label", ""),
+                phase=msg.metadata.get("phase", ""),
+                error=msg.metadata.get("error"),
+            )
             return
         if msg.metadata.get("_goal_status"):
             status = msg.metadata.get("goal_status")
@@ -1850,6 +1860,32 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" session_updated ")
+
+    async def send_subagent_status(
+        self,
+        chat_id: str,
+        *,
+        task_id: str,
+        label: str,
+        phase: str,
+        error: str | None = None,
+    ) -> None:
+        """Notify clients that a subagent started or completed."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "subagent_status",
+            "chat_id": chat_id,
+            "task_id": task_id,
+            "label": label,
+            "phase": phase,
+        }
+        if error:
+            body["error"] = error
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" subagent_status ")
 
     async def send_runtime_model_updated(
         self,

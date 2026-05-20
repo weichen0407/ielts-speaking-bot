@@ -81,6 +81,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
+        on_status_change: Callable[[str, str, str, str | None, dict[str, str]], None] | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -99,6 +100,7 @@ class SubagentManager:
         self.max_concurrent_subagents = defaults.max_concurrent_subagents
         self.runner = AgentRunner(provider)
         self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
+        self._on_status_change = on_status_change
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -174,6 +176,9 @@ class SubagentManager:
                     del self._session_tasks[session_key]
 
         bg_task.add_done_callback(_cleanup)
+
+        if self._on_status_change:
+            self._on_status_change(task_id, display_label, "started", None, origin)
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
@@ -254,6 +259,9 @@ class SubagentManager:
             logger.exception("Subagent [{}] failed", task_id)
             if announce_result:
                 await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+        finally:
+            if self._on_status_change:
+                self._on_status_change(task_id, label, status.phase, status.error, origin)
 
     async def _announce_result(
         self,

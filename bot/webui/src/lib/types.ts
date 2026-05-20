@@ -256,6 +256,14 @@ export type InboundEvent =
       goal_state: GoalStateWsPayload;
     }
   | { event: "session_updated"; chat_id: string; scope?: "metadata" | "thread" | string }
+  | {
+      event: "subagent_status";
+      chat_id: string;
+      task_id: string;
+      label: string;
+      phase: "started" | "done" | "error";
+      error?: string;
+    }
   | { event: "error"; chat_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.

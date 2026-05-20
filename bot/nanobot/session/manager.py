@@ -316,14 +316,46 @@ class SessionManager:
         """Get the directory path for a session.
 
         Checks session metadata for a custom folder name first.
+        Falls back to searching through session directories if key doesn't match folder name.
         """
-        # Try to get custom folder name from session metadata
+        # Try to get custom folder name from session metadata (if session is cached)
         if key in self._cache:
             session = self._cache[key]
             custom_folder = session.metadata.get("_session_folder")
             if custom_folder:
                 return self.sessions_dir / custom_folder
-        return self.sessions_dir / self.safe_key(key)
+
+        # Try the expected path first
+        expected_path = self.sessions_dir / self.safe_key(key)
+        if expected_path.exists():
+            return expected_path
+
+        # Fallback: search through session directories to find the one with matching key
+        found_dir = self._find_session_dir_by_key(key)
+        if found_dir:
+            return found_dir
+
+        # Return expected path even if it doesn't exist (will be created by caller)
+        return expected_path
+
+    def _find_session_dir_by_key(self, key: str) -> Path | None:
+        """Find a session's directory by scanning for matching key in metadata."""
+        for session_dir in self.sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            thread_path = session_dir / "thread.jsonl"
+            if not thread_path.exists():
+                continue
+            try:
+                with open(thread_path, encoding="utf-8") as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        data = json.loads(first_line)
+                        if data.get("_type") == "metadata" and data.get("key") == key:
+                            return session_dir
+            except Exception:
+                continue
+        return None
 
     def rename_session_dir(self, key: str, new_name: str) -> bool:
         """Rename a session's folder to a new name and store mapping in metadata.

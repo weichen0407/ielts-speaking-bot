@@ -1,0 +1,56 @@
+version: 1
+triggers:
+  - id: vocab_analysis
+    name: "Vocabulary Analysis"
+    enabled: true
+    condition:
+      kind: turn_count
+      every: 2
+      scope: session
+    target:
+      subagent: vocab_subagent
+      prompt_file: subagents/vocab_subagent.md
+      silent: true
+      task_template: |
+        Analyze the conversation history and update vocabulary suggestions.
+
+        Session directory: {session_dir}/notes/
+        Read: {session_dir}/thread.jsonl
+        Write to: {session_dir}/notes/vocab.md
+
+  - id: memory_update
+    name: "Memory Update"
+    enabled: true
+    condition:
+      kind: turn_count
+      every: 10
+      scope: session
+    target:
+      subagent: memory_subagent
+      prompt_file: subagents/memory_subagent.md
+      silent: true
+      task_template: |
+        Update user memory profile based on this conversation session.
+
+        Session directory: {session_dir}
+        Read: {session_dir}/thread.jsonl
+        Write to: {workspace}/memory/MEMORY.md
+        Also read: {workspace}/formats/memory_format.md for output format
+
+  - id: polish_feedback
+    name: "Polish Feedback"
+    enabled: true
+    condition:
+      kind: turn_count
+      every: 3
+      scope: session
+    target:
+      subagent: polisher_subagent
+      prompt_file: subagents/polisher_subagent.md
+      silent: true
+      task_template: |
+        Analyze recent user messages and show optimized versions with diff.
+
+        Session directory: {session_dir}/notes/
+        Read: {session_dir}/thread.jsonl
+        Write to: {session_dir}/notes/polisher.md

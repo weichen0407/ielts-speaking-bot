@@ -72,6 +72,7 @@ export type StreamError =
   | { kind: "message_too_big" };
 
 type ErrorHandler = (error: StreamError) => void;
+type SubagentStatusHandler = (ev: { chat_id: string; task_id: string; label: string; phase: "started" | "done" | "error"; error?: string }) => void;
 
 interface PendingNewChat {
   resolve: (chatId: string) => void;
@@ -103,6 +104,7 @@ export class NanobotClient {
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
   private errorHandlers = new Set<ErrorHandler>();
+  private subagentStatusHandlers = new Set<SubagentStatusHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
@@ -177,6 +179,13 @@ export class NanobotClient {
     this.errorHandlers.add(handler);
     return () => {
       this.errorHandlers.delete(handler);
+    };
+  }
+
+  onSubagentStatus(handler: SubagentStatusHandler): Unsubscribe {
+    this.subagentStatusHandlers.add(handler);
+    return () => {
+      this.subagentStatusHandlers.delete(handler);
     };
   }
 
@@ -366,6 +375,13 @@ export class NanobotClient {
 
     if (parsed.event === "session_updated") {
       this.emitSessionUpdate(parsed.chat_id, parsed.scope);
+      return;
+    }
+
+    if (parsed.event === "subagent_status") {
+      for (const handler of this.subagentStatusHandlers) {
+        handler(parsed);
+      }
       return;
     }
 

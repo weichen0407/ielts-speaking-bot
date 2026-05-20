@@ -29,6 +29,8 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.counter.engine import CounterEngine
+from nanobot.counter.types import CounterTrigger
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
@@ -144,10 +146,7 @@ class AgentLoop:
         self._refresh_provider_snapshot()
         return LLMRuntime(self.provider, self.model)
 
-    SUBAGENTS_SPAWNED_KEY = "_session_subagents_spawned"
-    MESSAGE_COUNT_KEY = "_message_count"
     TITLE_KEY = "title"
-    SUBAGENTS_TRIGGER_INTERVAL = 3  # Spawn subagents every N messages
 
     def _load_subagent_prompt(self, filename: str) -> str | None:
         """Load a subagent prompt file from workspace."""
@@ -198,73 +197,43 @@ class AgentLoop:
         else:
             logger.warning("Failed to rename session folder for: {}", title)
 
-    async def _spawn_session_subagents(self, session: Session, msg: InboundMessage) -> None:
-        """Spawn vocab, polisher, and memory subagents for the session."""
-        # Generate and apply session title if not already set
-        await self._apply_session_title(session, msg)
+    async def _spawn_counter_subagent(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        trigger: CounterTrigger,
+        session_dir: str,
+    ) -> None:
+        """Spawn a single subagent from a counter trigger."""
+        prompt = self.counter_engine.load_prompt(trigger)
+        if not prompt:
+            return
 
-        session_dir = str(self.sessions._get_session_dir(session.key))
-        workspace_str = str(self.workspace)
-
-        # Load all subagent prompts
-        vocab_prompt = self._load_subagent_prompt("subagents/vocab_subagent.md")
-        polisher_prompt = self._load_subagent_prompt("subagents/polisher_subagent.md")
-        memory_prompt = self._load_subagent_prompt("subagents/memory_subagent.md")
-
-        # Prepare task messages
-        vocab_task = (
-            f"Analyze the conversation history and update vocabulary suggestions.\n\n"
-            f"Session directory: {session_dir}/notes/\n"
-            f"Read: {session_dir}/thread.jsonl\n"
-            f"Write to: {session_dir}/notes/vocab.md"
-        )
-        polisher_task = (
-            f"Analyze recent user messages and show optimized versions with diff.\n\n"
-            f"Session directory: {session_dir}/notes/\n"
-            f"Read: {session_dir}/thread.jsonl\n"
-            f"Write to: {session_dir}/notes/polisher.md"
-        )
-        memory_task = (
-            f"Update user profile based on conversation.\n\n"
-            f"Session directory: {session_dir}/notes/\n"
-            f"Read: {session_dir}/thread.jsonl\n"
-            f"Write to: {session_dir}/notes/profile.md"
-        )
-
-        # Substitute placeholders in prompts
-        for prompt in [vocab_prompt, polisher_prompt, memory_prompt]:
-            if prompt:
-                prompt.replace("{{ session_dir }}", session_dir)
-                prompt.replace("{{ workspace }}", workspace_str)
-
-        # Spawn all three subagents
-        subagents_to_spawn = [
-            ("vocab", vocab_prompt, vocab_task),
-            ("polisher", polisher_prompt, polisher_task),
-            ("memory", memory_prompt, memory_task),
-        ]
+        task = self.counter_engine.build_task(trigger, session_dir)
+        prompt = prompt.replace("{{ session_dir }}", session_dir)
+        prompt = prompt.replace("{{ workspace }}", str(self.workspace))
 
         msg_id = msg.metadata.get("message_id") if msg.metadata else None
 
-        for label, prompt, task in subagents_to_spawn:
-            if not prompt:
-                continue
-            prompt = prompt.replace("{{ session_dir }}", session_dir)
-            prompt = prompt.replace("{{ workspace }}", workspace_str)
-            try:
-                await self.subagents.spawn(
-                    task=task,
-                    label=label,
-                    origin_channel=msg.channel,
-                    origin_chat_id=msg.chat_id,
-                    session_key=session.key,
-                    origin_message_id=msg_id,
-                    extra_system_prompt=prompt,
-                    announce_result=False,  # Silent - only write to files
-                )
-                logger.info("Spawned {} subagent for session {}", label, session.key)
-            except Exception as e:
-                logger.warning("Failed to spawn {} subagent: {}", label, e)
+        try:
+            await self.subagents.spawn(
+                task=task,
+                label=trigger.target.subagent,
+                origin_channel=msg.channel,
+                origin_chat_id=msg.chat_id,
+                session_key=session.key,
+                origin_message_id=msg_id,
+                extra_system_prompt=prompt,
+                announce_result=not trigger.target.silent,
+            )
+            self.counter_engine.record_trigger(session.metadata, trigger.id)
+            logger.info(
+                "Spawned counter subagent [{}] for session {}",
+                trigger.id,
+                session.key,
+            )
+        except Exception as e:
+            logger.warning("Failed to spawn counter subagent [{}]: {}", trigger.id, e)
 
     async def _on_session_inactive(self, session_key: str) -> None:
         """Called when a session becomes inactive (user switched to another session).
@@ -415,6 +384,7 @@ class AgentLoop:
         ):
             self._image_generation_provider_configs["openrouter"] = image_generation_provider_config
         self.cron_service = cron_service
+        self.counter_engine = CounterEngine(workspace)
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
@@ -444,6 +414,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
+            on_status_change=self._on_subagent_status_change,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -550,6 +521,37 @@ class AgentLoop:
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
             **extra,
+        )
+
+    def _on_subagent_status_change(
+        self,
+        task_id: str,
+        label: str,
+        phase: str,
+        error: str | None,
+        origin: dict[str, str],
+    ) -> None:
+        """Called when a subagent starts or completes. Broadcasts via message bus."""
+        # Fire-and-forget: we don't await the bus publish because this runs
+        # from inside subagent callbacks where blocking is undesirable.
+        chat_id = origin.get("chat_id", "direct")
+        session_key = origin.get("session_key")
+        asyncio.create_task(
+            self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=origin.get("channel", "cli"),
+                    chat_id=chat_id,
+                    content="",
+                    metadata={
+                        "_subagent_status": True,
+                        "task_id": task_id,
+                        "label": label,
+                        "phase": phase,
+                        "error": error,
+                        "session_key": session_key,
+                    },
+                )
+            )
         )
 
     def _sync_subagent_runtime_limits(self) -> None:
@@ -1382,6 +1384,11 @@ class AgentLoop:
             ctx.turn_id,
             len(ctx.trace),
         )
+
+        # After a successful turn, bump counter and evaluate count-based triggers
+        if ctx.session is not None:
+            await self._maybe_spawn_periodic_subagents(ctx.session, ctx.msg)
+
         return ctx.outbound
 
     def _assemble_outbound(
@@ -1442,26 +1449,31 @@ class AgentLoop:
         if self._restore_pending_user_turn(ctx.session):
             self.sessions.save(ctx.session)
 
-        # Spawn subagents on first message or every N messages
-        await self._maybe_spawn_periodic_subagents(ctx.session, msg)
+        # Ensure session title is set on first real user message
+        await self._apply_session_title(ctx.session, msg)
 
         return "ok"
 
     async def _maybe_spawn_periodic_subagents(self, session: Session, msg: InboundMessage) -> None:
-        """Spawn subagents on first message or every N messages."""
+        """Spawn subagents based on counter trigger configuration.
+        
+        Called after a turn completes so only successful full conversations count.
+        """
         # Skip on /freechat command - subagents should only run on real conversation turns
         raw = msg.content.strip().lower()
         if raw == "/freechat":
             return
 
-        current_count = session.metadata.get(self.MESSAGE_COUNT_KEY, 0) + 1
-        session.metadata[self.MESSAGE_COUNT_KEY] = current_count
+        self.counter_engine.increment_turn(session.metadata)
+        triggers = self.counter_engine.check_triggers(session.metadata)
 
-        should_spawn = current_count == 1  # First message
-        should_spawn = should_spawn or (current_count % self.SUBAGENTS_TRIGGER_INTERVAL == 0)
+        if not triggers:
+            return
 
-        if should_spawn:
-            await self._spawn_session_subagents(session, msg)
+        session_dir = str(self.sessions._get_session_dir(session.key))
+
+        for trigger in triggers:
+            await self._spawn_counter_subagent(session, msg, trigger, session_dir)
 
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)
