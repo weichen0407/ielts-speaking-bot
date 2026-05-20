@@ -167,6 +167,16 @@
     "cancel": "Cancel",
     "confirm": "Delete"
   },
+  "notes": {
+    "title": "Session Notes",
+    "vocabulary": "Vocabulary",
+    "grammar": "Grammar",
+    "emptyVocab": "No vocabulary notes yet",
+    "emptyGrammar": "No grammar notes yet",
+    "openNotes": "Open notes",
+    "hint": "Use ==word== to highlight keywords",
+    "close": "Close"
+  },
   "connection": {
     "idle": "Idle",
     "connecting": "Connecting…",

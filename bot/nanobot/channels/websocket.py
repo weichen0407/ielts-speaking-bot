@@ -686,6 +686,10 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_session_delete(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/notes$", got)
+        if m:
+            return self._handle_session_notes(request, m.group(1))
+
         # Signed media fetch: ``<sig>`` is an HMAC over ``<payload>``; the
         # payload decodes to a path inside :func:`get_media_dir`. See
         # :meth:`_sign_media_path` for the inverse direction used to build
@@ -1238,6 +1242,20 @@ class WebSocketChannel(BaseChannel):
         deleted = self._session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
+
+    def _handle_session_notes(self, request: WsRequest, key: str) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not self._is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        notes = self._session_manager.get_session_notes(decoded_key)
+        # Return empty if no notes found (session might not exist or have no notes yet)
+        return _http_json_response(notes)
 
     def _serve_static(self, request_path: str) -> Response | None:
         """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""

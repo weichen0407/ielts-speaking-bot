@@ -383,6 +383,9 @@ class SessionManager:
     def get_session_notes(self, key: str) -> dict[str, str]:
         """Read vocab.md and polisher.md from a session's notes directory."""
         notes_dir = self._get_session_dir(key) / "notes"
+        # Fallback: if notes_dir doesn't exist, search for the session by key in metadata
+        if not notes_dir.exists():
+            notes_dir = self._find_session_notes_dir(key) or notes_dir
         vocab = ""
         polisher = ""
         vocab_path = notes_dir / "vocab.md"
@@ -392,6 +395,25 @@ class SessionManager:
         if polisher_path.exists():
             polisher = polisher_path.read_text(encoding="utf-8")
         return {"vocab": vocab, "polisher": polisher}
+
+    def _find_session_notes_dir(self, key: str) -> Path | None:
+        """Find a session's notes directory by scanning for matching key in metadata."""
+        for session_dir in self.sessions_dir.iterdir():
+            if not session_dir.is_dir():
+                continue
+            thread_path = session_dir / "thread.jsonl"
+            if not thread_path.exists():
+                continue
+            try:
+                with open(thread_path, encoding="utf-8") as f:
+                    first_line = f.readline().strip()
+                    if first_line:
+                        data = json.loads(first_line)
+                        if data.get("_type") == "metadata" and data.get("key") == key:
+                            return session_dir / "notes"
+            except Exception:
+                continue
+        return None
 
     def _migrate_legacy_session(self, legacy_path: Path, new_dir: Path) -> None:
         """Migrate a legacy flat .jsonl session to the new directory structure."""
@@ -757,4 +779,12 @@ class SessionManager:
                     })
                 continue
 
-        return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+        # Deduplicate by key, keeping the first occurrence (most recent)
+        seen = set()
+        unique_sessions = []
+        for s in sessions:
+            if s["key"] not in seen:
+                seen.add(s["key"])
+                unique_sessions.append(s)
+
+        return sorted(unique_sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

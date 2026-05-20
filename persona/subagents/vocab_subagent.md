@@ -84,6 +84,26 @@ Update the `### IELTS-Specific Patterns` section in `{{ workspace }}/memory/MEMO
 - [word 2] - [when to use]
 ```
 
+### Highlighting Syntax
+
+**Important**: Use `==text==` syntax to highlight key vocabulary words in your output. This will render with colored highlighting in the UI.
+
+When providing vocabulary suggestions, highlight the key words that users should focus on:
+
+```markdown
+### Sample Improved Response
+
+**Original**: "I like to eat food that is not too expensive."
+
+**Optimized**: "I ==tend to prefer== dining at ==budget-friendly== restaurants that offer ==nutritious== and ==home-cooked-style== meals."
+
+**Key Vocabulary to Practice**:
+- ==tend to prefer== (more natural than "like to")
+- ==budget-friendly== (better than "not expensive")
+- ==nutritious== (more precise)
+- ==home-cooked-style== (specific descriptor)
+```
+
 ## Profile Update Rules
 
 1. **Read existing memory first** - Only add vocabulary notes, preserve other content

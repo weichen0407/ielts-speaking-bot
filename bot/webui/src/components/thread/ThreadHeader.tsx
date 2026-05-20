@@ -1,4 +1,4 @@
-import { Menu, Moon, Sun } from "lucide-react";
+import { BookOpen, Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ interface ThreadHeaderProps {
   onToggleSidebar: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
+  onOpenNotes?: () => void;
   hideSidebarToggleOnDesktop?: boolean;
   minimal?: boolean;
 }
@@ -18,6 +19,7 @@ export function ThreadHeader({
   onToggleSidebar,
   theme,
   onToggleTheme,
+  onOpenNotes,
   hideSidebarToggleOnDesktop = false,
   minimal = false,
 }: ThreadHeaderProps) {
@@ -60,6 +62,17 @@ export function ThreadHeader({
         <div className="flex min-w-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
           <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
         </div>
+        {onOpenNotes && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("notes.openNotes", "Open notes")}
+            onClick={onOpenNotes}
+            className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/35 hover:text-foreground"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+          </Button>
+        )}
       </div>
 
       <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />

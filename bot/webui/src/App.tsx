@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { SessionNotesSheet } from "@/components/SessionNotesSheet";
 
 import { useSessions } from "@/hooks/useSessions";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
@@ -302,6 +303,11 @@ function Shell({
     key: string;
     label: string;
   } | null>(null);
+  const [notesSheetState, setNotesSheetState] = useState<{
+    open: boolean;
+    sessionKey: string | null;
+    title: string;
+  }>({ open: false, sessionKey: null, title: "" });
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -316,6 +322,13 @@ function Shell({
       // ignore storage errors (private mode, etc.)
     }
   }, [desktopSidebarOpen]);
+
+  // Close notes sheet when switching sessions
+  useEffect(() => {
+    if (notesSheetState.open && notesSheetState.sessionKey !== activeKey) {
+      setNotesSheetState((s) => ({ ...s, open: false }));
+    }
+  }, [activeKey, notesSheetState.open, notesSheetState.sessionKey]);
 
 
 
@@ -470,6 +483,16 @@ function Shell({
       deriveTitle(activeSession.preview, t("chat.newChat"))
     : t("app.brand");
 
+  const handleOpenNotes = useCallback(() => {
+    if (activeSession) {
+      setNotesSheetState({
+        open: true,
+        sessionKey: activeSession.key,
+        title: activeSession.title || headerTitle,
+      });
+    }
+  }, [activeSession, headerTitle]);
+
   useEffect(() => {
     if (view === "settings") {
       document.title = t("app.documentTitle.chat", {
@@ -550,6 +573,7 @@ function Shell({
               onNewChat={onNewChat}
               onCreateChat={onCreateChat}
               onTurnEnd={onTurnEnd}
+              onOpenNotes={handleOpenNotes}
               theme={theme}
               onToggleTheme={toggle}
               hideSidebarToggleOnDesktop={desktopSidebarOpen}
@@ -575,6 +599,15 @@ function Shell({
           title={pendingDelete?.label ?? ""}
           onCancel={() => setPendingDelete(null)}
           onConfirm={onConfirmDelete}
+        />
+
+        <SessionNotesSheet
+          open={notesSheetState.open}
+          onOpenChange={(open) =>
+            setNotesSheetState((s) => ({ ...s, open }))
+          }
+          sessionKey={notesSheetState.sessionKey}
+          sessionTitle={notesSheetState.title}
         />
         {restartToast ? (
           <div

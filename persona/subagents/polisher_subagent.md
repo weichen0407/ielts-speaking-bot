@@ -72,6 +72,37 @@ Update the grammar section in `{{ workspace }}/memory/MEMORY.md`.
 - [grammar point 2] - [example]
 ```
 
+### Highlighting Syntax
+
+**Important**: Use `==text==` syntax to highlight key improved words in your output. This will render with colored highlighting in the UI.
+
+Examples:
+- **Good**: "I ==started learning== English 5 years ago"
+- **Better**: "I ==have been learning== English for the past 5 years"
+
+When showing optimized sentences, use `==word==` to mark:
+- Grammar corrections
+- Improved vocabulary choices
+- Better sentence structures
+- Linking phrases added
+
+Example output format for polisher notes:
+
+```markdown
+## Sample Optimized Response
+
+**Original**: "I like music because it makes me feel good."
+
+**Optimized**: "I ==am particularly fond of== music because it ==evokes a sense of== ==well-being== and helps me ==unwind after a long day==."
+
+**Key Improvements**:
+- ==am particularly fond of== (more formal than "like")
+- ==evokes a sense of== (more sophisticated)
+- ==well-being== (more precise than "feel good")
+- ==unwind== (more natural collocation)
+- Added time expression ==after a long day== for context
+```
+
 ## Profile Update Rules
 
 1. **Read existing memory first** - Only add grammar notes, preserve other content

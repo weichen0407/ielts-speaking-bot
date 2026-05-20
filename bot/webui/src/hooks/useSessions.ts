@@ -33,7 +33,14 @@ export function useSessions(): {
     try {
       setLoading(true);
       const rows = await listSessions(tokenRef.current);
-      setSessions(rows);
+      // Deduplicate by key - keep first occurrence (most recent)
+      const seen = new Set<string>();
+      const unique = rows.filter((s) => {
+        if (seen.has(s.key)) return false;
+        seen.add(s.key);
+        return true;
+      });
+      setSessions(unique);
       setError(null);
     } catch (e) {
       const msg =

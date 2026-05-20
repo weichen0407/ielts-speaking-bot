@@ -391,4 +391,120 @@ This update adds Free Chat button to web UI, implements cross-session memory tra
 
 ---
 
-*Update created: 2026-05-19*
+## 2026-05-20 - Session Notes Panel and Highlighting Syntax
+
+This update adds a Session Notes Panel to the WebUI for viewing vocab/polisher notes, implements keyword highlighting syntax (`==word==`), and fixes session deduplication.
+
+---
+
+## 1. Session Notes Panel
+
+### New Files
+
+**bot/webui/src/components/SessionNotesSheet.tsx** (134 lines)
+- Sheet component that slides in from the right
+- Two tabs: Vocabulary and Grammar
+- Polls for updates every 5 seconds
+- Renders markdown content with MarkdownTextRenderer
+- Displays session title in header
+
+**bot/webui/src/hooks/useSessionNotes.ts** (68 lines)
+- Fetches session notes via API
+- 5-second polling interval when panel is open
+- Returns `notes.vocab` and `notes.polisher` strings
+
+### Backend API Endpoint
+
+**bot/nanobot/channels/websocket.py**
+- Added `GET /api/sessions/<key>/notes` handler (`_handle_session_notes`)
+- Returns `{"vocab": "...", "polisher": "..."}`
+- Validates session key and authorization
+
+### Frontend Integration
+
+**bot/webui/src/App.tsx**
+- Added `notesSheetState` for managing sheet open/close
+- Added `handleOpenNotes` callback
+- Closes notes sheet when switching sessions
+
+**bot/nanobot/session/manager.py**
+- Added `_find_session_notes_dir(key)` fallback method:
+  - Scans session directories for matching key in metadata
+  - Handles renamed sessions that don't use safe_key paths
+- Fixed `get_session_notes()` to use fallback search
+
+**bot/webui/src/lib/api.ts**
+- Added `fetchSessionNotes(token, key)` function
+- Added `SessionNotes` interface: `{ vocab: string, polisher: string }`
+
+---
+
+## 2. Highlighting Syntax
+
+### Markdown Rendering
+
+**bot/webui/src/components/MarkdownTextRenderer.tsx**
+- Complete rewrite of highlight handling
+- Uses `remark-directive` plugin for directive parsing
+- Custom `remarkHighlight()` plugin transforms `==word==` to textDirective nodes
+- Sets `hName: "mark"` and `hProperties` for directive conversion
+- `<mark>` elements render with amber background:
+  - Light mode: `bg-amber-200 text-amber-900`
+  - Dark mode: `dark:bg-amber-700/50 dark:text-amber-100`
+
+### Subagent Output Format
+
+**persona/subagents/vocab_subagent.md**
+- Added highlighting syntax documentation
+- Sample output uses `==word==` for key vocabulary
+
+**persona/subagents/polisher_subagent.md**
+- Added highlighting syntax documentation
+
+### CSS
+
+**bot/webui/src/globals.css**
+- Added `.highlight` class (backup for simple highlighting)
+
+---
+
+## 3. Session Deduplication
+
+### Backend
+
+**bot/nanobot/session/manager.py**
+- `list_sessions()` now deduplicates by key:
+  - Keeps first occurrence (most recent)
+  - Prevents duplicate sessions in sidebar
+
+### Frontend
+
+**bot/webui/src/hooks/useSessions.ts**
+- `refresh()` now deduplicates sessions client-side
+- Uses `Set` to track seen keys
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/channels/websocket.py | +18 lines: session notes API endpoint |
+| bot/nanobot/session/manager.py | +32 lines: fallback search, deduplication |
+| bot/webui/src/App.tsx | +33 lines: notes sheet state management |
+| bot/webui/src/components/MarkdownTextRenderer.tsx | +83 lines: highlight syntax support |
+| bot/webui/src/components/SessionNotesSheet.tsx | new file (134 lines) |
+| bot/webui/src/components/thread/ThreadHeader.tsx | +15 lines: BookOpen icon button |
+| bot/webui/src/components/thread/ThreadShell.tsx | +3 lines: onOpenNotes prop |
+| bot/webui/src/globals.css | +13 lines: highlight CSS class |
+| bot/webui/src/hooks/useSessionNotes.ts | new file (68 lines) |
+| bot/webui/src/hooks/useSessions.ts | +9 lines: deduplication |
+| bot/webui/src/i18n/locales/en/common.json | +10 lines: notes.* translations |
+| bot/webui/src/lib/api.ts | +16 lines: fetchSessionNotes |
+| persona/subagents/vocab_subagent.md | +20 lines: highlighting syntax |
+| persona/subagents/polisher_subagent.md | +31 lines: highlighting syntax |
+| persona/sessions/Collecting/notes/*.md | updated: ==word== highlighting |
+
+---
+
+*Update created: 2026-05-20*

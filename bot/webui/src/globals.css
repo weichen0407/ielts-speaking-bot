@@ -235,4 +235,17 @@
   .scrollbar-track-transparent::-webkit-scrollbar-track {
     background: transparent;
   }
+
+  /* Highlighted text for session notes */
+  .highlight {
+    background-color: #fde047;
+    color: #78350f;
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+  }
+  .dark .highlight {
+    background-color: hsl(24 80% 50% / 0.5);
+    color: hsl(40 80% 60%);
+  }
 }

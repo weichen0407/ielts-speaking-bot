@@ -95,6 +95,22 @@ export async function deleteSession(
   return body.deleted;
 }
 
+export interface SessionNotes {
+  vocab: string;
+  polisher: string;
+}
+
+export async function fetchSessionNotes(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<SessionNotes> {
+  return request<SessionNotes>(
+    `${base}/api/sessions/${encodeURIComponent(key)}/notes`,
+    token,
+  );
+}
+
 export async function fetchSettings(
   token: string,
   base: string = "",
