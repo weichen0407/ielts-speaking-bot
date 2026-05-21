@@ -20,7 +20,7 @@ triggers:
 
   - id: memory_update
     name: "Memory Update"
-    enabled: true
+    enabled: false
     condition:
       kind: turn_count
       count: 10
@@ -36,6 +36,29 @@ triggers:
         Read: {session_dir}/thread.jsonl
         Write to: {workspace}/memory/MEMORY.md
         Also read: {workspace}/formats/memory_format.md for output format
+
+  - id: memory_cron
+    name: "Memory Cron"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 0 * * *"
+      scope: global
+    target:
+      subagent: memory_cron_subagent
+      prompt_file: subagents/cross_session/memory_cron_subagent.md
+      silent: true
+      model: "gpt-4o-mini"
+      task_template: |
+        Update user memory profile based on sessions modified since last run.
+
+        Modified sessions (JSON):
+        {modified_sessions}
+
+        Read each session's thread.jsonl and extract NEW facts/preferences.
+        Merge into {workspace}/memory/MEMORY.md.
+
+        Only process messages newer than cursor timestamp.
 
   - id: polish_feedback
     name: "Polish Feedback"
@@ -77,7 +100,7 @@ triggers:
 
   - id: progress_organizer
     name: "Progress Organizer"
-    enabled: true
+    enabled: false
     condition:
       kind: file_line_count
       count: 0
@@ -86,7 +109,7 @@ triggers:
       subagent: progress_organizer_subagent
       prompt_file: subagents/cross_session/progress_organizer_subagent.md
       silent: true
-      depends_on: progress_tracker
+      depends_on: null
       model: "gpt-4o-mini"
       task_template: |
         Analyze new entries in {workspace}/progress_bank.jsonl from cursor position onward.
@@ -95,3 +118,23 @@ triggers:
         Read: {workspace}/progress.json (if exists)
         Update: {workspace}/progress.json with refined merged state
         (Entries are processed from the last cursor position; progress_bank.jsonl is NOT deleted)
+
+  - id: daily_consolidator
+    name: "Daily Consolidator"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 */8 * * *"
+      scope: global
+    target:
+      subagent: daily_consolidator_subagent
+      prompt_file: subagents/cross_session/daily_consolidator_subagent.md
+      silent: true
+      model: "gpt-4o-mini"
+      task_template: |
+        Aggregate vocab.md and polisher.md from sessions modified since last run.
+
+        Modified sessions (JSON):
+        {modified_sessions}
+
+        Write to: {workspace}/daily/daily_{date}.md

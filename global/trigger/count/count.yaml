@@ -1,0 +1,64 @@
+version: 1
+triggers:
+  # Global triggers - run regardless of mode
+  - id: memory_cron
+    name: "Memory Cron"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 0 * * *"
+      scope: global
+    target:
+      subagent: memory_cron_subagent
+      prompt_file: subagents/cross_session/memory_cron_subagent.md
+      silent: true
+      model: "gpt-4o-mini"
+      task_template: |
+        Update user memory profile based on sessions modified since last run.
+
+        Modified sessions (JSON):
+        {modified_sessions}
+
+        Read each session's thread.jsonl and extract NEW facts/preferences.
+        Merge into {workspace}/shared/memory/MEMORY.md.
+
+        Only process messages newer than cursor timestamp.
+
+  - id: daily_consolidator
+    name: "Daily Consolidator"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 */8 * * *"
+      scope: global
+    target:
+      subagent: daily_consolidator_subagent
+      prompt_file: subagents/cross_session/daily_consolidator_subagent.md
+      silent: true
+      model: "gpt-4o-mini"
+      task_template: |
+        Aggregate vocab.md and polisher.md from sessions modified since last run.
+
+        Modified sessions (JSON):
+        {modified_sessions}
+
+        Write to: {workspace}/shared/daily/daily_{date}.md
+
+  - id: progress_tracker
+    name: "Progress Tracker"
+    enabled: true
+    condition:
+      kind: file_line_count
+      count: 2
+      path: shared/user_responses.jsonl
+    target:
+      subagent: progress_tracker_subagent
+      prompt_file: subagents/cross_session/progress_tracker_subagent.md
+      silent: true
+      depends_on: null
+      model: "gpt-4o-mini"
+      task_template: |
+        Analyze new user responses since last run and extract meaningful highlights.
+
+        Read: {workspace}/shared/user_responses.jsonl
+        Call: save_progress_entries tool with analyzed entries

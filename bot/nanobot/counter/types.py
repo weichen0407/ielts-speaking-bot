@@ -18,7 +18,7 @@ class CounterCondition:
         threshold: Deprecated alias for count (file_line_count kind).
     """
 
-    kind: Literal["turn_count", "file_line_count"] = "turn_count"
+    kind: Literal["turn_count", "file_line_count", "cron"] = "turn_count"
     count: int = 1
     scope: Literal["session", "global"] = "session"
     path: str = ""

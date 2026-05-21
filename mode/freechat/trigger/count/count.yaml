@@ -1,0 +1,38 @@
+version: 1
+triggers:
+  # Mode-specific triggers - only run when this mode is active
+  - id: vocab_analysis
+    name: "Vocabulary Analysis"
+    enabled: true
+    condition:
+      kind: turn_count
+      count: 2
+      scope: session
+    target:
+      subagent: vocab_subagent
+      prompt_file: subagents/session/vocab_subagent.md
+      silent: true
+      task_template: |
+        Analyze the conversation history and update vocabulary suggestions.
+
+        Session directory: {session_dir}/notes/
+        Read: {session_dir}/thread.jsonl
+        Write to: {session_dir}/notes/vocab.md
+
+  - id: polish_feedback
+    name: "Polish Feedback"
+    enabled: true
+    condition:
+      kind: turn_count
+      count: 3
+      scope: session
+    target:
+      subagent: polisher_subagent
+      prompt_file: subagents/session/polisher_subagent.md
+      silent: true
+      task_template: |
+        Analyze recent user messages and show optimized versions with diff.
+
+        Session directory: {session_dir}/notes/
+        Read: {session_dir}/thread.jsonl
+        Write to: {session_dir}/notes/polisher.md

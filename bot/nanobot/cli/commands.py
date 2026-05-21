@@ -587,7 +587,7 @@ def _migrate_cron_store(config: "Config") -> None:
     from nanobot.config.paths import get_cron_dir
 
     legacy_path = get_cron_dir() / "jobs.json"
-    new_path = config.workspace_path / "cron" / "jobs.json"
+    new_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
     if legacy_path.is_file() and not new_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
@@ -741,7 +741,7 @@ def _run_gateway(
         _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
@@ -821,6 +821,201 @@ def _run_gateway(
                 logger.info("Dream cron job completed")
             except Exception:
                 logger.exception("Dream cron job failed")
+            return None
+
+        # Progress organizer is a cross-session subagent — spawn directly, silently.
+        if job.name == "progress_organizer":
+            try:
+                # Find the progress_organizer trigger in counter_engine
+                trigger = next(
+                    (t for t in agent.counter_engine._triggers if t.id == "progress_organizer"),
+                    None,
+                )
+                if not trigger:
+                    logger.warning("progress_organizer cron job: trigger not found in counter_engine")
+                    return None
+
+                # Load prompt and build task (same logic as _spawn_counter_subagent)
+                prompt = agent.counter_engine.load_prompt(trigger)
+                if not prompt:
+                    logger.warning("progress_organizer cron job: failed to load prompt")
+                    return None
+
+                task = agent.counter_engine.build_task(trigger, session_dir="")
+                prompt = prompt.replace("{{ session_dir }}", "")
+                prompt = prompt.replace("{{ workspace }}", str(agent.workspace))
+
+                # Spawn silently (announce_result=False)
+                task_id = await agent.subagents.spawn(
+                    task=task,
+                    label=trigger.target.subagent,
+                    origin_channel="cli",
+                    origin_chat_id="cron",
+                    session_key=None,
+                    origin_message_id=None,
+                    extra_system_prompt=prompt,
+                    announce_result=False,
+                    model=trigger.target.model,
+                )
+                logger.info(
+                    "progress_organizer cron job spawned subagent [{}], waiting for completion",
+                    task_id,
+                )
+                # Wait for completion before returning
+                await agent.subagents.wait_for_subagent(task_id)
+                logger.info("progress_organizer cron job completed")
+            except Exception:
+                logger.exception("progress_organizer cron job failed")
+            return None
+
+        # Memory cron: update MEMORY.md from sessions modified since last run
+        if job.name == "memory_cron":
+            try:
+                from nanobot.cli.cron_utils import (
+                    read_time_cursor,
+                    write_time_cursor,
+                    find_modified_sessions,
+                )
+
+                cursor_ts = read_time_cursor(agent.workspace, "memory_cron")
+                sessions = find_modified_sessions(
+                    agent.workspace / "sessions", cursor_ts
+                )
+
+                if not sessions:
+                    logger.info(
+                        "memory_cron: no sessions modified since {}",
+                        cursor_ts,
+                    )
+                    write_time_cursor(
+                        agent.workspace,
+                        "memory_cron",
+                        None,  # Uses current time
+                    )
+                    return None
+
+                # Find trigger for prompt loading
+                trigger = next(
+                    (
+                        t
+                        for t in agent.counter_engine._triggers
+                        if t.id == "memory_cron"
+                    ),
+                    None,
+                )
+                if not trigger:
+                    logger.warning("memory_cron: trigger not found")
+                    return None
+
+                prompt = agent.counter_engine.load_prompt(trigger)
+                if not prompt:
+                    logger.warning("memory_cron: failed to load prompt")
+                    return None
+
+                import json as json_mod
+
+                task = agent.counter_engine.build_task(trigger, session_dir="")
+                task = task.replace(
+                    "{{ modified_sessions }}",
+                    json_mod.dumps(sessions, ensure_ascii=False),
+                )
+                task = task.replace("{{ workspace }}", str(agent.workspace))
+
+                task_id = await agent.subagents.spawn(
+                    task=task,
+                    label="memory_cron",
+                    origin_channel="cli",
+                    origin_chat_id="cron",
+                    session_key=None,
+                    origin_message_id=None,
+                    extra_system_prompt=prompt,
+                    announce_result=False,
+                    model=trigger.target.model,
+                )
+                logger.info(
+                    "memory_cron spawned subagent [{}], waiting for completion",
+                    task_id,
+                )
+                await agent.subagents.wait_for_subagent(task_id)
+                write_time_cursor(agent.workspace, "memory_cron", None)
+                logger.info("memory_cron completed")
+            except Exception:
+                logger.exception("memory_cron failed")
+            return None
+
+        # Daily consolidator: aggregate vocab and polish notes into daily.md
+        if job.name == "daily_consolidator":
+            try:
+                from nanobot.cli.cron_utils import (
+                    read_time_cursor,
+                    write_time_cursor,
+                    find_sessions_with_modified_notes,
+                )
+
+                cursor_ts = read_time_cursor(agent.workspace, "daily_consolidator")
+                sessions = find_sessions_with_modified_notes(
+                    agent.workspace / "sessions", cursor_ts
+                )
+
+                if not sessions:
+                    logger.info(
+                        "daily_consolidator: no sessions with modified notes since {}",
+                        cursor_ts,
+                    )
+                    write_time_cursor(
+                        agent.workspace,
+                        "daily_consolidator",
+                        None,
+                    )
+                    return None
+
+                # Find trigger for prompt loading
+                trigger = next(
+                    (
+                        t
+                        for t in agent.counter_engine._triggers
+                        if t.id == "daily_consolidator"
+                    ),
+                    None,
+                )
+                if not trigger:
+                    logger.warning("daily_consolidator: trigger not found")
+                    return None
+
+                prompt = agent.counter_engine.load_prompt(trigger)
+                if not prompt:
+                    logger.warning("daily_consolidator: failed to load prompt")
+                    return None
+
+                import json as json_mod
+
+                task = agent.counter_engine.build_task(trigger, session_dir="")
+                task = task.replace(
+                    "{{ modified_sessions }}",
+                    json_mod.dumps(sessions, ensure_ascii=False),
+                )
+                task = task.replace("{{ workspace }}", str(agent.workspace))
+
+                task_id = await agent.subagents.spawn(
+                    task=task,
+                    label="daily_consolidator",
+                    origin_channel="cli",
+                    origin_chat_id="cron",
+                    session_key=None,
+                    origin_message_id=None,
+                    extra_system_prompt=prompt,
+                    announce_result=False,
+                    model=trigger.target.model,
+                )
+                logger.info(
+                    "daily_consolidator spawned subagent [{}], waiting for completion",
+                    task_id,
+                )
+                await agent.subagents.wait_for_subagent(task_id)
+                write_time_cursor(agent.workspace, "daily_consolidator", None)
+                logger.info("daily_consolidator completed")
+            except Exception:
+                logger.exception("daily_consolidator failed")
             return None
 
         from nanobot.utils.evaluator import evaluate_response
@@ -1133,7 +1328,7 @@ def agent(
         _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:

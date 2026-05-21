@@ -793,6 +793,7 @@ class AgentLoop:
         """Build the initial message list for the LLM turn."""
         session_notes = self.sessions.get_session_notes(session.key)
         session_dir = str(self.sessions._get_session_dir(session.key))
+        mode = session.metadata.get("mode")
         return self.context.build_messages(
             history=history,
             current_message=image_generation_prompt(msg.content, msg.metadata),
@@ -804,6 +805,7 @@ class AgentLoop:
             session_notes=session_notes,
             session_dir=session_dir,
             session_metadata=session.metadata,
+            mode=mode,
         )
 
     async def _dispatch_command_inline(
@@ -1271,6 +1273,7 @@ class AgentLoop:
 
         session_notes = self.sessions.get_session_notes(key)
         session_dir = str(self.sessions._get_session_dir(key))
+        mode = session.metadata.get("mode")
         messages = self.context.build_messages(
             history=history,
             current_message="" if is_subagent else msg.content,
@@ -1282,6 +1285,7 @@ class AgentLoop:
             session_notes=session_notes,
             session_dir=session_dir,
             session_metadata=session.metadata,
+            mode=mode,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(

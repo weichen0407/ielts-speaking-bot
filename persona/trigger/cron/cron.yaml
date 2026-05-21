@@ -1,0 +1,30 @@
+version: 1
+
+cron_jobs:
+  - id: dream
+    name: dream
+    enabled: true
+    schedule:
+      kind: every
+      everyMs: 7200000
+
+  - id: memory_cron
+    name: memory_cron
+    enabled: true
+    schedule:
+      kind: cron
+      expr: "0 0 * * *"
+
+  - id: daily_consolidator
+    name: daily_consolidator
+    enabled: true
+    schedule:
+      kind: cron
+      expr: "0 */8 * * *"
+
+  - id: progress_organizer
+    name: progress_organizer
+    enabled: true
+    schedule:
+      kind: cron
+      expr: "0 0 * * *"

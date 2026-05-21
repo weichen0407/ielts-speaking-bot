@@ -48,6 +48,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "sparkles",
     ),
     BuiltinCommandSpec(
+        "/ielts",
+        "IELTS Mode",
+        "Switch to IELTS speaking practice mode.",
+        "graduation-cap",
+    ),
+    BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",
@@ -221,12 +227,28 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_freechat(ctx: CommandContext) -> OutboundMessage | None:
-    """Select a topic that hasn't been fully explored and start a conversation."""
+    """Select a topic that hasn't been fully explored and start a conversation.
+
+    Sets session mode to "freechat" and updates counter_engine to use mode-specific triggers.
+    """
     import random
     import re
 
     loop = ctx.loop
-    topic_bank_path = loop.workspace / "topic_bank.md"
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+
+    # Set mode to freechat
+    session.metadata["mode"] = "freechat"
+    loop.counter_engine.set_mode("freechat")
+    loop.sessions.save(session)
+
+    # Get mode-specific topic_bank path
+    mode = session.metadata.get("mode", "freechat")
+    topic_bank_path = loop.workspace / "mode" / mode / "topic_bank.md"
+
+    if not topic_bank_path.exists():
+        # Fall back to workspace root
+        topic_bank_path = loop.workspace / "topic_bank.md"
 
     if not topic_bank_path.exists():
         return OutboundMessage(
@@ -392,6 +414,27 @@ Remember: This is IELTS speaking practice, so help me express myself more fluent
 
     ctx.msg.content = intro_prompt
     return None
+
+
+async def cmd_ielts(ctx: CommandContext) -> OutboundMessage | None:
+    """Switch to IELTS speaking practice mode.
+
+    Sets session mode to "ielts" and updates counter_engine to use mode-specific triggers.
+    """
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+
+    # Set mode to ielts
+    session.metadata["mode"] = "ielts"
+    loop.counter_engine.set_mode("ielts")
+    loop.sessions.save(session)
+
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="Switched to IELTS speaking practice mode. Your responses will be analyzed for vocabulary, grammar, and fluency.",
+        metadata=dict(ctx.msg.metadata or {}),
+    )
 
 
 def _format_preset_names(names: list[str]) -> str:
@@ -815,6 +858,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/freechat", cmd_freechat)
+    router.exact("/ielts", cmd_ielts)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

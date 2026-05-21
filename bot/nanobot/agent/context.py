@@ -31,8 +31,19 @@ class ContextBuilder:
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
         self.timezone = timezone
+        self._mode: str | None = None
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+
+    def set_mode(self, mode: str | None) -> None:
+        """Set the current mode for context building."""
+        self._mode = mode
+
+    def _get_mode_workspace(self) -> Path:
+        """Get the workspace path for the current mode."""
+        if self._mode:
+            return self.workspace / "mode" / self._mode
+        return self.workspace
 
     def build_system_prompt(
         self,
@@ -40,11 +51,15 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
         session_notes: dict[str, str] | None = None,
+        mode: str | None = None,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        If mode is provided, bootstrap files are loaded from mode/{mode}/ first.
+        """
         parts = [self._get_identity(channel=channel)]
 
-        bootstrap = self._load_bootstrap_files()
+        bootstrap = self._load_bootstrap_files(mode=mode)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -128,14 +143,29 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
-    def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+    def _load_bootstrap_files(self, mode: str | None = None) -> str:
+        """Load all bootstrap files from workspace.
+
+        If mode is provided, loads from mode/{mode}/ first, falls back to workspace root.
+        """
+        mode = mode or self._mode
         parts = []
 
+        # Determine base path: mode/{mode}/ or workspace root
+        if mode:
+            mode_ws = self.workspace / "mode" / mode
+        else:
+            mode_ws = self.workspace
+
         for filename in self.BOOTSTRAP_FILES:
-            file_path = self.workspace / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
+            # Try mode-specific location first
+            mode_path = mode_ws / filename
+            if mode_path.exists():
+                content = mode_path.read_text(encoding="utf-8")
+                parts.append(f"## {filename}\n\n{content}")
+            # Fall back to workspace root
+            elif (self.workspace / filename).exists():
+                content = (self.workspace / filename).read_text(encoding="utf-8")
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
@@ -163,6 +193,7 @@ class ContextBuilder:
         session_notes: dict[str, str] | None = None,
         session_metadata: Mapping[str, Any] | None = None,
         session_dir: str | None = None,
+        mode: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         extra = goal_state_runtime_lines(session_metadata)
@@ -187,7 +218,7 @@ class ContextBuilder:
         else:
             merged = user_content + [{"type": "text", "text": runtime_ctx}]
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary, session_notes=session_notes)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary, session_notes=session_notes, mode=mode)},
             *history,
         ]
         if messages[-1].get("role") == current_role:

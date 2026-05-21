@@ -1,8 +1,269 @@
 # Update Log
 
-## 2026-05-21 - Subagent Reorganization + Chained Triggers + Engineering Optimizations
+## 2026-05-21 - Mode Architecture
 
-This update reorganizes subagents into `session/` and `cross_session/` directories, implements trigger chaining (progress_organizer fires after progress_tracker), adds per-subagent model selection, and applies engineering optimizations to reduce token usage.
+This update implements a modular mode architecture that decouples freechat from the core and enables adding new modes (ielts, etc.). Global functionality runs regardless of mode, while mode-specific features only run when that mode is active.
+
+---
+
+## 1. New Directory Structure
+
+### `global/` — Global Shared (Always Runs)
+```
+global/
+├── trigger/
+│   ├── count/count.yaml    # Global triggers (memory_cron, daily_consolidator, progress_tracker)
+│   └── cron/cron.yaml
+└── (triggers only, no subagents)
+```
+
+### `mode/` — Mode Configurations
+```
+mode/
+├── freechat/
+│   ├── context/           # Bootstrap files (AGENTS.md, SOUL.md, etc.)
+│   │   ├── AGENTS.md
+│   │   ├── SOUL.md
+│   │   ├── USER.md
+│   │   ├── HEARTBEAT.md
+│   │   ├── TOOLS.md
+│   │   └── topic_bank.md
+│   └── trigger/
+│       └── count/count.yaml  # Mode-specific triggers (vocab, polish)
+└── ielts/
+    ├── context/
+    │   ├── AGENTS.md
+    │   ├── SOUL.md
+    │   ├── USER.md
+    │   └── HEARTBEAT.md
+    └── trigger/
+        └── count/count.yaml  # Mode-specific triggers (vocab, polish, ielts_feedback)
+```
+
+### `subagents/` — Centralized Subagent Prompts
+```
+subagents/
+├── session/               # Mode-specific subagents
+│   ├── vocab_subagent.md
+│   ├── polisher_subagent.md
+│   └── ielts_feedback_subagent.md
+└── cross_session/         # Global subagents
+    ├── memory_cron_subagent.md
+    ├── daily_consolidator_subagent.md
+    └── progress_tracker_subagent.md
+```
+
+### `shared/` — Shared Data (Mode-Independent)
+```
+shared/
+├── memory/MEMORY.md
+├── daily/daily_*.md
+├── progress.json
+├── progress_bank.jsonl
+├── user_responses.jsonl
+└── .cursor_*.json
+```
+
+---
+
+## 2. CounterEngine — Global + Mode Triggers
+
+**`bot/nanobot/counter/engine.py`**
+
+- `_load_global_config()` — Loads global triggers from `global/trigger/count/count.yaml` (always active)
+- `_load_config()` — Loads mode-specific triggers from `mode/{mode}/trigger/count/count.yaml` and merges with global
+- `set_mode(mode)` — Switches mode and reloads config
+- `load_prompt()` — Searches `subagents/{prompt_file}` first, then mode-specific paths
+
+### Global Triggers (always run)
+| ID | Condition | Subagent |
+|----|-----------|----------|
+| memory_cron | cron: 0 0 * * * | memory_cron_subagent |
+| daily_consolidator | cron: 0 */8 * * * | daily_consolidator_subagent |
+| progress_tracker | file_line_count: 2 | progress_tracker_subagent |
+
+### Mode Triggers (only when mode active)
+**freechat:** vocab_analysis (turn_count: 2), polish_feedback (turn_count: 3)
+**ielts:** vocab_analysis (turn_count: 2), polish_feedback (turn_count: 3), ielts_feedback (turn_count: 5)
+
+---
+
+## 3. ContextBuilder — Mode-Aware Bootstrap Loading
+
+**`bot/nanobot/agent/context.py`**
+
+- `_mode: str | None` — Stored mode for context building
+- `_load_bootstrap_files(mode)` — Loads AGENTS.md, SOUL.md, USER.md, TOOLS.md from `mode/{mode}/context/`
+- Falls back to workspace root if mode context doesn't exist
+
+---
+
+## 4. AgentLoop — Mode Propagation
+
+**`bot/nanobot/agent/loop.py`**
+
+- `_state_build()` — Reads `session.metadata["mode"]` and passes to ContextBuilder
+- Sets `ctx.initial_messages` with mode-aware context
+
+---
+
+## 5. Command Updates
+
+**`bot/nanobot/command/builtin.py`**
+
+- `cmd_freechat()` — Sets `session.metadata["mode"] = "freechat"`, updates counter_engine, selects topic
+- `cmd_ielts()` — Sets `session.metadata["mode"] = "ielts"`, updates counter_engine
+
+**`bot/nanobot/cli/commands.py`**
+
+- `on_cron_job()` — Enhanced to handle global cron triggers (memory_cron, daily_consolidator, progress_organizer)
+
+---
+
+## 6. Removed Old Triggers Location
+
+- `persona/counter/triggers.yaml` — Deleted (replaced by global/trigger/count/count.yaml + mode/*/trigger/count/count.yaml)
+- `persona/cron/jobs.json` — Deleted (now in global/trigger/cron/cron.yaml)
+- `global/subagents/` — Deleted (all subagents centralized in `subagents/`)
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/agent/context.py | +mode-aware bootstrap loading |
+| bot/nanobot/agent/loop.py | +mode propagation to context |
+| bot/nanobot/command/builtin.py | +cmd_freechat, +cmd_ielts |
+| bot/nanobot/cli/commands.py | +cron handlers for global triggers |
+| bot/nanobot/counter/engine.py | +global/mode trigger merge, +set_mode() |
+| global/trigger/count/count.yaml | new: global triggers |
+| global/trigger/cron/cron.yaml | new: global cron jobs |
+| mode/freechat/context/ | new: freechat bootstrap files |
+| mode/freechat/trigger/count/count.yaml | new: freechat triggers |
+| mode/ielts/context/ | new: ielts bootstrap files |
+| mode/ielts/trigger/count/count.yaml | new: ielts triggers |
+| subagents/session/ | new: vocab, polisher, ielts_feedback subagents |
+| subagents/cross_session/ | new: memory, daily, progress subagents |
+| shared/ | new: shared data directory |
+| architecture.md | updated: full mode architecture docs |
+
+## 2026-05-21 - Memory Cron + Daily Consolidator Cron
+
+This update converts memory subagent from turn_count trigger to cron-based (24h), adds daily_consolidator cron that aggregates vocab.md and polisher.md into daily.md, and implements time-based cursor system for both.
+
+---
+
+## 1. Time-Based Cursor System
+
+### New File: `bot/nanobot/cli/cron_utils.py`
+
+Cursor utilities for cron-based subagents:
+- `read_time_cursor(workspace, trigger_id)` — reads `.cursor_{trigger_id}.json`
+- `write_time_cursor(workspace, trigger_id, timestamp)` — writes timestamp to cursor file
+- `find_modified_sessions(sessions_dir, since_timestamp)` — finds sessions with thread.jsonl modified since cursor
+- `find_sessions_with_modified_notes(sessions_dir, since_timestamp)` — finds sessions with vocab.md/polisher.md modified since cursor
+
+### Cursor File Format
+
+```json
+{
+  "last_processed_timestamp": "2026-05-21T00:00:00Z"
+}
+```
+
+**Two separate cursors**:
+- `.cursor_memory_cron.json` — tracks thread.jsonl modification
+- `.cursor_daily_consolidator.json` — tracks notes modification
+
+---
+
+## 2. Memory Cron Subagent
+
+### New File: `persona/subagents/cross_session/memory_cron_subagent.md`
+
+- Reads sessions modified since last cron run
+- Extracts NEW user facts/preferences from thread.jsonl
+- Updates `memory/MEMORY.md` incrementally
+- Engineering layer filters by timestamp, LLM only does semantic analysis
+
+### Cron Schedule
+Configured in `triggers.yaml` as `kind: cron, count: "0 0 * * *"` (midnight daily)
+
+### Disabled Old Trigger
+`memory_update` (turn_count based) is now `enabled: false`
+
+---
+
+## 3. Daily Consolidator Subagent
+
+### New Files
+
+**`persona/subagents/cross_session/daily_consolidator_subagent.md`**
+- Aggregates vocab.md and polisher.md from all sessions modified since last run
+- Writes to `daily/daily_{date}.md` with JSON structure
+
+**`persona/formats/daily_format.md`**
+- JSON structure specification for daily.md
+
+### Daily.md Structure
+
+```json
+{
+  "date": "2026-05-21",
+  "generated_at": "2026-05-21T23:59:59Z",
+  "vocabulary": {
+    "new_words": [...],
+    "topic_distribution": {"Family": 5}
+  },
+  "grammar_patterns": {
+    "issues_observed": [...]
+  },
+  "polish_suggestions": [...],
+  "stats": {
+    "total_sessions": 3,
+    "new_vocabulary_items": 12
+  }
+}
+```
+
+### Cron Schedule
+Configured in `triggers.yaml` as `kind: cron, count: "0 */8 * * *"` (every 8 hours)
+
+---
+
+## 4. CounterCondition — Added `cron` Kind
+
+**`bot/nanobot/counter/types.py`**
+- Added `cron` to `kind` literal: `Literal["turn_count", "file_line_count", "cron"]`
+- Cron triggers use `count` field for cron expression (e.g., `"0 0 * * *"`)
+
+---
+
+## 5. on_cron_job Handler Extensions
+
+**`bot/nanobot/cli/commands.py`**
+- Added `memory_cron` handler: reads cursor, finds modified sessions, spawns subagent, updates cursor
+- Added `daily_consolidator` handler: reads cursor, finds sessions with modified notes, spawns subagent, updates cursor
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| bot/nanobot/counter/types.py | +cron to condition kind |
+| bot/nanobot/cli/cron_utils.py | new: cursor utils, session discovery |
+| bot/nanobot/cli/commands.py | +memory_cron, +daily_consolidator handlers |
+| persona/subagents/cross_session/memory_cron_subagent.md | new |
+| persona/subagents/cross_session/daily_consolidator_subagent.md | new |
+| persona/formats/daily_format.md | new: daily.md JSON structure |
+| persona/counter/triggers.yaml | +memory_cron, +daily_consolidator, disabled memory_update |
+| persona/cron/jobs.json | +memory_cron, +daily_consolidator cron jobs |
+
+---
+
+## 2026-05-21 - Subagent Reorganization + Cron-Based Progress Organizer + Engineering Optimizations
 
 ---
 
@@ -65,24 +326,27 @@ return status
 
 ---
 
-## 4. Chained Trigger Execution
+## 4. Cron-Based Progress Organizer
 
-### Same-Turn Trigger Chaining
+### Change from depends_on to Cron
 
-**bot/nanobot/agent/loop.py**
-- `_spawn_counter_subagent()` passes `model=trigger.target.model` to `spawn()`
-- Uses `_schedule_background(_chain_dependent_triggers(...))` for non-blocking chain execution
-- `_chain_dependent_triggers()` awaits `subagent_manager.wait_for_subagent(task_id)` then spawns dependent triggers
+**`progress_organizer`** — now fires via cron at midnight daily instead of via depends_on chain
+- Cron schedule: `0 0 * * *` (midnight every day)
+- Disabled in triggers.yaml (still kept for prompt/task reference)
+- Spawned directly by `on_cron_job` handler in commands.py
 
-### New Triggers
+### Cron Service Integration
 
-**`progress_tracker`** — fires when `user_responses.jsonl` has ≥2 new lines
-- Uses `gpt-4o-mini` model
-- Analyzes user responses, extracts language highlights
+**bot/nanobot/cli/commands.py**
+- Added special handling in `on_cron_job` for `job.name == "progress_organizer"`
+- Finds trigger in `agent.counter_engine._triggers`
+- Loads prompt via `counter_engine.load_prompt()`
+- Builds task via `counter_engine.build_task()` with empty session_dir
+- Spawns via `agent.subagents.spawn()` with `announce_result=False`
+- Awaits completion via `agent.subagents.wait_for_subagent()`
 
-**`progress_organizer`** — fires only via `depends_on: progress_tracker` (never on its own)
-- Uses `gpt-4o-mini` model
-- Refines and merges highlights from `progress_bank.jsonl` into `progress.json`
+**persona/cron/jobs.json**
+- Added `progress_organizer` cron job with `kind: "cron"` and `expr: "0 0 * * *"`
 
 ---
 
@@ -166,7 +430,9 @@ progress_bank.jsonl
 | bot/nanobot/counter/engine.py | trigger chaining support |
 | bot/nanobot/agent/tools/progress_bank.py | +contents param, new entry format with content+meta |
 | bot/nanobot/agent/tools/progress_organizer.py | +contents param, preserve content+meta |
-| persona/counter/triggers.yaml | new paths, +progress_tracker, +progress_organizer |
+| bot/nanobot/cli/commands.py | +progress_organizer cron handler in on_cron_job |
+| persona/counter/triggers.yaml | new paths, +progress_tracker, progress_organizer disabled (cron-based now) |
+| persona/cron/jobs.json | +progress_organizer cron job at midnight daily |
 | persona/subagents/session/ | new dir — vocab, polisher, memory subagents |
 | persona/subagents/cross_session/ | new dir — progress_tracker, progress_organizer subagents |
 
