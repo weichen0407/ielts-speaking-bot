@@ -1,0 +1,363 @@
+{
+  "metadata": {
+    "description": "IELTS Speaking Topic Bank Index",
+    "source": "https://ieltsliz.com/ielts-speaking-topics-2026/",
+    "last_updated": "2026-05-21"
+  },
+  "categories": {
+    "culture": ["02_art", "04_books"],
+    "environment": ["05_buildings", "20_nature", "26_weather"],
+    "health": ["13_health"],
+    "learning": ["10_education"],
+    "lifestyle": ["07_clothes", "11_food", "14_hobbies"],
+    "media": ["17_media"],
+    "personal": ["06_challenges", "08_confidence", "12_happiness", "23_success"],
+    "cognitive": ["16_intelligence", "18_memory", "21_numbers"],
+    "society": ["09_crime", "22_politeness"],
+    "technology": ["03_apps"],
+    "travel": ["15_holidays", "25_travel"]
+  },
+  "depth_levels": {
+    "1": "Simple preference or experience question",
+    "2": "Adds reason, detail, or frequency",
+    "3": "Opinion, comparison, or hypothetical",
+    "4": "Analysis, reflection, or impact",
+    "5": "Abstract thinking, values, or life philosophy"
+  },
+  "selection_strategy": {
+    "description": "When /freechat is triggered, select topics in this order:",
+    "steps": [
+      "1. Read this index to find topics with status not_explored or in_progress",
+      "2. Select the topic with lowest ID that hasn't been explored",
+      "3. Start with Part 1 at depth level 1",
+      "4. Progress naturally through Part 2 (cue card) to Part 3 (depth 3-4)",
+      "5. Update status to completed when all depths have been explored"
+    ]
+  },
+  "topics": {
+    "01_animals": {
+      "name": "Animals",
+      "category": "environment",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 4, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "02_art": {
+      "name": "Art",
+      "category": "culture",
+      "parts": {
+        "part1": {"question_count": 7, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 8, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "03_apps": {
+      "name": "Apps & Technology",
+      "category": "technology",
+      "parts": {
+        "part1": {"question_count": 5, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "04_books": {
+      "name": "Books & Reading",
+      "category": "culture",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "05_buildings": {
+      "name": "Buildings & Architecture",
+      "category": "environment",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "06_challenges": {
+      "name": "Challenges & Adversity",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 5, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "07_clothes": {
+      "name": "Clothes & Fashion",
+      "category": "lifestyle",
+      "parts": {
+        "part1": {"question_count": 8, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "08_confidence": {
+      "name": "Confidence & Self-Esteem",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "09_crime": {
+      "name": "Crime & Law",
+      "category": "society",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "10_education": {
+      "name": "Education & Learning",
+      "category": "learning",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "11_food": {
+      "name": "Food & Eating",
+      "category": "lifestyle",
+      "parts": {
+        "part1": {"question_count": 7, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "12_happiness": {
+      "name": "Happiness & Well-being",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "13_health": {
+      "name": "Health & Fitness",
+      "category": "health",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 8, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "14_hobbies": {
+      "name": "Hobbies & Interests",
+      "category": "lifestyle",
+      "parts": {
+        "part1": {"question_count": 8, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "15_holidays": {
+      "name": "Holidays & Travel",
+      "category": "travel",
+      "parts": {
+        "part1": {"question_count": 5, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "16_intelligence": {
+      "name": "Intelligence & Thinking",
+      "category": "cognitive",
+      "parts": {
+        "part1": {"question_count": 0, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "17_media": {
+      "name": "Media: News, Films & Social Media",
+      "category": "media",
+      "parts": {
+        "part1": {"question_count": 7, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "18_memory": {
+      "name": "Memory & Remembering",
+      "category": "cognitive",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "19_names": {
+      "name": "Names & Identity",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 0, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "20_nature": {
+      "name": "Nature & Environment",
+      "category": "environment",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "21_numbers": {
+      "name": "Numbers & Mathematics",
+      "category": "cognitive",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 0, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "22_politeness": {
+      "name": "Politeness & Manners",
+      "category": "society",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "23_success": {
+      "name": "Success & Achievement",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 0, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "24_sugar": {
+      "name": "Sugar & Snacks",
+      "category": "lifestyle",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 4, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "25_travel": {
+      "name": "Travel Experience",
+      "category": "travel",
+      "parts": {
+        "part1": {"question_count": 7, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 7, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "26_weather": {
+      "name": "Weather & Seasons",
+      "category": "environment",
+      "parts": {
+        "part1": {"question_count": 7, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    },
+    "27_work": {
+      "name": "Work & Careers",
+      "category": "personal",
+      "parts": {
+        "part1": {"question_count": 6, "asked": []},
+        "part2": {"cue_card_asked": false},
+        "part3": {"question_count": 6, "asked": []}
+      },
+      "status": "not_explored",
+      "max_depth": 0,
+      "last_discussed": null
+    }
+  }
+}
