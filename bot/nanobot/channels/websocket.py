@@ -690,6 +690,23 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_session_notes(request, m.group(1))
 
+        # Benative endpoints
+        m = re.match(r"^/api/sessions/([^/]+)/benative$", got)
+        if m:
+            return self._handle_session_benative(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/benative/article$", got)
+        if m:
+            return self._handle_session_benative_article(request, m.group(1))
+
+        m = re.match(r"^/api/sessions/([^/]+)/benative/responses$", got)
+        if m:
+            return self._handle_session_benative_responses(request, m.group(1))
+
+        # /api/benative/articles - list available articles
+        if got == "/api/benative/articles":
+            return self._handle_benative_articles(request)
+
         # Signed media fetch: ``<sig>`` is an HMAC over ``<payload>``; the
         # payload decodes to a path inside :func:`get_media_dir`. See
         # :meth:`_sign_media_path` for the inverse direction used to build
@@ -1256,6 +1273,138 @@ class WebSocketChannel(BaseChannel):
         notes = self._session_manager.get_session_notes(decoded_key)
         # Return empty if no notes found (session might not exist or have no notes yet)
         return _http_json_response(notes)
+
+    def _handle_benative_articles(self, request: WsRequest) -> Response:
+        """List available benative articles."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        articles_dir = self._session_manager.sessions_dir.parent / "benative" / "articles"
+        article_list = []
+
+        if articles_dir.exists():
+            for article_file in articles_dir.glob("*.json"):
+                try:
+                    import json
+                    article_data = json.loads(article_file.read_text(encoding="utf-8"))
+                    pairs_file = articles_dir.parent / "pairs" / f"{article_file.stem}.jsonl"
+                    sentence_count = 0
+                    if pairs_file.exists():
+                        sentence_count = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
+                    article_list.append({
+                        "id": article_data.get("id", article_file.stem),
+                        "title": article_data.get("title", "Untitled"),
+                        "source": article_data.get("source", "Unknown"),
+                        "topic": article_data.get("topic", "general"),
+                        "sentence_count": sentence_count,
+                    })
+                except Exception:
+                    continue
+
+        return _http_json_response({"articles": article_list})
+
+    def _handle_session_benative(self, request: WsRequest, key: str) -> Response:
+        """Get benative progress for a session."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not self._is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+
+        session = self._session_manager.sessions.get(decoded_key)
+        if not session:
+            return _http_json_response({})
+
+        session_dir = self._session_manager._get_session_dir(decoded_key)
+        progress_file = session_dir / "notes" / "benative_progress.json"
+
+        progress = {}
+        if progress_file.exists():
+            import json
+            progress = json.loads(progress_file.read_text(encoding="utf-8"))
+
+        return _http_json_response(progress)
+
+    def _handle_session_benative_article(self, request: WsRequest, key: str) -> Response:
+        """Get current benative article content for a session."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not self._is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+
+        session_dir = self._session_manager._get_session_dir(decoded_key)
+        progress_file = session_dir / "notes" / "benative_progress.json"
+
+        if not progress_file.exists():
+            return _http_json_response({"error": "No article selected"})
+
+        import json
+        progress = json.loads(progress_file.read_text(encoding="utf-8"))
+        article_id = progress.get("article_id")
+
+        if not article_id:
+            return _http_json_response({"error": "No article selected"})
+
+        articles_dir = self._session_manager.sessions_dir.parent / "benative" / "articles"
+        article_file = articles_dir / f"{article_id}.json"
+        pairs_file = self._session_manager.sessions_dir.parent / "benative" / "pairs" / f"{article_id}.jsonl"
+
+        if not article_file.exists():
+            return _http_json_response({"error": "Article not found"})
+
+        article_data = json.loads(article_file.read_text(encoding="utf-8"))
+
+        pairs = []
+        if pairs_file.exists():
+            for line in pairs_file.read_text(encoding="utf-8").strip().split("\n"):
+                if line.strip():
+                    pairs.append(json.loads(line))
+
+        return _http_json_response({
+            "article": article_data,
+            "pairs": pairs,
+            "current_sentence": progress.get("current_sentence", 0),
+            "total_sentences": len(pairs),
+        })
+
+    def _handle_session_benative_responses(self, request: WsRequest, key: str) -> Response:
+        """Get benative user responses for a session."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not self._is_websocket_channel_session_key(decoded_key):
+            return _http_error(404, "session not found")
+
+        session = self._session_manager.sessions.get(decoded_key)
+        if not session:
+            return _http_json_response({"responses": []})
+
+        session_uuid = session.session_uuid
+        responses_file = self._session_manager.sessions_dir.parent / "benative" / "sessions" / session_uuid / "responses.jsonl"
+
+        responses = []
+        if responses_file.exists():
+            import json
+            for line in responses_file.read_text(encoding="utf-8").strip().split("\n"):
+                if line.strip():
+                    responses.append(json.loads(line))
+
+        return _http_json_response({"responses": responses})
 
     def _serve_static(self, request_path: str) -> Response | None:
         """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""

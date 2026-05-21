@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
@@ -41,6 +41,7 @@ interface ThreadShellProps {
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
   hideSidebarToggleOnDesktop?: boolean;
+  benativeIndicator?: React.ReactNode;
 }
 
 function toModelBadgeLabel(modelName: string | null): string | null {
@@ -85,6 +86,7 @@ export function ThreadShell({
   theme = "light",
   onToggleTheme = () => {},
   hideSidebarToggleOnDesktop = false,
+  benativeIndicator,
 }: ThreadShellProps) {
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
@@ -385,6 +387,7 @@ export function ThreadShell({
         onOpenNotes={onOpenNotes}
         hideSidebarToggleOnDesktop={hideSidebarToggleOnDesktop}
         minimal={!session && !loading}
+        benativeIndicator={benativeIndicator}
       />
       <ThreadViewport
         messages={displayMessages}

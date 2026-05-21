@@ -290,7 +290,7 @@ class AgentLoop:
             f"Session directory: {session_dir}\n"
             f"Read: {session_dir}/thread.jsonl\n"
             f"Write to: {workspace_str}/memory/MEMORY.md\n\n"
-            f"Also read: {workspace_str}/formats/memory_format.md for output format"
+            f"Also read: {workspace_str}/global/formats/memory_format.md for output format"
         )
 
         # Substitute placeholders

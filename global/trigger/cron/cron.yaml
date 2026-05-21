@@ -20,3 +20,17 @@ cron_jobs:
     schedule:
       kind: cron
       expr: "0 */8 * * *"
+
+  - id: benative_article_fetcher
+    name: benative_article_fetcher
+    enabled: true
+    schedule:
+      kind: cron
+      expr: "0 12 * * *"
+
+  - id: benative_translator
+    name: benative_translator
+    enabled: true
+    schedule:
+      kind: cron
+      expr: "0 13 * * *"

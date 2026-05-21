@@ -331,15 +331,28 @@ ielts-speaking-bot/
 │       └── trigger/
 │           └── count/count.yaml     # Mode-specific triggers
 │
+│   └── benative/                   # Be Native mode
+│       ├── context/                 # Bootstrap 文件
+│       │   ├── AGENTS.md          # Benative 指令
+│       │   ├── SOUL.md            # Native speaker coach
+│       │   ├── USER.md
+│       │   ├── HEARTBEAT.md
+│       │   └── TOOLS.md
+│       └── trigger/
+│           └── count/count.yaml     # Mode-specific triggers (benative_review)
+│
 ├── subagents/                      # 所有 subagent prompts（集中管理）
 │   ├── session/
 │   │   ├── vocab_subagent.md
 │   │   ├── polisher_subagent.md
-│   │   └── ielts_feedback_subagent.md
+│   │   ├── ielts_feedback_subagent.md
+│   │   └── benative_review_subagent.md
 │   └── cross_session/
 │       ├── memory_cron_subagent.md
 │       ├── daily_consolidator_subagent.md
-│       └── progress_tracker_subagent.md
+│       ├── progress_tracker_subagent.md
+│       ├── benative_article_fetcher_subagent.md
+│       └── benative_translator_subagent.md
 │
 └── shared/                        # 共享数据
     ├── memory/MEMORY.md
@@ -347,6 +360,14 @@ ielts-speaking-bot/
     ├── progress.json
     ├── progress_bank.jsonl
     ├── user_responses.jsonl
+    ├── benative/                   # Benative 模式数据
+    │   ├── articles/               # 原始文章
+    │   ├── pairs/                  # 翻译对 (英文+中文)
+    │   └── sessions/{uuid}/         # 用户回答
+    │       └── responses.jsonl
+    ├── freechat/                   # Freechat 模式数据
+    │   └── sessions/{uuid}/        # 用户回答
+    │       └── responses.jsonl
     └── .cursor_*.json
 ```
 
@@ -500,6 +521,20 @@ load_prompt(trigger):
 | **无 mode** (默认) | global: memory_cron, daily_consolidator, progress_tracker |
 | **freechat** | global + vocab, polish |
 | **ielts** | global + vocab, polish, ielts_feedback |
+| **benative** | global + benative_review |
+
+**Global Triggers (所有 mode 都运行)**:
+- `memory_cron`: cron (0 0 * * *) - 更新用户记忆
+- `daily_consolidator`: cron (0 */8 * * *) - 聚合每日笔记
+- `progress_tracker`: file_line_count (2) - 跟踪用户表达
+- `benative_article_fetcher`: cron (0 12 * * *) - 爬取新闻文章
+- `benative_translator`: cron (0 13 * * *) - 翻译文章为中文
+
+**Mode-specific Triggers**:
+- `vocab_analysis`: turn_count (2) - 词汇分析
+- `polish_feedback`: turn_count (3) - 语法润色
+- `ielts_feedback`: turn_count (5) - IELTS 反馈
+- `benative_review`: turn_count (10) - Benative 回答评测
 
 ---
 

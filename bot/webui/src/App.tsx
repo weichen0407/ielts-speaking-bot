@@ -6,6 +6,9 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SessionNotesSheet } from "@/components/SessionNotesSheet";
+import { ArticleSelectDialog } from "@/components/ArticleSelectDialog";
+import { BenativeProgressIndicator } from "@/components/BenativeProgressIndicator";
+import { BenativeNotesSheet } from "@/components/BenativeNotesSheet";
 
 import { useSessions } from "@/hooks/useSessions";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
@@ -308,6 +311,12 @@ function Shell({
     sessionKey: string | null;
     title: string;
   }>({ open: false, sessionKey: null, title: "" });
+  const [benativeArticleSelectOpen, setBenativeArticleSelectOpen] = useState(false);
+  const [benativeNotesSheetState, setBenativeNotesSheetState] = useState<{
+    open: boolean;
+    sessionKey: string | null;
+    title: string;
+  }>({ open: false, sessionKey: null, title: "" });
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -334,12 +343,33 @@ function Shell({
     }
   }, [activeKey, notesSheetState.open, notesSheetState.sessionKey]);
 
+  // Close benative sheets when switching sessions
+  useEffect(() => {
+    if (benativeNotesSheetState.open && benativeNotesSheetState.sessionKey !== activeKey) {
+      setBenativeNotesSheetState((s) => ({ ...s, open: false }));
+    }
+  }, [activeKey, benativeNotesSheetState.open, benativeNotesSheetState.sessionKey]);
 
+  useEffect(() => {
+    if (benativeArticleSelectOpen && activeKey === null) {
+      setBenativeArticleSelectOpen(false);
+    }
+  }, [activeKey, benativeArticleSelectOpen]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey]);
+
+  const handleBenativeArticleSelect = useCallback(
+    (articleId: string) => {
+      if (activeSession?.chatId) {
+        client.sendMessage(activeSession.chatId, `/benative select ${articleId}`);
+      }
+      setBenativeArticleSelectOpen(false);
+    },
+    [activeSession, client],
+  );
 
   const closeDesktopSidebar = useCallback(() => {
     setDesktopSidebarOpen(false);
@@ -601,6 +631,9 @@ function Shell({
               theme={theme}
               onToggleTheme={toggle}
               hideSidebarToggleOnDesktop={desktopSidebarOpen}
+              benativeIndicator={
+                <BenativeProgressIndicator sessionKey={activeSession?.key ?? null} />
+              }
             />
           </div>
           {view === "settings" && (
@@ -664,6 +697,23 @@ function Shell({
             ))}
           </div>
         ) : null}
+
+        {/* Benative Article Selection Dialog */}
+        <ArticleSelectDialog
+          open={benativeArticleSelectOpen}
+          onOpenChange={setBenativeArticleSelectOpen}
+          onSelect={handleBenativeArticleSelect}
+        />
+
+        {/* Benative Notes Sheet */}
+        <BenativeNotesSheet
+          open={benativeNotesSheetState.open}
+          onOpenChange={(open) =>
+            setBenativeNotesSheetState((s) => ({ ...s, open }))
+          }
+          sessionKey={benativeNotesSheetState.sessionKey}
+          sessionTitle={benativeNotesSheetState.title}
+        />
       </div>
     </ThemeProvider>
   );

@@ -10,6 +10,10 @@ persona/user_responses.jsonl
 persona/progress_bank.jsonl
 persona/progress.json
 persona/.cursor_*.json
+persona/memory/*.jsonl
+
+# Shared runtime data
+shared/.cursor_*.json
 
 # WebUI build output
 bot/webui/dist/

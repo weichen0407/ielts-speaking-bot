@@ -11,7 +11,6 @@ triggers:
     target:
       subagent: vocab_subagent
       prompt_file: subagents/session/vocab_subagent.md
-      silent: true
       task_template: |
         Analyze the conversation history and update vocabulary suggestions.
 
@@ -29,7 +28,6 @@ triggers:
     target:
       subagent: polisher_subagent
       prompt_file: subagents/session/polisher_subagent.md
-      silent: true
       task_template: |
         Analyze recent user messages and show optimized versions with diff.
 

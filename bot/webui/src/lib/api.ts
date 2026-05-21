@@ -111,6 +111,90 @@ export async function fetchSessionNotes(
   );
 }
 
+// Benative API types
+export interface BenativeArticle {
+  id: string;
+  title: string;
+  source: string;
+  topic: string;
+  sentence_count: number;
+}
+
+export interface BenativeProgress {
+  article_id?: string;
+  current_sentence?: number;
+  total_sentences?: number;
+}
+
+export interface BenativeArticleWithPairs {
+  article: {
+    id: string;
+    title: string;
+    source: string;
+    topic: string;
+    content: string;
+  };
+  pairs: Array<{
+    en: string;
+    zh: string;
+    sentence_index: number;
+  }>;
+  current_sentence: number;
+  total_sentences: number;
+}
+
+export interface BenativeResponse {
+  session_uuid: string;
+  round: number;
+  article_id: string;
+  zh: string;
+  user_en: string;
+  timestamp: string;
+}
+
+export async function fetchBenativeArticles(
+  token: string,
+  base: string = "",
+): Promise<{ articles: BenativeArticle[] }> {
+  return request<{ articles: BenativeArticle[] }>(
+    `${base}/api/benative/articles`,
+    token,
+  );
+}
+
+export async function fetchBenativeProgress(
+  token: string,
+  sessionKey: string,
+  base: string = "",
+): Promise<BenativeProgress> {
+  return request<BenativeProgress>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/benative`,
+    token,
+  );
+}
+
+export async function fetchBenativeArticle(
+  token: string,
+  sessionKey: string,
+  base: string = "",
+): Promise<BenativeArticleWithPairs> {
+  return request<BenativeArticleWithPairs>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/benative/article`,
+    token,
+  );
+}
+
+export async function fetchBenativeResponses(
+  token: string,
+  sessionKey: string,
+  base: string = "",
+): Promise<{ responses: BenativeResponse[] }> {
+  return request<{ responses: BenativeResponse[] }>(
+    `${base}/api/sessions/${encodeURIComponent(sessionKey)}/benative/responses`,
+    token,
+  );
+}
+
 export async function fetchSettings(
   token: string,
   base: string = "",

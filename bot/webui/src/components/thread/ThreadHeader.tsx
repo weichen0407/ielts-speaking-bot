@@ -1,3 +1,4 @@
+import React from "react";
 import { BookOpen, Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -12,6 +13,7 @@ interface ThreadHeaderProps {
   onOpenNotes?: () => void;
   hideSidebarToggleOnDesktop?: boolean;
   minimal?: boolean;
+  benativeIndicator?: React.ReactNode;
 }
 
 export function ThreadHeader({
@@ -22,6 +24,7 @@ export function ThreadHeader({
   onOpenNotes,
   hideSidebarToggleOnDesktop = false,
   minimal = false,
+  benativeIndicator,
 }: ThreadHeaderProps) {
   const { t } = useTranslation();
   if (minimal) {
@@ -73,6 +76,7 @@ export function ThreadHeader({
             <BookOpen className="h-3.5 w-3.5" />
           </Button>
         )}
+        {benativeIndicator}
       </div>
 
       <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />

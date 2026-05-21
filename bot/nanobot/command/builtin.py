@@ -437,6 +437,148 @@ async def cmd_ielts(ctx: CommandContext) -> OutboundMessage | None:
     )
 
 
+async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
+    """Switch to Be Native mode for authentic expression practice.
+
+    Sets session mode to "benative" and shows available articles for practice.
+    Usage: /benative [select <article_id>]
+    """
+    import json
+    from datetime import datetime
+
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+
+    args = ctx.args.strip() if ctx.args else ""
+
+    # Handle /benative select <article_id>
+    if args.startswith("select "):
+        article_id = args[7:].strip()
+        if not article_id:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content="Please provide an article ID. Usage: `/benative select <article_id>`",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+        # Set mode and store article selection
+        session.metadata["mode"] = "benative"
+        session.metadata["benative_article_id"] = article_id
+        loop.counter_engine.set_mode("benative")
+        loop.sessions.save(session)
+
+        # Save progress file
+        session_dir = loop.sessions._get_session_dir(session.key)
+        notes_dir = session_dir / "notes"
+        notes_dir.mkdir(parents=True, exist_ok=True)
+        progress_file = notes_dir / "benative_progress.json"
+
+        # Count total sentences
+        pairs_file = loop.workspace / "shared" / "benative" / "pairs" / f"{article_id}.jsonl"
+        total_sentences = 0
+        if pairs_file.exists():
+            total_sentences = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
+
+        progress_data = {
+            "article_id": article_id,
+            "current_sentence": 0,
+            "total_sentences": total_sentences,
+            "selected_at": datetime.now().isoformat(),
+        }
+        progress_file.write_text(json.dumps(progress_data, ensure_ascii=False), encoding="utf-8")
+
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"""Article selected! You're now in Benative practice mode.
+
+Current progress: 0/{total_sentences} sentences
+
+I'll show you Chinese sentences one by one. Try to translate them into natural English!
+
+Type `/benative progress` to see your current progress.""",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Handle /benative progress
+    if args == "progress":
+        session_dir = loop.sessions._get_session_dir(session.key)
+        progress_file = session_dir / "notes" / "benative_progress.json"
+        if progress_file.exists():
+            progress_data = json.loads(progress_file.read_text(encoding="utf-8"))
+            article_id = progress_data.get("article_id", "unknown")
+            current = progress_data.get("current_sentence", 0)
+            total = progress_data.get("total_sentences", 0)
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=f"Current progress: {current}/{total} sentences\nArticle ID: {article_id}",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+        else:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content="No active benative practice. Use `/benative` to start.",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+    # Default: /benative - show article list
+    session.metadata["mode"] = "benative"
+    loop.counter_engine.set_mode("benative")
+    loop.sessions.save(session)
+
+    # List available articles
+    articles_dir = loop.workspace / "shared" / "benative" / "articles"
+    article_list = []
+
+    if articles_dir.exists():
+        for article_file in articles_dir.glob("*.json"):
+            try:
+                article_data = json.loads(article_file.read_text(encoding="utf-8"))
+                # Count sentences from corresponding pairs file
+                pairs_file = articles_dir.parent / "pairs" / f"{article_file.stem}.jsonl"
+                sentence_count = 0
+                if pairs_file.exists():
+                    sentence_count = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
+                article_list.append({
+                    "id": article_data.get("id", article_file.stem),
+                    "title": article_data.get("title", "Untitled"),
+                    "source": article_data.get("source", "Unknown"),
+                    "topic": article_data.get("topic", "general"),
+                    "sentence_count": sentence_count,
+                })
+            except Exception:
+                continue
+
+    if not article_list:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="""Switched to Be Native mode for authentic expression practice.
+
+No articles available yet. Articles are fetched daily at 12:00. Please check back later or wait for the next fetch cycle.""",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Format article list
+    lines = ["**Available Articles for Practice:**\n"]
+    for i, article in enumerate(article_list, 1):
+        lines.append(f"{i}. **{article['title']}** ({article['source']}) - {article['topic']} - {article['sentence_count']} sentences")
+
+    lines.append("\nTo select an article, reply with the number (e.g., `1`) or the article ID.")
+    lines.append("\nOnce selected, I'll show you Chinese sentences one by one. Try to translate them into natural English!")
+
+    content = "\n".join(lines)
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
 def _format_preset_names(names: list[str]) -> str:
     return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
 
@@ -859,6 +1001,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/freechat", cmd_freechat)
     router.exact("/ielts", cmd_ielts)
+    router.exact("/benative", cmd_benative)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)

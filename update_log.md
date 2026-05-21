@@ -1,5 +1,282 @@
 # Update Log
 
+## 2026-05-21 - 项目结构清理与配置重构
+
+本次更新对项目目录结构进行了清理，移除了重复和废弃的文件，统一了 trigger 配置管理，并泛化了 mode-specific 的后端逻辑。
+
+---
+
+## 1. 清理 `persona/` 目录
+
+`persona/` 目录是在引入 `mode/` 架构之前的旧结构，其中大量文件与新的 `mode/` 和 `subagents/` 目录重复。
+
+### 删除的文件
+
+**重复的 bootstrap 文件**（已被 `mode/{mode}/context/` 替代）：
+- `persona/AGENTS.md`
+- `persona/SOUL.md`
+- `persona/USER.md`
+- `persona/HEARTBEAT.md`
+- `persona/TOOLS.md`
+- `persona/topic_bank.md`
+
+**重复的 subagent 文件**（已被顶层 `subagents/` 替代）：
+- `persona/subagents/session/vocab_subagent.md`
+- `persona/subagents/session/polisher_subagent.md`
+- `persona/subagents/session/memory_subagent.md`
+- `persona/subagents/cross_session/daily_consolidator_subagent.md`
+- `persona/subagents/cross_session/memory_cron_subagent.md`
+- `persona/subagents/cross_session/progress_organizer_subagent.md`
+- `persona/subagents/cross_session/progress_tracker_subagent.md`
+
+**废弃的 trigger 配置**（已被 `global/trigger/` 和 `mode/*/trigger/` 替代）：
+- `persona/trigger/count/count.yaml`
+- `persona/trigger/count/.cursor_progress_organizer.json`
+- `persona/trigger/count/.cursor_progress_tracker.json`
+- `persona/trigger/cron/cron.yaml`
+- `persona/trigger/cron/jobs.json`
+
+### 保留的文件
+
+**用户级格式文档**（迁移到 `global/formats/`）：
+- `persona/formats/daily_format.md`
+- `persona/formats/memory_format.md`
+- `persona/formats/polisher_format.md`
+- `persona/formats/vocab_format.md`
+
+**运行时数据**：
+- `persona/memory/` — 用户记忆数据
+- `persona/sessions/` — 会话数据（已在 `.gitignore`）
+- `persona/session_index.jsonl` — 会话索引（已在 `.gitignore`）
+
+### 同步更新的引用路径
+
+**`bot/nanobot/agent/loop.py`**
+- 更新 memory subagent 任务模板中的格式文件路径：
+  - 从 `{workspace}/formats/memory_format.md`
+  - 改为 `{workspace}/global/formats/memory_format.md`
+
+---
+
+## 2. 清理 Git 跟踪的运行时文件
+
+以下文件是运行时生成的状态数据，不应纳入版本控制：
+- `shared/.cursor_progress_organizer.json`
+- `shared/.cursor_progress_tracker.json`
+- `persona/trigger/count/.cursor_progress_organizer.json`
+- `persona/trigger/count/.cursor_progress_tracker.json`
+- `persona/memory/history.jsonl`
+
+**`.gitignore` 更新**：
+- 新增 `persona/memory/*.jsonl`
+- 新增 `shared/.cursor_*.json`
+
+---
+
+## 3. WebUI 包管理器统一为 Bun
+
+- 删除 `bot/webui/package-lock.json`
+- 仅保留 `bot/webui/bun.lock`
+
+---
+
+## 4. Trigger 配置统一管理
+
+### 新增 `global/trigger/defaults.yaml`
+
+集中管理所有 trigger 的默认参数，避免在每个 trigger 中重复书写：
+
+```yaml
+version: 1
+defaults:
+  target:
+    silent: true
+```
+
+### CounterEngine 支持默认值合并
+
+**`bot/nanobot/counter/engine.py`**
+- 新增 `_load_defaults()` — 加载 `global/trigger/defaults.yaml`
+- 新增 `_apply_defaults(trigger_dict)` — 将默认值合并到 trigger，但允许 trigger 级别覆盖
+- 全局 trigger 和 mode-specific trigger 加载时自动应用默认值
+
+### Trigger YAML 简化
+
+移除了 `silent: true` 的重复书写。需要 `model: "gpt-4o-mini"` 的 cross-session subagent 仍显式保留 model 字段；session-level subagent（vocab、polish）继续使用主模型，不设置 model。
+
+**简化的文件**：
+- `global/trigger/count/count.yaml`
+- `mode/freechat/trigger/count/count.yaml`
+- `mode/ielts/trigger/count/count.yaml`
+
+**恢复 model 字段的 trigger**（cross-session 级别）：
+- `memory_cron`
+- `daily_consolidator`
+- `progress_tracker`
+- `benative_article_fetcher`
+- `benative_translator`
+- `ielts_feedback`
+
+---
+
+## 5. Mode Trigger 目录结构补全
+
+每个 mode 现在具备完整的 trigger 目录结构：
+
+```
+mode/{mode}/
+└── trigger/
+    ├── count/count.yaml   # turn_count / file_line_count 触发器
+    └── cron/cron.yaml     # cron 调度配置
+```
+
+**新建/恢复的文件**：
+- `mode/freechat/trigger/cron/cron.yaml` — 空配置（之前被误删）
+- `mode/ielts/trigger/cron/cron.yaml` — 空配置（之前被误删）
+- `mode/benative/trigger/cron/cron.yaml` — 新建空配置
+
+---
+
+## 6. Session Manager 泛化
+
+**`bot/nanobot/session/manager.py`**
+
+将 mode-specific 的 `append_benative_response()` 和 `append_freechat_response()` 泛化为统一的 `append_mode_response()`：
+
+```python
+def append_mode_response(
+    self,
+    session: Session,
+    round_num: int,
+    **fields: Any,
+) -> None
+```
+
+**改动点**：
+- `_get_mode_responses_path()` 改为通用路径构建：`shared/{mode}/sessions/{uuid}/responses.jsonl`
+- `append_mode_response()` 接受 `**fields` 参数，任何 mode 都可以调用
+- 旧的 `append_benative_response()` 和 `append_freechat_response()` 保留为 wrapper（标记为 deprecated），确保向后兼容
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| `.gitignore` | +persona/memory, +shared/.cursor_*.json |
+| `bot/nanobot/agent/loop.py` | 更新 formats 路径引用 |
+| `bot/nanobot/counter/engine.py` | +_load_defaults, +_apply_defaults |
+| `bot/nanobot/session/manager.py` | +append_mode_response, 泛化 _get_mode_responses_path |
+| `global/trigger/defaults.yaml` | 新建：统一默认配置 |
+| `global/trigger/count/count.yaml` | 简化：移除重复 silent，cross-session 保留 model |
+| `global/formats/*.md` | 从 persona/formats/ 迁移 |
+| `mode/freechat/trigger/count/count.yaml` | 简化：移除重复 silent |
+| `mode/freechat/trigger/cron/cron.yaml` | 恢复（空配置） |
+| `mode/ielts/trigger/count/count.yaml` | 简化：移除重复 silent，ielts_feedback 保留 model |
+| `mode/ielts/trigger/cron/cron.yaml` | 恢复（空配置） |
+| `mode/benative/trigger/cron/cron.yaml` | 新建（空配置） |
+| `bot/webui/package-lock.json` | 删除 |
+
+---
+
+*Update created: 2026-05-21*
+
+## 2026-05-21 - Be Native Mode
+
+This update adds a new "be native" mode for authentic expression practice through real-world English content.
+
+### Overview
+
+Benative mode enables users to practice English translation by:
+1. Fetching news articles daily (12:00) via web search + web fetch
+2. Translating articles into Chinese sentence pairs
+3. Practicing by translating Chinese back to English sentence by sentence
+4. Reviewing translations with word/structure comparison every N sentences
+
+### New Files
+
+**`mode/benative/`** - Benative mode configuration
+```
+mode/benative/
+├── context/
+│   ├── AGENTS.md      # Sentence-by-sentence practice instructions
+│   ├── SOUL.md        # Native speaker coach personality
+│   ├── USER.md
+│   ├── HEARTBEAT.md
+│   └── TOOLS.md
+└── trigger/
+    └── count/count.yaml  # benative_review trigger (turn_count: 10)
+```
+
+**`subagents/cross_session/benative_article_fetcher_subagent.md`**
+- Fetches news articles via web_search + web_fetch
+- Extracts entities (persons, organizations, locations)
+- Stores to `shared/benative/articles/{uuid}.json`
+
+**`subagents/cross_session/benative_translator_subagent.md`**
+- Translates articles sentence by sentence
+- Stores English-Chinese pairs to `shared/benative/pairs/{uuid}.jsonl`
+
+**`subagents/session/benative_review_subagent.md`**
+- Reviews user responses vs original English
+- Outputs word-level and structure analysis
+- Writes to `session/notes/benative_review.md`
+
+### Updated Files
+
+**`global/trigger/count/count.yaml`** - Added benative triggers:
+- `benative_article_fetcher`: cron at 12:00 daily
+- `benative_translator`: cron at 13:00 daily
+
+**`global/trigger/cron/cron.yaml`** - Added benative cron jobs
+
+**`bot/nanobot/command/builtin.py`** - Added `cmd_benative()` and `/benative` command
+
+### Session Flow
+
+```
+/benative → 显示文章列表 → 用户选择 → 逐句显示中文 → 用户翻译 → 每10句 review
+```
+
+### Data Storage
+
+- `shared/benative/articles/` - Original English articles (JSON)
+- `shared/benative/pairs/` - Sentence pairs (JSONL: `{"en": "...", "zh": "..."}`)
+- `shared/benative/sessions/{uuid}/responses.jsonl` - User responses per session
+- `session/notes/benative_review.md` - AI review output
+- `session/notes/benative_progress.json` - Current progress
+
+### Backend Changes
+
+**`bot/nanobot/session/manager.py`**
+- Added `append_benative_response()` - writes to shared/benative/sessions/{uuid}/responses.jsonl
+- Added `append_freechat_response()` - writes to shared/freechat/sessions/{uuid}/responses.jsonl
+- Added `_get_mode_responses_path()` - returns mode-specific responses path
+
+**`bot/nanobot/channels/websocket.py`**
+- Added `_handle_benative_articles()` - GET /api/benative/articles
+- Added `_handle_session_benative()` - GET /api/sessions/{key}/benative
+- Added `_handle_session_benative_article()` - GET /api/sessions/{key}/benative/article
+- Added `_handle_session_benative_responses()` - GET /api/sessions/{key}/benative/responses
+
+### WebUI Changes
+
+**New Components:**
+- `ArticleSelectDialog.tsx` - Modal for selecting articles
+- `BenativeProgressIndicator.tsx` - Shows "10/123" progress badge
+- `BenativeNotesSheet.tsx` - Session notes panel with responses and review tabs
+
+**New Hooks:**
+- `useBenativeArticles.ts` - Fetches available articles
+- `useBenativeProgress.ts` - Fetches session progress
+- `useBenativeResponses.ts` - Fetches user responses
+
+**New API Functions:**
+- `fetchBenativeArticles()` - GET /api/benative/articles
+- `fetchBenativeProgress()` - GET /api/sessions/{key}/benative
+- `fetchBenativeArticle()` - GET /api/sessions/{key}/benative/article
+- `fetchBenativeResponses()` - GET /api/sessions/{key}/benative/responses
+
 ## 2026-05-21 - Mode Architecture
 
 This update implements a modular mode architecture that decouples freechat from the core and enables adding new modes (ielts, etc.). Global functionality runs regardless of mode, while mode-specific features only run when that mode is active.

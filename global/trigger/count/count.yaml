@@ -11,7 +11,6 @@ triggers:
     target:
       subagent: memory_cron_subagent
       prompt_file: subagents/cross_session/memory_cron_subagent.md
-      silent: true
       model: "gpt-4o-mini"
       task_template: |
         Update user memory profile based on sessions modified since last run.
@@ -34,7 +33,6 @@ triggers:
     target:
       subagent: daily_consolidator_subagent
       prompt_file: subagents/cross_session/daily_consolidator_subagent.md
-      silent: true
       model: "gpt-4o-mini"
       task_template: |
         Aggregate vocab.md and polisher.md from sessions modified since last run.
@@ -54,7 +52,6 @@ triggers:
     target:
       subagent: progress_tracker_subagent
       prompt_file: subagents/cross_session/progress_tracker_subagent.md
-      silent: true
       depends_on: null
       model: "gpt-4o-mini"
       task_template: |
@@ -62,3 +59,37 @@ triggers:
 
         Read: {workspace}/shared/user_responses.jsonl
         Call: save_progress_entries tool with analyzed entries
+
+  - id: benative_article_fetcher
+    name: "Benative Article Fetcher"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 12 * * *"
+      scope: global
+    target:
+      subagent: benative_article_fetcher_subagent
+      prompt_file: subagents/cross_session/benative_article_fetcher_subagent.md
+      model: "gpt-4o-mini"
+      task_template: |
+        Fetch news articles for benative mode practice.
+
+        Articles directory: {workspace}/shared/benative/articles/
+        Write article JSON files and update cursor.
+
+  - id: benative_translator
+    name: "Benative Translator"
+    enabled: true
+    condition:
+      kind: cron
+      count: "0 13 * * *"
+      scope: global
+    target:
+      subagent: benative_translator_subagent
+      prompt_file: subagents/cross_session/benative_translator_subagent.md
+      model: "gpt-4o-mini"
+      task_template: |
+        Translate untranslated benative articles.
+
+        Articles directory: {workspace}/shared/benative/articles/
+        Pairs directory: {workspace}/shared/benative/pairs/

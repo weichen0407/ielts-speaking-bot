@@ -861,6 +861,103 @@ class SessionManager:
         except Exception:
             logger.warning("Failed to append user expression to {}", self._responses_path)
 
+    def _get_mode_responses_path(self, session: Session) -> Path | None:
+        """Get mode-specific responses path based on session mode.
+
+        Returns None if mode doesn't have a specific responses file.
+        """
+        session_uuid = session.session_uuid or session.metadata.get("session_uuid", "")
+        if not session_uuid:
+            return None
+
+        mode = session.metadata.get("mode")
+        if not mode:
+            return None
+
+        return self.sessions_dir.parent / mode / "sessions" / session_uuid / "responses.jsonl"
+
+    def append_mode_response(
+        self,
+        session: Session,
+        round_num: int,
+        **fields: Any,
+    ) -> None:
+        """Append a mode-specific response to the mode-specific responses file.
+
+        Generic method that works for any mode. The responses are stored under
+        shared/{mode}/sessions/{session_uuid}/responses.jsonl.
+
+        Args:
+            session: The current session.
+            round_num: Conversation round number.
+            **fields: Mode-specific data fields (e.g., zh, user_en for benative;
+                      topic, content for freechat).
+        """
+        session_uuid = session.session_uuid or session.metadata.get("session_uuid", "")
+        if not session_uuid:
+            logger.warning("append_mode_response: no session_uuid")
+            return
+
+        mode = session.metadata.get("mode")
+        if not mode:
+            logger.warning("append_mode_response: no mode set in session")
+            return
+
+        entry: dict[str, Any] = {
+            "session_uuid": session_uuid,
+            "round": round_num,
+            "mode": mode,
+            "timestamp": datetime.now().isoformat(),
+        }
+        entry.update(fields)
+
+        responses_path = self._get_mode_responses_path(session)
+        if not responses_path:
+            logger.warning("append_mode_response: no mode-specific path for mode={}", mode)
+            return
+
+        try:
+            ensure_dir(responses_path.parent)
+            with open(responses_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            logger.info(
+                "append_mode_response: mode={}, path={}, session_uuid={}, round={}",
+                mode,
+                responses_path,
+                session_uuid,
+                round_num,
+            )
+        except Exception:
+            logger.warning("Failed to append mode response to {}", responses_path)
+
+    def append_benative_response(
+        self,
+        session: Session,
+        round_num: int,
+        article_id: str,
+        zh: str,
+        user_en: str,
+    ) -> None:
+        """[Deprecated] Use append_mode_response instead."""
+        self.append_mode_response(
+            session, round_num,
+            article_id=article_id, zh=zh, user_en=user_en,
+        )
+
+    def append_freechat_response(
+        self,
+        session: Session,
+        round_num: int,
+        topic: str,
+        content: str,
+    ) -> None:
+        """[Deprecated] Use append_mode_response instead."""
+        self.append_mode_response(
+            session, round_num,
+            topic=topic or session.metadata.get("_session_folder", ""),
+            content=content,
+        )
+
     # ─── Progress Bank ─────────────────────────────────────────────────────────────
 
     @property

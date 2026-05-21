@@ -28,8 +28,34 @@ class CounterEngine:
         self._current_mode: str | None = None
         self._global_triggers: list[CounterTrigger] = []
         self._mode_triggers: list[CounterTrigger] = []
+        self._defaults: dict[str, Any] = self._load_defaults()
         self._load_global_config()
         self._load_config()
+
+    def _load_defaults(self) -> dict[str, Any]:
+        """Load default trigger settings from global/trigger/defaults.yaml."""
+        defaults_path = self.workspace / "global" / "trigger" / "defaults.yaml"
+        if not defaults_path.exists():
+            return {}
+        try:
+            raw = yaml.safe_load(defaults_path.read_text(encoding="utf-8"))
+            if raw and isinstance(raw, dict):
+                return raw.get("defaults", {})
+        except Exception:
+            logger.exception("Failed to load defaults from {}", defaults_path)
+        return {}
+
+    def _apply_defaults(self, trigger_dict: dict) -> dict:
+        """Merge trigger dict with global defaults."""
+        merged = dict(trigger_dict)
+        default_target = self._defaults.get("target", {})
+        if default_target and "target" in merged:
+            merged_target = dict(merged["target"])
+            for key, value in default_target.items():
+                if key not in merged_target:
+                    merged_target[key] = value
+            merged["target"] = merged_target
+        return merged
 
     def _load_global_config(self) -> None:
         """Load global triggers from global/trigger/count/count.yaml."""
@@ -47,7 +73,7 @@ class CounterEngine:
 
             triggers_raw = raw.get("triggers", [])
             self._global_triggers = [
-                CounterTrigger.from_dict(t) for t in triggers_raw if isinstance(t, dict)
+                CounterTrigger.from_dict(self._apply_defaults(t)) for t in triggers_raw if isinstance(t, dict)
             ]
             enabled = [t for t in self._global_triggers if t.enabled]
             logger.info(
@@ -89,7 +115,7 @@ class CounterEngine:
 
             triggers_raw = raw.get("triggers", [])
             mode_triggers = [
-                CounterTrigger.from_dict(t) for t in triggers_raw if isinstance(t, dict)
+                CounterTrigger.from_dict(self._apply_defaults(t)) for t in triggers_raw if isinstance(t, dict)
             ]
             self._mode_triggers = mode_triggers
             self._triggers.extend(mode_triggers)  # Append mode-specific triggers
