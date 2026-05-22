@@ -51,7 +51,8 @@
     "sections": {
       "interface": "介面",
       "ai": "AI",
-      "system": "系統"
+      "system": "系統",
+      "voice": "語音"
     },
     "rows": {
       "theme": "主題",
@@ -59,14 +60,24 @@
       "provider": "提供者",
       "model": "模型",
       "restart": "重新啟動 nanobot",
-      "configPath": "設定檔路徑"
+      "configPath": "設定檔路徑",
+      "voiceProvider": "語音提供商",
+      "whisperlivekitAutostart": "自動啟動 WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit 位址",
+      "whisperlivekitModel": "WhisperLiveKit 模型",
+      "whisperlivekitLanguage": "WhisperLiveKit 語言"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
       "language": "選擇 WebUI 使用的語言。",
       "provider": "選擇新模型請求使用的服務提供者。",
       "model": "設定 nanobot 預設使用的模型名稱。",
-      "configPath": "目前閘道正在使用的設定檔。"
+      "configPath": "目前閘道正在使用的設定檔。",
+      "voiceProvider": "選擇麥克風按鈕使用的語音轉文字服務。",
+      "whisperlivekitAutostart": "啟動 nanobot gateway 時自動啟動本機 WhisperLiveKit 服務。",
+      "whisperlivekitUrl": "本機 WhisperLiveKit 轉寫 WebSocket 位址。",
+      "whisperlivekitModel": "重新啟動後由本機 WhisperLiveKit 服務載入的模型。",
+      "whisperlivekitLanguage": "傳送給 WhisperLiveKit 的語言提示，例如 en、zh 或 auto。"
     },
     "values": {
       "light": "淺色",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "關閉目標"
+      "goalStateCloseAria": "關閉目標",
+      "voice": {
+        "startAria": "開始語音輸入",
+        "stopAria": "停止語音輸入",
+        "whisperlivekitLocal": "本機 WhisperLiveKit",
+        "deepgramCloud": "Deepgram 雲端",
+        "listening": "正在聆聽…",
+        "processing": "正在處理最後一段音訊…",
+        "error": "語音輸入發生錯誤"
+      }
     },
     "scrollToBottom": "捲動到底部",
     "loadEarlier": "載入更早訊息"

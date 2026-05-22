@@ -9,6 +9,7 @@ from collections.abc import Callable
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 # Force UTF-8 encoding for Windows console
 if sys.platform == "win32":
@@ -1263,7 +1264,99 @@ def _run_gateway(
         except Exception as e:
             console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
+    def _whisperlivekit_port() -> int:
+        parsed = urlparse(config.channels.whisperlivekit_url or "ws://localhost:8000/asr")
+        return parsed.port or 8000
+
+    async def _whisperlivekit_healthy(host: str, port: int) -> bool:
+        try:
+            reader, writer = await asyncio.open_connection(host, port)
+            request = f"GET /health HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
+            writer.write(request.encode("ascii"))
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(256), timeout=1.0)
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+            return b"200" in data.split(b"\r\n", 1)[0]
+        except (OSError, asyncio.TimeoutError):
+            return False
+
+    async def _wait_for_whisperlivekit(host: str, port: int) -> bool:
+        for _ in range(30):
+            if await _whisperlivekit_healthy(host, port):
+                return True
+            await asyncio.sleep(0.5)
+        return False
+
+    async def _start_whisperlivekit() -> tuple[asyncio.subprocess.Process | None, bool]:
+        if config.channels.voice_provider != "whisperlivekit":
+            return None, False
+        if not config.channels.whisperlivekit_autostart:
+            return None, False
+
+        wlk_model = config.channels.whisperlivekit_model or "base"
+        wlk_language = config.channels.whisperlivekit_language or "auto"
+        wlk_host = "127.0.0.1"
+        wlk_port = _whisperlivekit_port()
+
+        if await _whisperlivekit_healthy(wlk_host, wlk_port):
+            console.print(
+                f"[green]✓[/green] WhisperLiveKit already running on ws://{wlk_host}:{wlk_port}/asr"
+            )
+            return None, False
+
+        try:
+            import whisperlivekit  # noqa: F401
+        except ImportError:
+            console.print(
+                "[yellow]![/yellow] WhisperLiveKit is not installed in this uv environment. "
+                "Run [bold]uv sync[/bold] from bot/ after installing the local WhisperLiveKit source."
+            )
+            return None, False
+
+        console.print(
+            f"[cyan]→[/cyan] Starting WhisperLiveKit "
+            f"(model={wlk_model}, language={wlk_language}, pcm=true)..."
+        )
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "from whisperlivekit.cli import main; main()",
+            "serve",
+            "--model", wlk_model,
+            "--language", wlk_language,
+            "--host", wlk_host,
+            "--port", str(wlk_port),
+            "--pcm-input",
+        )
+
+        if await _wait_for_whisperlivekit(wlk_host, wlk_port):
+            console.print(
+                f"[green]✓[/green] WhisperLiveKit running on ws://{wlk_host}:{wlk_port}/asr"
+            )
+            return process, True
+
+        if process.returncode is not None:
+            console.print(
+                f"[red]✗[/red] WhisperLiveKit failed to start (exit {process.returncode})"
+            )
+            return None, False
+
+        console.print(
+            f"[yellow]![/yellow] WhisperLiveKit is still starting on ws://{wlk_host}:{wlk_port}/asr"
+        )
+        return process, True
+
+    # WhisperLiveKit subprocess handle (started/stopped with gateway)
+    wlk_process: asyncio.subprocess.Process | None = None
+    wlk_managed = False
+
     async def run():
+        nonlocal wlk_process, wlk_managed
+
+        wlk_process, wlk_managed = await _start_whisperlivekit()
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -1288,6 +1381,16 @@ def _run_gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Stop WhisperLiveKit subprocess
+            if wlk_managed and wlk_process and wlk_process.returncode is None:
+                console.print("[cyan]→[/cyan] Stopping WhisperLiveKit...")
+                wlk_process.terminate()
+                try:
+                    await asyncio.wait_for(wlk_process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    wlk_process.kill()
+                    await wlk_process.wait()
+                console.print("[green]✓[/green] WhisperLiveKit stopped")
             # Flush all cached sessions to durable storage before exit.
             # This prevents data loss on filesystems with write-back
             # caching (rclone VFS, NFS, FUSE mounts, etc.).

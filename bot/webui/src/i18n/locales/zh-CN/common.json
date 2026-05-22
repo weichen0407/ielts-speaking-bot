@@ -58,7 +58,8 @@
     "sections": {
       "interface": "界面",
       "ai": "AI",
-      "system": "系统"
+      "system": "系统",
+      "voice": "语音"
     },
     "rows": {
       "theme": "主题",
@@ -66,14 +67,24 @@
       "provider": "提供商",
       "model": "模型",
       "restart": "重启 nanobot",
-      "configPath": "配置路径"
+      "configPath": "配置路径",
+      "voiceProvider": "语音提供商",
+      "whisperlivekitAutostart": "自动启动 WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit 地址",
+      "whisperlivekitModel": "WhisperLiveKit 模型",
+      "whisperlivekitLanguage": "WhisperLiveKit 语言"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
       "language": "选择 WebUI 使用的语言。",
       "provider": "选择新模型请求使用的服务提供商。",
       "model": "设置 nanobot 默认使用的模型名称。",
-      "configPath": "当前网关正在使用的配置文件。"
+      "configPath": "当前网关正在使用的配置文件。",
+      "voiceProvider": "选择麦克风按钮使用的语音转文字服务。",
+      "whisperlivekitAutostart": "启动 nanobot gateway 时自动启动本地 WhisperLiveKit 服务。",
+      "whisperlivekitUrl": "本地 WhisperLiveKit 转写 WebSocket 地址。",
+      "whisperlivekitModel": "重启后由本地 WhisperLiveKit 服务加载的模型。",
+      "whisperlivekitLanguage": "发送给 WhisperLiveKit 的语言提示，例如 en、zh 或 auto。"
     },
     "values": {
       "light": "浅色",
@@ -321,7 +332,16 @@
         "too_large": "图片太大，请换一张小一点的",
         "io": "无法读取该文件"
       },
-      "goalStateCloseAria": "关闭目标"
+      "goalStateCloseAria": "关闭目标",
+      "voice": {
+        "startAria": "开始语音输入",
+        "stopAria": "停止语音输入",
+        "whisperlivekitLocal": "本地 WhisperLiveKit",
+        "deepgramCloud": "Deepgram 云端",
+        "listening": "正在聆听…",
+        "processing": "正在处理最后一段音频…",
+        "error": "语音输入出错"
+      }
     },
     "scrollToBottom": "滚动到底部",
     "loadEarlier": "加载更早消息"

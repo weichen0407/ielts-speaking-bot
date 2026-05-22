@@ -39,11 +39,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { setVoiceSettings } from "@/hooks/useVoiceSettings";
 import {
   fetchSettings,
   updateProviderSettings,
   updateSettings,
+  updateVoiceSettings,
   updateWebSearchSettings,
+  type VoiceSettingsUpdate,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
@@ -102,6 +106,14 @@ export function SettingsView({
     model: "",
     provider: "",
   });
+  const [voiceForm, setVoiceForm] = useState<VoiceSettingsUpdate>({
+    voice_provider: "whisperlivekit",
+    whisperlivekit_autostart: true,
+    whisperlivekit_url: "ws://localhost:8000/asr",
+    whisperlivekit_language: "auto",
+    whisperlivekit_model: "base",
+  });
+  const [voiceSaving, setVoiceSaving] = useState(false);
 
   const applyPayload = useCallback((payload: SettingsPayload) => {
     setSettings(payload);
@@ -114,6 +126,29 @@ export function SettingsView({
       apiKey: prev.provider === payload.web_search.provider ? prev.apiKey ?? "" : "",
       baseUrl: payload.web_search.base_url ?? "",
     }));
+    const voiceProvider = payload.voice?.provider ?? "whisperlivekit";
+    const wlkUrl = payload.voice?.whisperlivekit_url ?? "ws://localhost:8000/asr";
+    const wlkLanguage = payload.voice?.whisperlivekit_language ?? "auto";
+    setVoiceForm({
+      voice_provider: voiceProvider,
+      whisperlivekit_autostart: payload.voice?.whisperlivekit_autostart ?? true,
+      whisperlivekit_url: wlkUrl,
+      whisperlivekit_language: wlkLanguage,
+      whisperlivekit_model: payload.voice?.whisperlivekit_model ?? "base",
+    });
+    setVoiceSettings({
+      provider: voiceProvider,
+      whisperlivekitAutostart: payload.voice?.whisperlivekit_autostart ?? true,
+      whisperlivekitUrl: wlkUrl,
+      whisperlivekitLanguage: wlkLanguage,
+      whisperlivekitModel: payload.voice?.whisperlivekit_model ?? "base",
+    });
+    // Update global voice settings so useVoiceInput picks them up
+    if (typeof window !== "undefined") {
+      (window as unknown as { __NANOBOT_VOICE_PROVIDER?: string }).__NANOBOT_VOICE_PROVIDER = voiceProvider;
+      (window as unknown as { __NANOBOT_WLK_URL?: string }).__NANOBOT_WLK_URL = wlkUrl;
+      (window as unknown as { __NANOBOT_WLK_LANGUAGE?: string }).__NANOBOT_WLK_LANGUAGE = wlkLanguage;
+    }
   }, []);
 
   useEffect(() => {
@@ -255,6 +290,33 @@ export function SettingsView({
     }
   };
 
+  const saveVoice = useCallback(async () => {
+    if (!settings || voiceSaving) return;
+    setVoiceSaving(true);
+    try {
+      const payload = await updateVoiceSettings(token, voiceForm);
+      applyPayload(payload);
+      // Update global voice settings so useVoiceInput picks them up
+      setVoiceSettings({
+        provider: voiceForm.voice_provider ?? "whisperlivekit",
+        whisperlivekitAutostart: voiceForm.whisperlivekit_autostart ?? true,
+        whisperlivekitUrl: voiceForm.whisperlivekit_url ?? "ws://localhost:8000/asr",
+        whisperlivekitLanguage: voiceForm.whisperlivekit_language ?? "auto",
+        whisperlivekitModel: voiceForm.whisperlivekit_model ?? "base",
+      });
+      if (typeof window !== "undefined") {
+        (window as unknown as { __NANOBOT_VOICE_PROVIDER?: string }).__NANOBOT_VOICE_PROVIDER = voiceForm.voice_provider;
+        (window as unknown as { __NANOBOT_WLK_URL?: string }).__NANOBOT_WLK_URL = voiceForm.whisperlivekit_url;
+        (window as unknown as { __NANOBOT_WLK_LANGUAGE?: string }).__NANOBOT_WLK_LANGUAGE = voiceForm.whisperlivekit_language;
+      }
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setVoiceSaving(false);
+    }
+  }, [settings, voiceForm, voiceSaving, token, applyPayload]);
+
   const resetProviderDraft = useCallback((providerName: string) => {
     const provider = settings?.providers.find((item) => item.name === providerName);
     if (!provider) return;
@@ -369,6 +431,10 @@ export function SettingsView({
                   onRestart={onRestart}
                   isRestarting={isRestarting}
                   onOpenByok={() => setActiveSection("byok")}
+                  voiceForm={voiceForm}
+                  setVoiceForm={setVoiceForm}
+                  voiceSaving={voiceSaving}
+                  onSaveVoice={saveVoice}
                 />
               ) : (
                 <ByokSettings
@@ -502,6 +568,10 @@ function GeneralSettings({
   onRestart,
   isRestarting,
   onOpenByok,
+  voiceForm,
+  setVoiceForm,
+  voiceSaving,
+  onSaveVoice,
 }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -520,12 +590,28 @@ function GeneralSettings({
   onRestart?: () => void;
   isRestarting?: boolean;
   onOpenByok: () => void;
+  voiceForm: VoiceSettingsUpdate;
+  setVoiceForm: Dispatch<SetStateAction<VoiceSettingsUpdate>>;
+  voiceSaving: boolean;
+  onSaveVoice: () => void;
 }) {
   const { t } = useTranslation();
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const providerValue = configuredProviders.some((provider) => provider.name === form.provider)
     ? form.provider
     : "";
+
+  const voiceDirty = useMemo(() => {
+    if (!settings?.voice) return false;
+    return (
+      voiceForm.voice_provider !== settings.voice.provider ||
+      voiceForm.whisperlivekit_autostart !== settings.voice.whisperlivekit_autostart ||
+      voiceForm.whisperlivekit_url !== settings.voice.whisperlivekit_url ||
+      voiceForm.whisperlivekit_language !== settings.voice.whisperlivekit_language ||
+      voiceForm.whisperlivekit_model !== settings.voice.whisperlivekit_model
+    );
+  }, [voiceForm, settings?.voice]);
+
   return (
     <div className="space-y-8">
       <section>
@@ -608,6 +694,138 @@ function GeneralSettings({
                 {t("settings.byok.openByok")}
               </Button>
             </SettingsRow>
+          ) : null}
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{t("settings.sections.voice")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={t("settings.rows.voiceProvider")}
+            description={t("settings.help.voiceProvider")}
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 w-[180px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none hover:bg-accent/55"
+                >
+                  <span className="truncate">
+                    {voiceForm.voice_provider === "deepgram" ? "Deepgram (Cloud)" : "WhisperLiveKit (Local)"}
+                  </span>
+                  <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="end"
+                className="rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]"
+              >
+                <DropdownMenuItem
+                  onClick={() => setVoiceForm((prev) => ({ ...prev, voice_provider: "deepgram" }))}
+                  className={cn(
+                    "cursor-pointer rounded-[10px] px-3 py-2 text-[13px]",
+                    voiceForm.voice_provider === "deepgram" && "bg-accent font-medium",
+                  )}
+                >
+                  <Cloud className="mr-2 h-4 w-4" aria-hidden />
+                  Deepgram (Cloud)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setVoiceForm((prev) => ({ ...prev, voice_provider: "whisperlivekit" }))}
+                  className={cn(
+                    "cursor-pointer rounded-[10px] px-3 py-2 text-[13px]",
+                    voiceForm.voice_provider === "whisperlivekit" && "bg-accent font-medium",
+                  )}
+                >
+                  <Cpu className="mr-2 h-4 w-4" aria-hidden />
+                  WhisperLiveKit (Local)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SettingsRow>
+
+          {voiceForm.voice_provider === "whisperlivekit" && (
+            <>
+              <SettingsRow
+                title={t("settings.rows.whisperlivekitAutostart")}
+                description={t("settings.help.whisperlivekitAutostart")}
+              >
+                <Switch
+                  checked={voiceForm.whisperlivekit_autostart ?? true}
+                  onCheckedChange={(checked) => setVoiceForm((prev) => ({ ...prev, whisperlivekit_autostart: checked }))}
+                />
+              </SettingsRow>
+
+              <SettingsRow
+                title={t("settings.rows.whisperlivekitUrl")}
+                description={t("settings.help.whisperlivekitUrl")}
+              >
+                <Input
+                  value={voiceForm.whisperlivekit_url ?? ""}
+                  onChange={(e) => setVoiceForm((prev) => ({ ...prev, whisperlivekit_url: e.target.value }))}
+                  className="h-8 w-[280px] rounded-full text-[13px]"
+                  placeholder="ws://localhost:8000/asr"
+                />
+              </SettingsRow>
+
+              <SettingsRow
+                title={t("settings.rows.whisperlivekitModel")}
+                description={t("settings.help.whisperlivekitModel")}
+              >
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 w-[120px] justify-between rounded-full border-input bg-background px-3 text-[13px] font-normal shadow-none hover:bg-accent/55"
+                    >
+                      <span className="truncate">{voiceForm.whisperlivekit_model ?? "base"}</span>
+                      <ChevronDown className="ml-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    className="rounded-[18px] border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]"
+                  >
+                    {["base", "small", "medium", "large"].map((model) => (
+                      <DropdownMenuItem
+                        key={model}
+                        onClick={() => setVoiceForm((prev) => ({ ...prev, whisperlivekit_model: model }))}
+                        className={cn(
+                          "cursor-pointer rounded-[10px] px-3 py-2 text-[13px]",
+                          voiceForm.whisperlivekit_model === model && "bg-accent font-medium",
+                        )}
+                      >
+                        {model}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </SettingsRow>
+
+              <SettingsRow
+                title={t("settings.rows.whisperlivekitLanguage")}
+                description={t("settings.help.whisperlivekitLanguage")}
+              >
+                <Input
+                  value={voiceForm.whisperlivekit_language ?? ""}
+                  onChange={(e) => setVoiceForm((prev) => ({ ...prev, whisperlivekit_language: e.target.value }))}
+                  className="h-8 w-[120px] rounded-full text-[13px]"
+                  placeholder="auto"
+                />
+              </SettingsRow>
+            </>
+          )}
+
+          {(voiceDirty || voiceSaving) ? (
+            <SettingsFooter
+              dirty={voiceDirty}
+              saving={voiceSaving}
+              saved={false}
+              onSave={onSaveVoice}
+            />
           ) : null}
         </SettingsGroup>
       </section>

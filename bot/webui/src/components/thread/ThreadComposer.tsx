@@ -365,6 +365,114 @@ function RunElapsedStrip({
   );
 }
 
+function VoiceInputStatus({
+  provider,
+  isRecording,
+  isProcessing,
+  status,
+  error,
+  recordingStartedAt,
+}: {
+  provider: "deepgram" | "whisperlivekit";
+  isRecording: boolean;
+  isProcessing: boolean;
+  status: string;
+  error: string | null;
+  recordingStartedAt: number | null;
+}) {
+  const { t } = useTranslation();
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!isRecording || recordingStartedAt == null) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [isRecording, recordingStartedAt]);
+
+  if (!isRecording && !isProcessing && !error) return null;
+
+  const elapsed = recordingStartedAt == null
+    ? null
+    : Math.max(0, Math.floor((Date.now() - recordingStartedAt) / 1000));
+  const elapsedLabel = elapsed == null
+    ? null
+    : `${Math.floor(elapsed / 60)}:${(elapsed % 60).toString().padStart(2, "0")}`;
+  const providerLabel = provider === "whisperlivekit"
+    ? t("thread.composer.voice.whisperlivekitLocal")
+    : t("thread.composer.voice.deepgramCloud");
+  const stateLabel = error
+    ? t("thread.composer.voice.error")
+    : isProcessing
+      ? t("thread.composer.voice.processing")
+      : status || t("thread.composer.voice.listening");
+
+  return (
+    <div
+      role={error ? "alert" : "status"}
+      className={cn(
+        "mx-3 mt-2 flex items-center gap-2 rounded-2xl border px-3 py-2 text-[12px]",
+        error
+          ? "border-destructive/30 bg-destructive/7 text-destructive"
+          : "border-sky-400/20 bg-sky-500/[0.07] text-foreground/80 dark:border-sky-300/20 dark:bg-sky-400/[0.08]",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "grid h-7 w-7 shrink-0 place-items-center rounded-full",
+          error ? "bg-destructive/10" : "bg-sky-500/10 text-sky-600 dark:text-sky-300",
+        )}
+      >
+        <Mic className="h-3.5 w-3.5" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-semibold text-foreground/88">{providerLabel}</span>
+          {elapsedLabel ? (
+            <span className="shrink-0 rounded-full bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {elapsedLabel}
+            </span>
+          ) : null}
+        </span>
+        <span className="truncate text-muted-foreground">{error || stateLabel}</span>
+      </span>
+      {!error ? (
+        <span
+          className="relative h-9 w-[92px] shrink-0 overflow-hidden rounded-full border border-sky-400/15 bg-background/55"
+          aria-hidden
+        >
+          <svg
+            viewBox="0 0 92 36"
+            className={cn(
+              "absolute inset-0 h-full w-[184px] text-sky-500/75 dark:text-sky-300/80",
+              isProcessing ? "animate-pulse" : "animate-voice-wave",
+            )}
+            preserveAspectRatio="none"
+          >
+            <path
+              d="M0 18 C5 8 10 8 15 18 S25 28 30 18 S40 8 45 18 S55 28 60 18 S70 8 75 18 S85 28 90 18 S100 8 105 18 S115 28 120 18 S130 8 135 18 S145 28 150 18 S160 8 165 18 S175 28 180 18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M0 18 C5 13 10 13 15 18 S25 23 30 18 S40 13 45 18 S55 23 60 18 S70 13 75 18 S85 23 90 18 S100 13 105 18 S115 23 120 18 S130 13 135 18 S145 23 150 18 S160 13 165 18 S175 23 180 18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              opacity="0.45"
+            />
+          </svg>
+          <span className="absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-background/90 to-transparent" />
+          <span className="absolute inset-y-0 right-0 w-5 bg-gradient-to-l from-background/90 to-transparent" />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ThreadComposer({
   onSend,
   disabled,
@@ -393,7 +501,18 @@ export function ThreadComposer({
   const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
-  const { transcript, isRecording, startRecording, stopRecording, clearTranscript } = useVoiceInput();
+  const {
+    transcript,
+    isRecording,
+    isProcessing,
+    error: voiceError,
+    status: voiceStatus,
+    provider: voiceProvider,
+    recordingStartedAt,
+    startRecording,
+    stopRecording,
+    clearTranscript,
+  } = useVoiceInput();
   const imageMode = controlledImageMode ?? uncontrolledImageMode;
   const setImageMode = useCallback(
     (enabled: boolean) => {
@@ -798,6 +917,14 @@ export function ThreadComposer({
         {runStartedAt != null || goalState?.active ? (
           <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
+        <VoiceInputStatus
+          provider={voiceProvider}
+          isRecording={isRecording}
+          isProcessing={isProcessing}
+          status={voiceStatus}
+          error={voiceError}
+          recordingStartedAt={recordingStartedAt}
+        />
         <textarea
           ref={textareaRef}
           value={isRecording ? transcript : value}
@@ -869,7 +996,7 @@ export function ThreadComposer({
               size="icon"
               variant="ghost"
               disabled={disabled}
-              aria-label={isRecording ? "Stop voice input" : "Start voice input"}
+              aria-label={isRecording ? t("thread.composer.voice.stopAria") : t("thread.composer.voice.startAria")}
               className={cn(
                 "rounded-full hover:text-foreground",
                 isRecording
@@ -880,8 +1007,7 @@ export function ThreadComposer({
                   : "h-7.5 w-7.5 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
               )}
               onClick={() => {
-                console.log("[ThreadComposer] Mic button clicked, isRecording:", isRecording);
-                isRecording ? stopRecording() : startRecording();
+                void (isRecording ? Promise.resolve(stopRecording()) : startRecording());
               }}
             >
               <Mic className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />

@@ -51,7 +51,8 @@
     "sections": {
       "interface": "Antarmuka",
       "ai": "AI",
-      "system": "Sistem"
+      "system": "Sistem",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "Tema",
@@ -59,14 +60,24 @@
       "provider": "Penyedia",
       "model": "Model",
       "restart": "Mulai ulang nanobot",
-      "configPath": "Path konfigurasi"
+      "configPath": "Path konfigurasi",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
       "language": "Pilih bahasa yang digunakan WebUI.",
       "provider": "Pilih penyedia untuk permintaan model baru.",
       "model": "Atur nama model default yang digunakan nanobot.",
-      "configPath": "File konfigurasi gateway yang sedang digunakan."
+      "configPath": "File konfigurasi gateway yang sedang digunakan.",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "Terang",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "Tutup tujuan"
+      "goalStateCloseAria": "Tutup tujuan",
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
+      }
     },
     "scrollToBottom": "Gulir ke bawah",
     "loadEarlier": "Muat pesan sebelumnya"

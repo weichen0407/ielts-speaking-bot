@@ -62,6 +62,7 @@ dependencies = [
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
     "boto3>=1.43.0",
+    "whisperlivekit>=0.2.20",
 ]
 
 [project.optional-dependencies]
@@ -117,6 +118,9 @@ nanobot = "nanobot.cli.commands:app"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+whisperlivekit = { path = "../WhisperLiveKit", editable = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true

@@ -265,3 +265,28 @@ export async function updateWebSearchSettings(
     token,
   );
 }
+
+export interface VoiceSettingsUpdate {
+  voice_provider?: "deepgram" | "whisperlivekit";
+  whisperlivekit_autostart?: boolean;
+  whisperlivekit_url?: string;
+  whisperlivekit_language?: string;
+  whisperlivekit_model?: string;
+}
+
+export async function updateVoiceSettings(
+  token: string,
+  update: VoiceSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  if (update.voice_provider !== undefined) query.set("voice_provider", update.voice_provider);
+  if (update.whisperlivekit_autostart !== undefined) query.set("whisperlivekit_autostart", String(update.whisperlivekit_autostart));
+  if (update.whisperlivekit_url !== undefined) query.set("whisperlivekit_url", update.whisperlivekit_url);
+  if (update.whisperlivekit_language !== undefined) query.set("whisperlivekit_language", update.whisperlivekit_language);
+  if (update.whisperlivekit_model !== undefined) query.set("whisperlivekit_model", update.whisperlivekit_model);
+  return request<SettingsPayload>(
+    `${base}/api/settings/voice/update?${query}`,
+    token,
+  );
+}

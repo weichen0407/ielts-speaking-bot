@@ -51,7 +51,8 @@
     "sections": {
       "interface": "Interface",
       "ai": "IA",
-      "system": "Système"
+      "system": "Système",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "Thème",
@@ -59,14 +60,24 @@
       "provider": "Fournisseur",
       "model": "Modèle",
       "restart": "Redémarrer nanobot",
-      "configPath": "Chemin de configuration"
+      "configPath": "Chemin de configuration",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "Basculer entre les apparences claire et sombre.",
       "language": "Choisissez la langue utilisée par le WebUI.",
       "provider": "Sélectionnez le fournisseur des nouvelles requêtes de modèle.",
       "model": "Définissez le nom du modèle par défaut utilisé par nanobot.",
-      "configPath": "Le fichier de configuration actuellement utilisé par la passerelle."
+      "configPath": "Le fichier de configuration actuellement utilisé par la passerelle.",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "Clair",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "Fermer l’objectif"
+      "goalStateCloseAria": "Fermer l’objectif",
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
+      }
     },
     "scrollToBottom": "Faire défiler vers le bas",
     "loadEarlier": "Charger les messages précédents"

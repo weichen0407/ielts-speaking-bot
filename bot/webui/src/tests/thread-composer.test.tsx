@@ -62,7 +62,7 @@ describe("ThreadComposer", () => {
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reason" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deep research" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Voice input" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start voice input" })).toBeInTheDocument();
     const input = screen.getByPlaceholderText("Ask anything...");
     expect(input).toBeInTheDocument();
     expect(input.className).toContain("min-h-[78px]");

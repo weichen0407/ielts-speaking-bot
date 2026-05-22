@@ -51,7 +51,8 @@
     "sections": {
       "interface": "인터페이스",
       "ai": "AI",
-      "system": "시스템"
+      "system": "시스템",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "테마",
@@ -59,14 +60,24 @@
       "provider": "제공자",
       "model": "모델",
       "restart": "nanobot 재시작",
-      "configPath": "설정 경로"
+      "configPath": "설정 경로",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
       "language": "WebUI에서 사용할 언어를 선택합니다.",
       "provider": "새 모델 요청에 사용할 제공자를 선택합니다.",
       "model": "nanobot이 기본으로 사용할 모델 이름을 설정합니다.",
-      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다."
+      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다.",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "라이트",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "목표 닫기"
+      "goalStateCloseAria": "목표 닫기",
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
+      }
     },
     "scrollToBottom": "맨 아래로 스크롤",
     "loadEarlier": "이전 메시지 불러오기"

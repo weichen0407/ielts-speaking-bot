@@ -71,7 +71,8 @@
     "sections": {
       "interface": "Interface",
       "ai": "AI",
-      "system": "System"
+      "system": "System",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "Theme",
@@ -79,14 +80,24 @@
       "provider": "Provider",
       "model": "Model",
       "restart": "Restart nanobot",
-      "configPath": "Config path"
+      "configPath": "Config path",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
       "language": "Choose the language used by the WebUI.",
       "provider": "Select the provider that should serve new model requests.",
       "model": "Set the default model name used by nanobot.",
-      "configPath": "The gateway configuration file currently in use."
+      "configPath": "The gateway configuration file currently in use.",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "Light",
@@ -344,6 +355,15 @@
         "decode_failed": "Couldn't decode this image",
         "too_large": "Image is too large — try a smaller one",
         "io": "Couldn't read this file"
+      },
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
       }
     },
     "scrollToBottom": "Scroll to bottom",

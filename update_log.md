@@ -1,5 +1,225 @@
 # Update Log
 
+## 2026-05-22 - WhisperLiveKit 本地语音输入集成
+
+本次更新将 WhisperLiveKit 本地实时转写能力接入 nanobot WebUI，使 `uv run nanobot gateway` 可以在本机自动启动 WhisperLiveKit，并在聊天输入框中提供带声音波纹状态的麦克风输入体验。
+
+---
+
+## 1. WhisperLiveKit 自动启动接入
+
+### 启动方式调整
+
+**`bot/nanobot/cli/commands.py`**
+- 将原先依赖 PATH 中 `wlk` 命令的启动方式，改为使用当前 uv 环境的 Python 解释器启动：
+  - `sys.executable -c "from whisperlivekit.cli import main; main()" serve ...`
+- 保证用户执行 `uv run nanobot gateway` 时，WhisperLiveKit 子进程与 nanobot 使用同一个虚拟环境。
+- 启动参数新增 `--pcm-input`，让 WhisperLiveKit 服务端返回 `useAudioWorklet: true`，前端稳定走 PCM AudioWorklet 流式输入。
+
+### 本机服务管理
+
+- WhisperLiveKit 固定绑定 `127.0.0.1`，符合当前“仅本机使用”的需求。
+- 从 `channels.whisperlivekit_url` 解析端口，默认使用 `8000`。
+- 启动前检查 `http://127.0.0.1:{port}/health`：
+  - 如果已有 WhisperLiveKit 服务在运行，则复用已有服务。
+  - 如果没有运行，则由 gateway 启动并托管子进程。
+- 启动后轮询 `/health`，替代固定 sleep，提高模型加载较慢时的可靠性。
+- gateway 退出时只关闭自己托管的 WhisperLiveKit 子进程，不会误杀外部手动启动的服务。
+
+### 依赖接入
+
+**`bot/pyproject.toml`**
+- 新增 `whisperlivekit>=0.2.20` 依赖。
+- 新增 uv 本地源：
+  - `whisperlivekit = { path = "../WhisperLiveKit", editable = true }`
+- 这样 bot 项目会直接使用仓库内顶层 `WhisperLiveKit/` 源码。
+
+---
+
+## 2. Voice Settings API 完善
+
+**`bot/nanobot/channels/websocket.py`**
+
+新增/完善 WebUI voice settings 的读取与保存能力：
+
+- settings payload 中返回：
+  - `provider`
+  - `whisperlivekit_autostart`
+  - `whisperlivekit_url`
+  - `whisperlivekit_language`
+  - `whisperlivekit_model`
+- 新增 `/api/settings/voice/update` 更新入口。
+- 保存 voice 配置时增加 URL 校验：
+  - scheme 必须是 `ws` 或 `wss`
+  - path 必须是 `/asr`
+  - autostart 开启时 host 必须是 `localhost`、`127.0.0.1` 或 `::1`
+- 对会影响 WhisperLiveKit 子进程的配置变更返回 `requires_restart=True`，例如：
+  - provider 切换
+  - autostart 切换
+  - model / language 变更
+  - WhisperLiveKit URL host / port / path 变更
+
+---
+
+## 3. WebUI 语音状态统一
+
+### 统一 voice settings store
+
+**`bot/webui/src/hooks/useVoiceSettings.ts`**
+- 默认 provider 改为 `whisperlivekit`。
+- 作为 WebUI 内部统一 voice settings store，避免设置页和语音 hook 使用不同默认值。
+
+**`bot/webui/src/components/settings/SettingsView.tsx`**
+- 加载 settings payload 时同步写入 voice settings store。
+- 保存 voice settings 后同步更新 store，使麦克风输入无需刷新页面即可读取最新配置。
+
+### Provider 分流与状态透出
+
+**`bot/webui/src/hooks/useVoiceInput.ts`**
+- 保留 Deepgram / WhisperLiveKit 双 provider 分支。
+- WhisperLiveKit 作为默认本地 provider。
+- 新增向 UI 暴露的状态：
+  - `isProcessing`
+  - `status`
+  - `recordingStartedAt`
+  - `provider`
+- 让 composer 能显示“连接中 / 正在聆听 / 正在处理最后音频 / 错误”等状态。
+
+---
+
+## 4. WhisperLiveKit 浏览器 Hook 强化
+
+**`bot/webui/src/hooks/useWhisperLiveKit.ts`**
+
+对 WhisperLiveKit 前端 WebSocket 与录音生命周期进行了加固：
+
+- 连接 `ws://localhost:8000/asr?language=...&mode=full`。
+- 处理服务端消息：
+  - `config`
+  - `active_transcription`
+  - `no_audio_detected`
+  - `ready_to_stop`
+- 支持 AudioWorklet PCM 流式输入：
+  - `/web/pcm_worklet.js`
+  - `/web/recorder_worker.js`
+- 增加 config 消息超时，避免服务端连接异常时麦克风状态卡住。
+- 修复 MediaRecorder fallback 的生命周期管理：
+  - 独立保存 `MediaRecorder` ref
+  - stop 时正确停止 recorder
+  - 清理 stream、worklet、worker、AudioContext
+- 启动失败会 reject 给上层 `useVoiceInput`，便于 UI 展示错误。
+- 结束录音时发送空 `ArrayBuffer`，等待 `ready_to_stop` 后完成最终转写。
+
+---
+
+## 5. Composer 中加入 WhisperLiveKit 风格声音波纹
+
+**`bot/webui/src/components/thread/ThreadComposer.tsx`**
+
+新增 `VoiceInputStatus` 状态条，参考 WhisperLiveKit 原始 Web UI 的录音体验，但以 React/Tailwind 方式集成到 nanobot composer 中。
+
+### UI 行为
+
+- 录音、处理中或出错时显示状态条。
+- 显示当前 provider：
+  - `WhisperLiveKit local`
+  - `Deepgram cloud`
+- 显示录音计时器。
+- 显示当前状态文本或错误信息。
+- 麦克风按钮 aria label 改为 i18n 文案。
+
+### 声音波纹
+
+**`bot/webui/tailwind.config.js`**
+- 新增 `voice-wave` keyframe 与 animation。
+- 将原先的简单柱状动画改为更接近 WhisperLiveKit 的连续 SVG 波形：
+  - 双层曲线
+  - 横向流动
+  - 轻微振幅变化
+  - processing 状态下使用 pulse
+
+---
+
+## 6. Worker 资源与本地化
+
+### WhisperLiveKit Worker 资源
+
+确认以下 WebUI public 资源与顶层 WhisperLiveKit 源文件一致：
+
+- `bot/webui/public/web/pcm_worklet.js`
+- `bot/webui/public/web/recorder_worker.js`
+
+这些文件负责浏览器端 PCM 提取、降采样和发送给 WhisperLiveKit WebSocket。
+
+### i18n 文案补齐
+
+更新所有 locale：
+
+- `bot/webui/src/i18n/locales/en/common.json`
+- `bot/webui/src/i18n/locales/es/common.json`
+- `bot/webui/src/i18n/locales/fr/common.json`
+- `bot/webui/src/i18n/locales/id/common.json`
+- `bot/webui/src/i18n/locales/ja/common.json`
+- `bot/webui/src/i18n/locales/ko/common.json`
+- `bot/webui/src/i18n/locales/vi/common.json`
+- `bot/webui/src/i18n/locales/zh-CN/common.json`
+- `bot/webui/src/i18n/locales/zh-TW/common.json`
+
+新增文案包括：
+- Voice 设置分区
+- voice provider / WhisperLiveKit URL / model / language / autostart
+- 麦克风 start / stop aria label
+- WhisperLiveKit local / Deepgram cloud
+- listening / processing / error 状态
+
+---
+
+## 7. 测试与验证
+
+### 已通过的检查
+
+- `uv --project bot run python -m compileall bot/nanobot/cli/commands.py bot/nanobot/channels/websocket.py`
+- `uv --project bot run python -c "import whisperlivekit; from whisperlivekit.cli import main; print(whisperlivekit.__file__)"`
+- `bun run --cwd bot/webui test`
+- `bun run --cwd bot/webui test src/tests/thread-composer.test.tsx`
+- `bun run --cwd bot/webui test src/tests/i18n.test.tsx`
+- `bun run --cwd bot/webui build`
+
+### 测试修复
+
+- `bot/webui/src/tests/thread-composer.test.tsx`
+  - 更新麦克风按钮 aria label 断言。
+- `bot/webui/src/tests/app-layout.test.tsx`
+  - 补齐 `NanobotClient` mock 中缺失的 `onSubagentStatus`，避免 App layout 测试在 React effect 阶段报错。
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| `bot/pyproject.toml` | 新增 whisperlivekit 依赖和 uv 本地 editable source |
+| `bot/nanobot/cli/commands.py` | WhisperLiveKit 使用 uv 当前 Python 自动启动，加入 `--pcm-input`、health check、托管退出 |
+| `bot/nanobot/channels/websocket.py` | 新增 voice settings payload/update，URL 校验和 restart 提示 |
+| `bot/nanobot/config/schema.py` | voice provider 与 WhisperLiveKit 默认配置 |
+| `bot/webui/src/hooks/useVoiceSettings.ts` | 新增/统一 voice settings store，默认 WhisperLiveKit |
+| `bot/webui/src/hooks/useVoiceInput.ts` | provider 分流、读取 voice settings、向 UI 暴露 status / processing / startedAt |
+| `bot/webui/src/hooks/useWhisperLiveKit.ts` | WhisperLiveKit WebSocket + AudioWorklet 生命周期加固 |
+| `bot/webui/src/components/settings/SettingsView.tsx` | Voice 设置 UI 和 store 同步 |
+| `bot/webui/src/components/thread/ThreadComposer.tsx` | 新增 VoiceInputStatus 和 WhisperLiveKit 风格声音波纹 |
+| `bot/webui/tailwind.config.js` | 新增 `voice-wave` 动画 |
+| `bot/webui/public/web/pcm_worklet.js` | WhisperLiveKit PCM AudioWorklet 资源 |
+| `bot/webui/public/web/recorder_worker.js` | WhisperLiveKit PCM 降采样 Worker 资源 |
+| `bot/webui/src/i18n/locales/*/common.json` | 补齐 voice 设置与 composer 语音状态文案 |
+| `bot/webui/src/lib/api.ts` | Voice settings update API 类型与调用 |
+| `bot/webui/src/lib/types.ts` | SettingsPayload 增加 voice 配置类型 |
+| `bot/webui/src/tests/thread-composer.test.tsx` | 更新语音按钮测试 |
+| `bot/webui/src/tests/app-layout.test.tsx` | 补齐 NanobotClient mock |
+
+---
+
+*Update created: 2026-05-22*
+
 ## 2026-05-21 - 项目结构清理与配置重构
 
 本次更新对项目目录结构进行了清理，移除了重复和废弃的文件，统一了 trigger 配置管理，并泛化了 mode-specific 的后端逻辑。

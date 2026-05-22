@@ -672,6 +672,9 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
 
+        if got == "/api/settings/voice/update":
+            return self._handle_settings_voice_update(request)
+
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -845,6 +848,7 @@ class WebSocketChannel(BaseChannel):
             if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
             else "duckduckgo"
         )
+        channels_config = config.channels
         return {
             "agent": {
                 "model": defaults.model,
@@ -858,6 +862,13 @@ class WebSocketChannel(BaseChannel):
                 "api_key_hint": _mask_secret_hint(search_config.api_key),
                 "base_url": search_config.base_url or None,
                 "providers": list(_WEB_SEARCH_PROVIDER_OPTIONS),
+            },
+            "voice": {
+                "provider": channels_config.voice_provider,
+                "whisperlivekit_autostart": channels_config.whisperlivekit_autostart,
+                "whisperlivekit_url": channels_config.whisperlivekit_url,
+                "whisperlivekit_language": channels_config.whisperlivekit_language,
+                "whisperlivekit_model": channels_config.whisperlivekit_model,
             },
             "runtime": {
                 "config_path": str(get_config_path().expanduser()),
@@ -1019,6 +1030,97 @@ class WebSocketChannel(BaseChannel):
         if changed:
             save_config(config)
         return _http_json_response(self._settings_payload(requires_restart=False))
+
+    def _handle_settings_voice_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from nanobot.config.loader import load_config, save_config
+
+        query = _parse_query(request.path)
+        config = load_config()
+        channels_config = config.channels
+        changed = False
+        previous = {
+            "voice_provider": channels_config.voice_provider,
+            "whisperlivekit_autostart": channels_config.whisperlivekit_autostart,
+            "whisperlivekit_url": channels_config.whisperlivekit_url,
+            "whisperlivekit_language": channels_config.whisperlivekit_language,
+            "whisperlivekit_model": channels_config.whisperlivekit_model,
+        }
+
+        voice_provider = _query_first(query, "voice_provider")
+        if voice_provider is not None:
+            voice_provider = voice_provider.strip().lower()
+            if voice_provider not in ("deepgram", "whisperlivekit"):
+                return _http_error(400, "invalid voice_provider: must be 'deepgram' or 'whisperlivekit'")
+            if channels_config.voice_provider != voice_provider:
+                channels_config.voice_provider = voice_provider
+                changed = True
+
+        whisperlivekit_autostart = _query_first(query, "whisperlivekit_autostart")
+        if whisperlivekit_autostart is not None:
+            autostart = whisperlivekit_autostart.lower() in ("true", "1", "yes")
+            if channels_config.whisperlivekit_autostart != autostart:
+                channels_config.whisperlivekit_autostart = autostart
+                changed = True
+
+        whisperlivekit_url = _query_first(query, "whisperlivekit_url")
+        if whisperlivekit_url is not None:
+            whisperlivekit_url = whisperlivekit_url.strip()
+            parsed = urlparse(whisperlivekit_url)
+            if parsed.scheme not in ("ws", "wss") or not parsed.netloc:
+                return _http_error(400, "invalid whisperlivekit_url: must be a ws:// or wss:// URL")
+            if _strip_trailing_slash(parsed.path or "/asr") != "/asr":
+                return _http_error(400, "invalid whisperlivekit_url: path must be /asr")
+            host = (parsed.hostname or "").lower()
+            if channels_config.whisperlivekit_autostart and host not in ("localhost", "127.0.0.1", "::1"):
+                return _http_error(
+                    400,
+                    "invalid whisperlivekit_url: autostart requires localhost, 127.0.0.1, or ::1",
+                )
+            if channels_config.whisperlivekit_url != whisperlivekit_url:
+                channels_config.whisperlivekit_url = whisperlivekit_url
+                changed = True
+
+        whisperlivekit_language = _query_first(query, "whisperlivekit_language")
+        if whisperlivekit_language is not None:
+            whisperlivekit_language = whisperlivekit_language.strip()
+            if channels_config.whisperlivekit_language != whisperlivekit_language:
+                channels_config.whisperlivekit_language = whisperlivekit_language
+                changed = True
+
+        whisperlivekit_model = _query_first(query, "whisperlivekit_model")
+        if whisperlivekit_model is not None:
+            whisperlivekit_model = whisperlivekit_model.strip().lower()
+            if whisperlivekit_model not in ("base", "small", "medium", "large"):
+                return _http_error(400, "invalid whisperlivekit_model: must be 'base', 'small', 'medium', or 'large'")
+            if channels_config.whisperlivekit_model != whisperlivekit_model:
+                channels_config.whisperlivekit_model = whisperlivekit_model
+                changed = True
+
+        if changed:
+            save_config(config)
+
+        previous_url = urlparse(previous["whisperlivekit_url"] or "ws://localhost:8000/asr")
+        current_url = urlparse(channels_config.whisperlivekit_url or "ws://localhost:8000/asr")
+        restart_required = any(
+            previous[key] != getattr(channels_config, key)
+            for key in (
+                "voice_provider",
+                "whisperlivekit_autostart",
+                "whisperlivekit_language",
+                "whisperlivekit_model",
+            )
+        ) or (
+            previous_url.hostname,
+            previous_url.port,
+            _strip_trailing_slash(previous_url.path or "/asr"),
+        ) != (
+            current_url.hostname,
+            current_url.port,
+            _strip_trailing_slash(current_url.path or "/asr"),
+        )
+        return _http_json_response(self._settings_payload(requires_restart=restart_required))
 
     @staticmethod
     def _is_websocket_channel_session_key(key: str) -> bool:

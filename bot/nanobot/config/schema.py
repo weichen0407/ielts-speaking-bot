@@ -39,6 +39,12 @@ class ChannelsConfig(Base):
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
+    # WhisperLiveKit local ASR settings (Phase 2 integration)
+    voice_provider: str = Field(default="whisperlivekit", description="Voice input provider: 'deepgram' (cloud) or 'whisperlivekit' (local)")
+    whisperlivekit_autostart: bool = Field(default=True, description="Auto-start WhisperLiveKit server with gateway")
+    whisperlivekit_url: str = Field(default="ws://localhost:8000/asr", description="WhisperLiveKit WebSocket URL")
+    whisperlivekit_language: str = Field(default="auto", description="WhisperLiveKit language code (e.g., 'en', 'zh', 'auto')")
+    whisperlivekit_model: str = Field(default="base", description="WhisperLiveKit model size: 'base', 'small', 'medium', 'large'")
 
 
 class DreamConfig(Base):

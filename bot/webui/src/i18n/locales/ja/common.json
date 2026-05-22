@@ -51,7 +51,8 @@
     "sections": {
       "interface": "インターフェース",
       "ai": "AI",
-      "system": "システム"
+      "system": "システム",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "テーマ",
@@ -59,14 +60,24 @@
       "provider": "プロバイダー",
       "model": "モデル",
       "restart": "nanobot を再起動",
-      "configPath": "設定パス"
+      "configPath": "設定パス",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "ライト表示とダーク表示を切り替えます。",
       "language": "WebUI で使用する言語を選択します。",
       "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
       "model": "nanobot が既定で使用するモデル名を設定します。",
-      "configPath": "現在ゲートウェイが使用している設定ファイルです。"
+      "configPath": "現在ゲートウェイが使用している設定ファイルです。",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "ライト",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "目標を閉じる"
+      "goalStateCloseAria": "目標を閉じる",
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
+      }
     },
     "scrollToBottom": "一番下へスクロール",
     "loadEarlier": "以前のメッセージを読み込む"

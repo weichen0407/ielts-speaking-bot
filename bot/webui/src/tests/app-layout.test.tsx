@@ -65,6 +65,7 @@ vi.mock("@/lib/nanobot-client", () => {
     connect = connectSpy;
     onStatus = () => () => {};
     onRuntimeModelUpdate = () => () => {};
+    onSubagentStatus = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
     sendMessage = vi.fn();

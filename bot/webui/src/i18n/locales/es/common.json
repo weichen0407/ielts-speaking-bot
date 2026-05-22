@@ -51,7 +51,8 @@
     "sections": {
       "interface": "Interfaz",
       "ai": "IA",
-      "system": "Sistema"
+      "system": "Sistema",
+      "voice": "Voice"
     },
     "rows": {
       "theme": "Tema",
@@ -59,14 +60,24 @@
       "provider": "Proveedor",
       "model": "Modelo",
       "restart": "Reiniciar nanobot",
-      "configPath": "Ruta de configuración"
+      "configPath": "Ruta de configuración",
+      "voiceProvider": "Voice provider",
+      "whisperlivekitAutostart": "Auto-start WhisperLiveKit",
+      "whisperlivekitUrl": "WhisperLiveKit URL",
+      "whisperlivekitModel": "WhisperLiveKit model",
+      "whisperlivekitLanguage": "WhisperLiveKit language"
     },
     "help": {
       "theme": "Cambia entre apariencia clara y oscura.",
       "language": "Elige el idioma usado por la WebUI.",
       "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
       "model": "Define el nombre del modelo predeterminado que usa nanobot.",
-      "configPath": "El archivo de configuración que usa actualmente el gateway."
+      "configPath": "El archivo de configuración que usa actualmente el gateway.",
+      "voiceProvider": "Choose the speech-to-text provider used by the mic button.",
+      "whisperlivekitAutostart": "Start the local WhisperLiveKit server when nanobot gateway starts.",
+      "whisperlivekitUrl": "Local WebSocket endpoint for WhisperLiveKit transcription.",
+      "whisperlivekitModel": "Model loaded by the local WhisperLiveKit server after restart.",
+      "whisperlivekitLanguage": "Language hint sent to WhisperLiveKit, such as en, zh, or auto."
     },
     "values": {
       "light": "Claro",
@@ -301,7 +312,16 @@
           }
         }
       },
-      "goalStateCloseAria": "Cerrar objetivo"
+      "goalStateCloseAria": "Cerrar objetivo",
+      "voice": {
+        "startAria": "Start voice input",
+        "stopAria": "Stop voice input",
+        "whisperlivekitLocal": "WhisperLiveKit local",
+        "deepgramCloud": "Deepgram cloud",
+        "listening": "Listening…",
+        "processing": "Processing final audio…",
+        "error": "Voice input error"
+      }
     },
     "scrollToBottom": "Desplazarse al final",
     "loadEarlier": "Cargar mensajes anteriores"

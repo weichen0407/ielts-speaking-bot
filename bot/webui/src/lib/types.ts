@@ -119,6 +119,14 @@ export interface BootstrapResponse {
   model_name?: string | null;
 }
 
+export interface VoiceSettings {
+  provider: "deepgram" | "whisperlivekit";
+  whisperlivekit_autostart?: boolean;
+  whisperlivekit_url?: string;
+  whisperlivekit_language?: string;
+  whisperlivekit_model?: string;
+}
+
 export interface SettingsPayload {
   agent: {
     model: string;
@@ -145,6 +153,7 @@ export interface SettingsPayload {
       credential: "none" | "api_key" | "base_url";
     }>;
   };
+  voice: VoiceSettings;
   runtime: {
     config_path: string;
   };
