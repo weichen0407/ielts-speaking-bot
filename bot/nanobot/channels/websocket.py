@@ -868,6 +868,7 @@ class WebSocketChannel(BaseChannel):
                 "whisperlivekit_autostart": channels_config.whisperlivekit_autostart,
                 "whisperlivekit_url": channels_config.whisperlivekit_url,
                 "whisperlivekit_language": channels_config.whisperlivekit_language,
+                "whisperlivekit_backend": channels_config.whisperlivekit_backend,
                 "whisperlivekit_model": channels_config.whisperlivekit_model,
             },
             "runtime": {
@@ -1043,8 +1044,9 @@ class WebSocketChannel(BaseChannel):
         previous = {
             "voice_provider": channels_config.voice_provider,
             "whisperlivekit_autostart": channels_config.whisperlivekit_autostart,
-            "whisperlivekit_url": channels_config.whisperlivekit_url,
+            "whisperkit_url": channels_config.whisperlivekit_url,
             "whisperlivekit_language": channels_config.whisperlivekit_language,
+            "whisperlivekit_backend": channels_config.whisperlivekit_backend,
             "whisperlivekit_model": channels_config.whisperlivekit_model,
         }
 
@@ -1089,11 +1091,21 @@ class WebSocketChannel(BaseChannel):
                 channels_config.whisperlivekit_language = whisperlivekit_language
                 changed = True
 
+        whisperlivekit_backend = _query_first(query, "whisperlivekit_backend")
+        if whisperlivekit_backend is not None:
+            whisperlivekit_backend = whisperlivekit_backend.strip().lower()
+            if whisperlivekit_backend not in ("mlx-whisper", "faster-whisper", "whisper"):
+                return _http_error(400, "invalid whisperlivekit_backend: must be 'mlx-whisper', 'faster-whisper', or 'whisper'")
+            if channels_config.whisperlivekit_backend != whisperlivekit_backend:
+                channels_config.whisperlivekit_backend = whisperlivekit_backend
+                changed = True
+
         whisperlivekit_model = _query_first(query, "whisperlivekit_model")
         if whisperlivekit_model is not None:
             whisperlivekit_model = whisperlivekit_model.strip().lower()
-            if whisperlivekit_model not in ("base", "small", "medium", "large"):
-                return _http_error(400, "invalid whisperlivekit_model: must be 'base', 'small', 'medium', or 'large'")
+            valid_models = ("base", "small", "medium", "large", "large-v3", "large-v3-turbo", "turbo")
+            if whisperlivekit_model not in valid_models:
+                return _http_error(400, f"invalid whisperlivekit_model: must be one of {valid_models}")
             if channels_config.whisperlivekit_model != whisperlivekit_model:
                 channels_config.whisperlivekit_model = whisperlivekit_model
                 changed = True
@@ -1109,6 +1121,7 @@ class WebSocketChannel(BaseChannel):
                 "voice_provider",
                 "whisperlivekit_autostart",
                 "whisperlivekit_language",
+                "whisperlivekit_backend",
                 "whisperlivekit_model",
             )
         ) or (

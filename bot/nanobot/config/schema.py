@@ -44,7 +44,8 @@ class ChannelsConfig(Base):
     whisperlivekit_autostart: bool = Field(default=True, description="Auto-start WhisperLiveKit server with gateway")
     whisperlivekit_url: str = Field(default="ws://localhost:8000/asr", description="WhisperLiveKit WebSocket URL")
     whisperlivekit_language: str = Field(default="auto", description="WhisperLiveKit language code (e.g., 'en', 'zh', 'auto')")
-    whisperlivekit_model: str = Field(default="base", description="WhisperLiveKit model size: 'base', 'small', 'medium', 'large'")
+    whisperlivekit_backend: str = Field(default="mlx-whisper", description="WhisperLiveKit backend: 'mlx-whisper' (Apple Silicon), 'faster-whisper', 'whisper'")
+    whisperlivekit_model: str = Field(default="base", description="WhisperLiveKit model: 'base', 'small', 'medium', 'large', 'large-v3', 'large-v3-turbo'")
 
 
 class DreamConfig(Base):

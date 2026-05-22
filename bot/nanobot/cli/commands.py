@@ -1297,6 +1297,7 @@ def _run_gateway(
 
         wlk_model = config.channels.whisperlivekit_model or "base"
         wlk_language = config.channels.whisperlivekit_language or "auto"
+        wlk_backend = config.channels.whisperlivekit_backend or "mlx-whisper"
         wlk_host = "127.0.0.1"
         wlk_port = _whisperlivekit_port()
 
@@ -1317,13 +1318,14 @@ def _run_gateway(
 
         console.print(
             f"[cyan]→[/cyan] Starting WhisperLiveKit "
-            f"(model={wlk_model}, language={wlk_language}, pcm=true)..."
+            f"(backend={wlk_backend}, model={wlk_model}, language={wlk_language}, pcm=true)..."
         )
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",
             "from whisperlivekit.cli import main; main()",
             "serve",
+            "--backend", wlk_backend,
             "--model", wlk_model,
             "--language", wlk_language,
             "--host", wlk_host,

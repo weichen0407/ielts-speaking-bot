@@ -62,7 +62,7 @@ dependencies = [
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
     "boto3>=1.43.0",
-    "whisperlivekit>=0.2.20",
+    "whisperlivekit[mlx-whisper]>=0.2.20",
 ]
 
 [project.optional-dependencies]
