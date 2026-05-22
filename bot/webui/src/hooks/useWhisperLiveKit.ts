@@ -26,6 +26,10 @@ export interface UseWhisperLiveKitApi {
   stopRecording: () => void;
   /** Clear the transcript (called when message is sent). */
   clearTranscript: () => void;
+  /** Audio analyser node for waveform visualization. */
+  analyser: AnalyserNode | null;
+  /** Audio context for waveform visualization. */
+  audioContext: AudioContext | null;
 }
 
 interface WhisperLiveKitConfig {
@@ -72,6 +76,7 @@ export function useWhisperLiveKit(config?: WhisperLiveKitConfig): UseWhisperLive
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const recorderWorkerRef = useRef<Worker | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -112,6 +117,10 @@ export function useWhisperLiveKit(config?: WhisperLiveKitConfig): UseWhisperLive
     if (recorderWorkerRef.current) {
       recorderWorkerRef.current.terminate();
       recorderWorkerRef.current = null;
+    }
+
+    if (analyserRef.current) {
+      analyserRef.current = null;
     }
 
     if (audioContextRef.current) {
@@ -263,6 +272,12 @@ export function useWhisperLiveKit(config?: WhisperLiveKitConfig): UseWhisperLive
       mediaStreamRef.current = stream;
       const source = audioContext.createMediaStreamSource(stream);
 
+      // Create analyser for waveform visualization
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      source.connect(analyser);
+
       if (serverUseAudioWorkletRef.current && audioContext.audioWorklet) {
         try {
           await audioContext.audioWorklet.addModule("/web/pcm_worklet.js");
@@ -350,5 +365,7 @@ export function useWhisperLiveKit(config?: WhisperLiveKitConfig): UseWhisperLive
     startRecording,
     stopRecording,
     clearTranscript,
+    analyser: analyserRef.current,
+    audioContext: audioContextRef.current,
   };
 }

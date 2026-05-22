@@ -372,6 +372,7 @@ function VoiceInputStatus({
   status,
   error,
   recordingStartedAt,
+  analyser,
 }: {
   provider: "deepgram" | "whisperlivekit";
   isRecording: boolean;
@@ -379,15 +380,87 @@ function VoiceInputStatus({
   status: string;
   error: string | null;
   recordingStartedAt: number | null;
+  analyser: AnalyserNode | null;
 }) {
   const { t } = useTranslation();
   const [, setTick] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animationFrameRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isRecording || recordingStartedAt == null) return;
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, [isRecording, recordingStartedAt]);
+
+  // Waveform drawing effect
+  useEffect(() => {
+    if (!isRecording || !analyser || !canvasRef.current) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = 0;
+      }
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = 92;
+    const height = 36;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.scale(dpr, dpr);
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const draw = () => {
+      if (!analyser || !ctx) return;
+      analyser.getByteTimeDomainData(dataArray);
+
+      ctx.clearRect(0, 0, width, height);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = provider === "whisperlivekit"
+        ? "rgb(14, 165, 233)" // sky-500
+        : "rgb(34, 197, 94)"; // emerald-500
+      ctx.beginPath();
+
+      const sliceWidth = width / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * height) / 2;
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+
+        x += sliceWidth;
+      }
+
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+
+      animationFrameRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = 0;
+      }
+    };
+  }, [isRecording, analyser, provider]);
 
   if (!isRecording && !isProcessing && !error) return null;
 
@@ -441,32 +514,13 @@ function VoiceInputStatus({
           className="relative h-9 w-[92px] shrink-0 overflow-hidden rounded-full border border-sky-400/15 bg-background/55"
           aria-hidden
         >
-          <svg
-            viewBox="0 0 92 36"
+          <canvas
+            ref={canvasRef}
             className={cn(
-              "absolute inset-0 h-full w-[184px] text-sky-500/75 dark:text-sky-300/80",
-              isProcessing ? "animate-pulse" : "animate-voice-wave",
+              "absolute inset-0",
+              isProcessing ? "animate-pulse" : "",
             )}
-            preserveAspectRatio="none"
-          >
-            <path
-              d="M0 18 C5 8 10 8 15 18 S25 28 30 18 S40 8 45 18 S55 28 60 18 S70 8 75 18 S85 28 90 18 S100 8 105 18 S115 28 120 18 S130 8 135 18 S145 28 150 18 S160 8 165 18 S175 28 180 18"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-            />
-            <path
-              d="M0 18 C5 13 10 13 15 18 S25 23 30 18 S40 13 45 18 S55 23 60 18 S70 13 75 18 S85 23 90 18 S100 13 105 18 S115 23 120 18 S130 13 135 18 S145 23 150 18 S160 13 165 18 S175 23 180 18"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-              opacity="0.45"
-            />
-          </svg>
-          <span className="absolute inset-y-0 left-0 w-5 bg-gradient-to-r from-background/90 to-transparent" />
-          <span className="absolute inset-y-0 right-0 w-5 bg-gradient-to-l from-background/90 to-transparent" />
+          />
         </span>
       ) : null}
     </div>
@@ -512,6 +566,7 @@ export function ThreadComposer({
     startRecording,
     stopRecording,
     clearTranscript,
+    analyser,
   } = useVoiceInput();
   const imageMode = controlledImageMode ?? uncontrolledImageMode;
   const setImageMode = useCallback(
@@ -924,6 +979,7 @@ export function ThreadComposer({
           status={voiceStatus}
           error={voiceError}
           recordingStartedAt={recordingStartedAt}
+          analyser={analyser}
         />
         <textarea
           ref={textareaRef}

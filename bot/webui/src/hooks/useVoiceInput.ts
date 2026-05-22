@@ -39,6 +39,8 @@ export interface UseVoiceInputApi {
   clearTranscript: () => void;
   /** Current provider in use */
   provider: VoiceProvider;
+  /** Audio analyser node for waveform visualization (whisperlivekit only). */
+  analyser: AnalyserNode | null;
 }
 
 function getGlobalProvider(): VoiceProvider | null {
@@ -247,5 +249,6 @@ export function useVoiceInput(config?: VoiceInputConfig): UseVoiceInputApi {
     stopRecording,
     clearTranscript,
     provider,
+    analyser: wlk.analyser,
   };
 }
