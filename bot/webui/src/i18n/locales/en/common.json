@@ -188,6 +188,27 @@
     "hint": "Use ==word== to highlight keywords",
     "close": "Close"
   },
+  "globalNotes": {
+    "title": "Quick Notes",
+    "open": "Open notes",
+    "close": "Close",
+    "placeholder": "Write a note...",
+    "placeholderWithQuote": "Add your note about this...",
+    "add": "Add",
+    "withTimestamp": "Add with ASR time",
+    "timestamp": "Timestamp",
+    "currentSession": "Current session",
+    "cmdEnter": "Ctrl+Enter to add",
+    "empty": "No notes yet. Start taking notes!",
+    "export": "Export",
+    "clearAll": "Clear all",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "quote": "Add to notes",
+    "clearQuote": "Remove quote"
+  },
   "connection": {
     "idle": "Idle",
     "connecting": "Connecting…",

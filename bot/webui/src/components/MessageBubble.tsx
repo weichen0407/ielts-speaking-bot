@@ -5,7 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Sparkles, Wrench } from "lucide-react";
+import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Quote, Sparkles, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -13,11 +13,16 @@ import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
 import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
+import { useQuote } from "@/components/GlobalNotes";
 
 interface MessageBubbleProps {
   message: UIMessage;
   /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
   showAssistantCopyAction?: boolean;
+  /** Index of this message in the thread (0-based). Used for quote references. */
+  messageIndex?: number;
+  /** Total number of messages in thread. Used for quote references. */
+  messageCount?: number;
 }
 
 /**
@@ -32,11 +37,14 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   showAssistantCopyAction = true,
+  messageIndex = 0,
+  messageCount: _messageCount = 1,
 }: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
   const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
+  const { startQuote } = useQuote() ?? {};
 
   useEffect(() => {
     return () => {
@@ -91,6 +99,27 @@ export function MessageBubble({
             {message.content}
           </p>
         ) : null}
+        {/* Quote button for user messages */}
+        {startQuote && hasText && (
+          <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              type="button"
+              onClick={() => {
+                const ref = `user:${messageIndex}`;
+                startQuote(ref, message.content.trim().slice(0, 200));
+              }}
+              aria-label={t("globalNotes.quote")}
+              title={t("globalNotes.quote")}
+              className={cn(
+                "inline-flex h-7 w-7 items-center justify-center rounded-full",
+                "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              <Quote className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -123,6 +152,24 @@ export function MessageBubble({
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
             <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+              {startQuote && message.content.trim() ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ref = `${message.role}:${messageIndex}`;
+                    startQuote(ref, message.content.trim().slice(0, 200));
+                  }}
+                  aria-label={t("globalNotes.quote")}
+                  title={t("globalNotes.quote")}
+                  className={cn(
+                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                    "transition-colors hover:bg-muted/55 hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  )}
+                >
+                  <Quote className="h-4 w-4" aria-hidden />
+                </button>
+              ) : null}
               {showCopyButton ? (
                 <button
                   type="button"

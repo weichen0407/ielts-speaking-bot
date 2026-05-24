@@ -111,6 +111,38 @@ export async function fetchSessionNotes(
   );
 }
 
+// Global notes API (cross-session user notebook)
+export interface GlobalNotesResponse {
+  date: string;
+  content: string;
+}
+
+export async function fetchGlobalNotes(
+  token: string,
+  date: string,
+  base: string = "",
+): Promise<GlobalNotesResponse> {
+  return request<GlobalNotesResponse>(
+    `${base}/api/notes?date=${encodeURIComponent(date)}`,
+    token,
+  );
+}
+
+export async function saveGlobalNotes(
+  token: string,
+  date: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  entries: any[],
+  base: string = "",
+): Promise<{ date: string; saved: boolean }> {
+  // Use GET with query params since WsRequest doesn't expose body directly
+  const dataParam = encodeURIComponent(JSON.stringify(entries));
+  return request<{ date: string; saved: boolean }>(
+    `${base}/api/notes?date=${encodeURIComponent(date)}&data=${dataParam}`,
+    token,
+  );
+}
+
 // Benative API types
 export interface BenativeArticle {
   id: string;

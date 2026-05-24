@@ -9,6 +9,12 @@ import { SessionNotesSheet } from "@/components/SessionNotesSheet";
 import { ArticleSelectDialog } from "@/components/ArticleSelectDialog";
 import { BenativeProgressIndicator } from "@/components/BenativeProgressIndicator";
 import { BenativeNotesSheet } from "@/components/BenativeNotesSheet";
+import {
+  GlobalNotesFloatingButton,
+  GlobalNotesPanel,
+  QuoteProvider,
+  useGlobalNotes,
+} from "@/components/GlobalNotes";
 
 import { useSessions } from "@/hooks/useSessions";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
@@ -325,6 +331,9 @@ function Shell({
   >([]);
   const subagentTimers = useRef<Map<string, number>>(new Map());
 
+  // Global notes
+  const globalNotes = useGlobalNotes();
+
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -574,6 +583,7 @@ function Shell({
 
   return (
     <ThemeProvider theme={theme}>
+      <QuoteProvider onQuote={() => globalNotes.open()}>
       <div className="relative flex h-full w-full overflow-hidden">
         {/* Desktop sidebar: in normal flow, so the thread area width stays honest. */}
         {showMainSidebar ? (
@@ -714,7 +724,16 @@ function Shell({
           sessionKey={benativeNotesSheetState.sessionKey}
           sessionTitle={benativeNotesSheetState.title}
         />
+
+        {/* Global Notes - Floating Notebook */}
+        <GlobalNotesPanel
+          api={globalNotes}
+          sessionKey={activeSession?.key ?? null}
+          sessionTitle={activeSession?.title ?? headerTitle}
+        />
+        <GlobalNotesFloatingButton api={globalNotes} />
       </div>
+      </QuoteProvider>
     </ThemeProvider>
   );
 }

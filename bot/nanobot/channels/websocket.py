@@ -693,6 +693,11 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_session_notes(request, m.group(1))
 
+        # Global notes (cross-session user notebook)
+        m = re.match(r"^/api/notes$", got)
+        if m:
+            return self._handle_global_notes(request)
+
         # Benative endpoints
         m = re.match(r"^/api/sessions/([^/]+)/benative$", got)
         if m:
@@ -1389,6 +1394,168 @@ class WebSocketChannel(BaseChannel):
         # Return empty if no notes found (session might not exist or have no notes yet)
         return _http_json_response(notes)
 
+    def _handle_global_notes(self, request: WsRequest) -> Response:
+        """Get or save global user notes.
+
+        GET /api/notes?date=YYYY-MM-DD - Returns notes for the specified date
+        POST /api/notes?date=YYYY-MM-DD&data=<urlencoded json> - Save notes
+
+        Storage structure (under ielts-speaking-bot/user-notes/):
+        - notes.json: Raw data (source of truth)
+        - by-date/YYYY-MM-DD.md: Notes grouped by date
+        - by-session/{session-key}.md: Notes grouped by session
+        """
+        from urllib.parse import parse_qs, unquote
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        # Get project root directory (ielts-speaking-bot/, not bot/)
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        user_notes_dir = project_root / "user-notes"
+        by_date_dir = user_notes_dir / "by-date"
+        by_session_dir = user_notes_dir / "by-session"
+
+        # Debug logging
+        logger.info(f"[GlobalNotes] request.path: {request.path}")
+
+        query_string = request.path[request.path.find('?')+1:] if '?' in request.path else ''
+        query_params = parse_qs(query_string)
+        date_str = query_params.get("date", [""])[0]
+        has_data = "data=" in request.path
+
+        logger.info(f"[GlobalNotes] date_str: {date_str}, has_data: {has_data}")
+
+        if not has_data:
+            # GET request - return markdown for the date
+            if not date_str:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+
+            notes_file = by_date_dir / f"user-note-{date_str}.md"
+            if notes_file.exists():
+                content = notes_file.read_text(encoding="utf-8")
+                return _http_json_response({"date": date_str, "content": content})
+            return _http_json_response({"date": date_str, "content": ""})
+
+        # POST request - save notes
+        try:
+            import json
+
+            logger.info(f"[GlobalNotes] POST section reached, date_str={date_str}")
+
+            if not date_str:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+
+            data_param = query_params.get("data", [""])[0]
+            if not data_param:
+                logger.warning(f"[GlobalNotes] missing data_param")
+                return _http_error(400, "missing data parameter")
+
+            # Parse full entries but only store key fields
+            full_entries = json.loads(unquote(data_param))
+            logger.info(f"[GlobalNotes] parsed {len(full_entries)} entries")
+
+            # Simplify entries - only keep key fields
+            entries = []
+            for entry in full_entries:
+                simplified = {
+                    "id": entry.get("id"),
+                    "timestamp": entry.get("timestamp"),
+                    "sessionTitle": entry.get("sessionTitle") or entry.get("sessionKey"),
+                    "content": entry.get("content", ""),
+                    "quotedContent": entry.get("quotedContent"),
+                }
+                entries.append(simplified)
+
+            logger.info(f"[GlobalNotes] simplified to {len(entries)} entries")
+            logger.info(f"[GlobalNotes] writing to dirs: user_notes={user_notes_dir}, by_date={by_date_dir}, by_session={by_session_dir}")
+
+            # Create directories
+            user_notes_dir.mkdir(parents=True, exist_ok=True)
+            by_date_dir.mkdir(parents=True, exist_ok=True)
+            by_session_dir.mkdir(parents=True, exist_ok=True)
+
+            # 1. Save raw JSON
+            notes_json_file = user_notes_dir / "notes.json"
+            notes_json_file.write_text(json.dumps({
+                "date": date_str,
+                "entries": entries
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+            logger.info(f"[GlobalNotes] wrote notes.json")
+
+            # 2. Generate by-date markdown
+            date_md = self._generate_notes_markdown(entries, date_str, "date")
+            date_md_file = by_date_dir / f"user-note-{date_str}.md"
+            date_md_file.write_text(date_md, encoding="utf-8")
+
+            # 3. Generate by-session markdowns
+            session_entries: dict[str, list] = {}
+            for entry in entries:
+                session_key = entry.get("sessionTitle") or "unknown"
+                if session_key not in session_entries:
+                    session_entries[session_key] = []
+                session_entries[session_key].append(entry)
+
+            for session_key, sess_entries in session_entries.items():
+                safe_key = session_key.replace("/", "_").replace(":", "_").replace(" ", "_")
+                session_md = self._generate_notes_markdown(sess_entries, date_str, "session", session_key)
+                session_md_file = by_session_dir / f"{safe_key}.md"
+                session_md_file.write_text(session_md, encoding="utf-8")
+
+            return _http_json_response({"date": date_str, "saved": True})
+        except json.JSONDecodeError:
+            return _http_error(400, "invalid JSON")
+        except Exception as e:
+            logger.warning("Failed to save global notes: {}", e)
+            return _http_error(500, f"failed to save notes: {e}")
+
+    def _generate_notes_markdown(self, entries: list, date_str: str, mode: str = "date", session_key: str | None = None) -> str:
+        """Generate markdown content from entries.
+
+        Only includes key fields: sessionTitle, content, quotedContent
+        """
+        from datetime import datetime
+
+        lines = []
+
+        if mode == "date":
+            lines.append(f"# Notes - {date_str}")
+            lines.append("")
+        else:
+            lines.append(f"# Notes - {session_key}")
+            lines.append(f"*Date: {date_str}*")
+            lines.append("")
+
+        for entry in entries:
+            timestamp = entry.get("timestamp")
+            if timestamp:
+                if isinstance(timestamp, (int, float)):
+                    timestamp = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            session_title = entry.get("sessionTitle") or session_key or "Unknown"
+            content = entry.get("content", "")
+            quoted = entry.get("quotedContent")
+
+            lines.append("---")
+            lines.append(f"**[{timestamp}]** | {session_title}")
+
+            if quoted:
+                lines.append("")
+                for ql in str(quoted).split('\n'):
+                    lines.append(f"> {ql}")
+
+            if content:
+                lines.append("")
+                lines.append(content)
+
+            lines.append("")
+
+        return "\n".join(lines)
+
     def _handle_benative_articles(self, request: WsRequest) -> Response:
         """List available benative articles."""
         if not self._check_api_token(request):
@@ -1432,7 +1599,7 @@ class WebSocketChannel(BaseChannel):
         if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
 
-        session = self._session_manager.sessions.get(decoded_key)
+        session = self._session_manager._cache.get(decoded_key)
         if not session:
             return _http_json_response({})
 
@@ -1505,7 +1672,7 @@ class WebSocketChannel(BaseChannel):
         if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
 
-        session = self._session_manager.sessions.get(decoded_key)
+        session = self._session_manager._cache.get(decoded_key)
         if not session:
             return _http_json_response({"responses": []})
 

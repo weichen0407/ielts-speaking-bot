@@ -1,5 +1,155 @@
 # Update Log
 
+## 2026-05-23 - 全局笔记本（Global Notes）
+
+本次更新在 WebUI 中添加了一个全局悬浮笔记本功能，用户可以在任何对话中快速记录笔记，支持引用消息内容和 ASR 时间戳。
+
+---
+
+## 1. 全局笔记本组件
+
+### 新增文件
+
+**`bot/webui/src/components/GlobalNotes.tsx`**
+- `useGlobalNotes` hook：管理笔记状态、通过 API 持久化到后端
+- `GlobalNotesPanel` 组件：笔记本面板 UI，支持添加/编辑/删除笔记
+- `GlobalNotesFloatingButton` 组件：右下角悬浮按钮
+- `QuoteProvider` / `useQuote` context：管理消息引用状态
+- 支持功能：
+  - 点击消息的 Quote 按钮添加引用（临时状态）
+  - 录音时可添加 ASR 时间戳
+  - 笔记按时间倒序显示
+  - 编辑和删除单条笔记
+
+### UI 特性
+
+- 笔记本面板：宽度 384px，最大高度 576px
+- 悬浮按钮：右下角固定位置，点击展开/收起
+- 引用预览：在输入框上方显示待添加的引用内容
+- 引用样式：紫色左边框 + 浅紫色背景
+
+---
+
+## 2. 消息引用功能
+
+### 修改文件
+
+**`bot/webui/src/components/MessageBubble.tsx`**
+- 用户消息和助手消息添加 Quote 按钮
+- 鼠标悬停时显示引用按钮
+- 点击后自动打开笔记本面板
+- 引用作为临时状态，只有点击 "Add" 才保存
+
+### 交互流程
+
+```
+1. 鼠标悬停在消息上 → 显示 Quote 按钮
+2. 点击 Quote 按钮 → 笔记本面板自动打开
+3. 输入框上方显示引用的内容（带 X 可移除）
+4. 可选：在输入框写备注
+5. 点击 Add → 笔记保存，包含引用内容
+```
+
+---
+
+## 3. 后端笔记 API
+
+### 修改文件
+
+**`bot/nanobot/channels/websocket.py`**
+- 新增 `_handle_global_notes()` 处理函数
+- 新增 `_generate_notes_markdown()` 生成 markdown 格式
+- GET `/api/notes?date=YYYY-MM-DD` - 读取指定日期的笔记
+- POST `/api/notes?date=...&data=...` - 保存笔记（通过 query 参数传递数据，因为 WsRequest 不直接暴露 body）
+
+### 存储结构
+
+```
+ielts-speaking-bot/user-notes/
+├── notes.json                              # 原始数据 (source of truth)
+├── by-date/
+│   └── user-note-2026-05-23.md          # 按日期组织的笔记
+└── by-session/
+    └── My_Session.md                      # 按 session 组织的笔记
+```
+
+### 笔记 JSON 格式
+
+```json
+{
+  "date": "2026-05-23",
+  "entries": [
+    {
+      "id": "...",
+      "timestamp": 1747992000000,
+      "sessionTitle": "Family",
+      "content": "123",
+      "quotedContent": "A cat counts as a family member too"
+    }
+  ]
+}
+```
+
+### Markdown 格式
+
+```markdown
+# Notes - 2026-05-23
+
+---
+**[2026-05-23 20:01:04]** | Family
+
+> A cat counts as a family member too
+
+123
+
+---
+```
+
+---
+
+## 4. SessionManager 修复
+
+### 修改文件
+
+**`bot/nanobot/channels/websocket.py`**
+- 修复两处 `.sessions` 属性访问错误（第 1435 和 1508 行）
+- `SessionManager` 使用 `_cache` 而非 `sessions` 属性
+- 涉及函数：
+  - `_handle_session_benative_progress`
+  - `_handle_session_benative_responses`
+
+---
+
+## 5. 其他更新
+
+**`bot/webui/src/lib/api.ts`**
+- 新增 `fetchGlobalNotes()` 和 `saveGlobalNotes()` API 函数
+- 保存时使用 query 参数传递数据
+
+**`.gitignore`**
+- 添加 `user-notes/` 目录
+
+**`bot/webui/src/i18n/locales/en/common.json`**
+- 新增 `globalNotes.*` 翻译文案
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| `bot/webui/src/components/GlobalNotes.tsx` | 新增：全局笔记本组件、QuoteProvider、useQuote hook |
+| `bot/webui/src/components/MessageBubble.tsx` | 新增：Quote 按钮和引用功能 |
+| `bot/webui/src/App.tsx` | 集成 GlobalNotes 和 QuoteProvider |
+| `bot/webui/src/lib/api.ts` | 新增：fetchGlobalNotes、saveGlobalNotes API |
+| `bot/nanobot/channels/websocket.py` | 新增：_handle_global_notes、_generate_notes_markdown；修复：.sessions → _cache |
+| `bot/webui/src/i18n/locales/en/common.json` | 新增：globalNotes.* 翻译 |
+| `.gitignore` | 新增：user-notes/ |
+
+---
+
+*Update created: 2026-05-23*
+
 ## 2026-05-22 - WhisperLiveKit 本地语音输入集成
 
 本次更新将 WhisperLiveKit 本地实时转写能力接入 nanobot WebUI，使 `uv run nanobot gateway` 可以在本机自动启动 WhisperLiveKit，并在聊天输入框中提供带声音波纹状态的麦克风输入体验。
