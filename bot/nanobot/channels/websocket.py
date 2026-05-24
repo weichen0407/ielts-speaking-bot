@@ -698,6 +698,19 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_global_notes(request)
 
+        # Notes AI Assistant endpoints
+        m = re.match(r"^/api/notes/ai-reply$", got)
+        if m:
+            return self._handle_notes_ai_reply_request(request)
+
+        m = re.match(r"^/api/notes/ai-reply/status$", got)
+        if m:
+            return self._handle_notes_ai_reply_status(request)
+
+        m = re.match(r"^/api/notes/ai-replies$", got)
+        if m:
+            return self._handle_notes_ai_replies_list(request)
+
         # Benative endpoints
         m = re.match(r"^/api/sessions/([^/]+)/benative$", got)
         if m:
@@ -1406,6 +1419,7 @@ class WebSocketChannel(BaseChannel):
         - by-session/{session-key}.md: Notes grouped by session
         """
         from urllib.parse import parse_qs, unquote
+        from datetime import datetime
 
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1430,6 +1444,19 @@ class WebSocketChannel(BaseChannel):
 
         if not has_data:
             # GET request - return markdown for the date
+            all_dates = query_params.get("all_dates", [""])[0]
+
+            if all_dates.lower() == "true":
+                # Return all dates with their content
+                dates = []
+                if by_date_dir.exists():
+                    for f in sorted(by_date_dir.iterdir(), reverse=True):
+                        if f.suffix == ".md" and f.stem.startswith("user-note-"):
+                            date_key = f.stem.replace("user-note-", "")
+                            content = f.read_text(encoding="utf-8")
+                            dates.append({"date": date_key, "content": content})
+                return _http_json_response({"dates": dates})
+
             if not date_str:
                 date_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -1511,6 +1538,190 @@ class WebSocketChannel(BaseChannel):
             logger.warning("Failed to save global notes: {}", e)
             return _http_error(500, f"failed to save notes: {e}")
 
+    def _handle_notes_ai_reply_request(self, request: WsRequest) -> Response:
+        """Trigger AI reply generation for a note.
+
+        GET /api/notes/ai-reply?note_id=xxx&date=YYYY-MM-DD&reply_type=encouragement&note_content=xxx&quoted_content=xxx
+        """
+        from datetime import datetime
+        import json
+        import uuid
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find('?')+1:] if '?' in request.path else ''
+        query_params = parse_qs(query_string)
+
+        note_id = query_params.get("note_id", [""])[0]
+        date = query_params.get("date", [""])[0]
+        reply_type = query_params.get("reply_type", ["encouragement"])[0]
+        note_content = query_params.get("note_content", [""])[0]
+        quoted_content = query_params.get("quoted_content", [None])[0]
+
+        if not note_id or not date:
+            return _http_error(400, "note_id and date are required")
+
+        # Generate a task_id for tracking
+        task_id = f"notes-ai-{uuid.uuid4().hex[:8]}"
+
+        # Write task to queue file for AgentLoop to process
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        queue_file = project_root / "user-notes" / ".notes_ai_queue.json"
+        queue_file.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            queue_data = {}
+            if queue_file.exists():
+                try:
+                    queue_data = json.loads(queue_file.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    queue_data = {}
+        except Exception:
+            queue_data = {}
+
+        if "tasks" not in queue_data:
+            queue_data["tasks"] = []
+
+        queue_data["tasks"].append({
+            "task_id": task_id,
+            "note_id": note_id,
+            "date": date,
+            "reply_type": reply_type,
+            "note_content": note_content,
+            "quoted_content": quoted_content,
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+        })
+
+        queue_file.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        logger.info(f"[NotesAI] Reply request queued: note_id={note_id}, date={date}, task_id={task_id}")
+
+        return _http_json_response({
+            "task_id": task_id,
+            "status": "started",
+            "message": "AI reply generation started"
+        })
+
+    def _handle_notes_ai_reply_status(self, request: WsRequest) -> Response:
+        """Query AI reply generation status.
+
+        GET /api/notes/ai-reply/status?task_id=xxx
+        """
+        import json
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find('?')+1:] if '?' in request.path else ''
+        query_params = parse_qs(query_string)
+
+        task_id = query_params.get("task_id", [""])[0]
+
+        if not task_id:
+            return _http_error(400, "task_id is required")
+
+        # Read task status from queue file
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        queue_file = project_root / "user-notes" / ".notes_ai_queue.json"
+
+        task_status = "running"
+        task_data = None
+
+        if queue_file.exists():
+            try:
+                queue_data = json.loads(queue_file.read_text(encoding="utf-8"))
+                for task in queue_data.get("tasks", []):
+                    if task.get("task_id") == task_id:
+                        task_status = task.get("status", "running")
+                        if task_status == "done":
+                            task_data = task.get("result")
+                        break
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        return _http_json_response({
+            "task_id": task_id,
+            "status": task_status,
+            "reply": task_data,
+            "error": None
+        })
+
+    def _handle_notes_ai_replies_list(self, request: WsRequest) -> Response:
+        """Get all AI replies for a date.
+
+        GET /api/notes/ai-replies?date=YYYY-MM-DD
+        """
+        from datetime import datetime
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find('?')+1:] if '?' in request.path else ''
+        query_params = parse_qs(query_string)
+
+        date = query_params.get("date", [""])[0]
+        if not date:
+            date = datetime.now().strftime("%Y-%m-%d")
+
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        ai_replies_dir = project_root / "user-notes" / "ai-replies" / "by-date"
+        index_file = project_root / "user-notes" / "ai-replies" / "index.json"
+
+        logger.info(f"[NotesAI] _handle_notes_ai_replies_list: date={date}, query_params={dict(query_params)}")
+
+        replies = []
+
+        # Read from index file if exists
+        logger.info(f"[NotesAI] index_file path: {index_file}")
+        logger.info(f"[NotesAI] index_file exists: {index_file.exists()}")
+        # Read raw file content for debugging
+        if index_file.exists():
+            raw_content = index_file.read_text(encoding="utf-8")
+            logger.info(f"[NotesAI] index_file raw content length: {len(raw_content)}")
+            logger.info(f"[NotesAI] index_file raw content: {raw_content[:500]}")
+            import json
+            try:
+                index_data = json.loads(index_file.read_text(encoding="utf-8"))
+                raw_replies = list(index_data.get("replies", {}).values())
+                logger.info(f"[NotesAI] Raw replies from index: {len(raw_replies)} items")
+                # Transform to match frontend's AiReplyEntry interface
+                from datetime import datetime
+                for r in raw_replies:
+                    # Map 'id' (noteId) to 'noteId' for frontend compatibility
+                    note_id = r.pop("id", r.get("noteId", ""))
+                    r["noteId"] = note_id
+                    logger.info(f"[NotesAI] Transformed noteId: {note_id}")
+                    # Convert ISO timestamp string to milliseconds
+                    ts = r.get("timestamp", "")
+                    if ts:
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("+08:00", "").replace("Z", ""))
+                            r["timestamp"] = int(dt.timestamp() * 1000)
+                        except Exception:
+                            r["timestamp"] = 0
+                    # Extract date from timestamp for filtering
+                    if ts:
+                        try:
+                            dt = datetime.fromisoformat(ts.replace("+08:00", "").replace("Z", ""))
+                            r["date"] = dt.strftime("%Y-%m-%d")
+                        except Exception:
+                            r["date"] = ""
+
+                replies = raw_replies
+                logger.info(f"[NotesAI] Transformed replies: {len(replies)} items, first noteId={replies[0].get('noteId') if replies else 'none'}")
+            except json.JSONDecodeError:
+                pass
+
+        # Filter by date if requested
+        if date:
+            replies = [r for r in replies if r.get("date") == date]
+            logger.info(f"[NotesAI] After date filter ({date}): {len(replies)} items")
+
+        logger.info(f"[NotesAI] Final response: {len(replies)} replies")
+        return _http_json_response({"date": date, "replies": replies})
+
     def _generate_notes_markdown(self, entries: list, date_str: str, mode: str = "date", session_key: str | None = None) -> str:
         """Generate markdown content from entries.
 
@@ -1529,6 +1740,7 @@ class WebSocketChannel(BaseChannel):
             lines.append("")
 
         for entry in entries:
+            entry_id = entry.get("id", "unknown")
             timestamp = entry.get("timestamp")
             if timestamp:
                 if isinstance(timestamp, (int, float)):
@@ -1541,7 +1753,7 @@ class WebSocketChannel(BaseChannel):
             quoted = entry.get("quotedContent")
 
             lines.append("---")
-            lines.append(f"**[{timestamp}]** | {session_title}")
+            lines.append(f"**[{timestamp}]** | {session_title} **[id:{entry_id}]**")
 
             if quoted:
                 lines.append("")

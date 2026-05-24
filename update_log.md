@@ -1,5 +1,104 @@
 # Update Log
 
+## 2026-05-24 - AI 回复笔记 / QuickNote Session 过滤
+
+本次更新为全局笔记本添加了 AI 智能回复生成功能，并修复了 QuickNote 面板的 session 过滤问题。
+
+---
+
+## 1. AI 回复笔记功能
+
+### 功能概述
+
+用户可以点击笔记卡片的 "AI Reply" 按钮，系统会异步生成针对该笔记的鼓励/建议/纠错回复，并自动关联到对应笔记。
+
+### 后端修改
+
+**`bot/nanobot/agent/loop.py`**
+- 修复 `_check_notes_ai_queue()` 中的变量遮蔽问题：`task` → `task_prompt`
+- 修复错误引用变量：`task` → `task_item`
+- 队列任务处理逻辑正确更新 task_item 状态
+
+**`bot/nanobot/channels/websocket.py`**
+- 新增 `_handle_notes_ai_reply_request()`：接收 AI 回复请求，写入队列
+- 新增 `_handle_notes_ai_reply_status()`：查询任务状态
+- 新增 `_handle_notes_ai_replies_list()`：获取 AI 回复列表
+- 修复字段映射：index.json 的 `id` → `noteId`，`timestamp` ISO 字符串 → 毫秒，`date` 字段提取
+- 修改 `_generate_notes_markdown()`：markdown 头部包含 `[id:xxx]` 用于 ID 持久化
+
+### 前端修改
+
+**`bot/webui/src/components/NotesBookSheet.tsx`**
+- 新增 `triggerNotesAiReply()` 调用触发 AI 回复
+- 新增轮询逻辑：每 2 秒查询任务状态，完成后重新获取数据刷新 UI
+- 导入 `fetchNotesAiReplyStatus` API
+- 绿色 Check 图标：有 AI 回复的笔记显示绿色对勾
+
+**`bot/webui/src/components/GlobalNotes.tsx`**
+- `parseNotesContent()` 支持从 markdown 提取 `[id:xxx]` 格式的 ID
+- `GlobalNotesPanel` 支持按 sessionTitle 过滤笔记
+
+### 数据流
+
+```
+1. 用户点击 AI Reply → POST /api/notes/ai-reply?note_id=xxx&...
+2. 后端写入 .notes_ai_queue.json (status: pending)
+3. AgentLoop 定时检查队列 → spawn subagent 生成回复
+4. Subagent 写入 user-notes/ai-replies/index.json
+5. 前端轮询状态 → 完成则重新获取笔记和 AI 回复
+6. 前端匹配 note.id === aiReply.noteId → 显示回复
+```
+
+### 存储结构
+
+```
+user-notes/
+├── .notes_ai_queue.json          # AI 回复任务队列
+└── ai-replies/
+    ├── index.json                # AI 回复索引
+    └── by-date/                  # 按日期的回复文件
+        └── ai-reply-YYYY-MM-DD.md
+```
+
+---
+
+## 2. QuickNote Session 过滤
+
+### 问题
+
+切换 session 后，QuickNote 悬浮面板仍然显示所有 session 的笔记。
+
+### 修复
+
+**`bot/webui/src/components/GlobalNotes.tsx`**
+- `GlobalNotesPanel` 接收 `sessionTitle` prop
+- 新增 `displayEntries` 过滤：仅当 `entry.sessionTitle === 当前 sessionTitle` 时显示
+- 空 sessionTitle 时显示所有笔记（保持原有行为）
+
+---
+
+## 3. 修复的其他问题
+
+- `parseNotesContent` 每次解析都生成新 ID → 改为从 markdown 提取持久化的 ID
+- AI 回复字段映射：后端返回 `id` 而非 `noteId`，ISO 时间戳未转换
+- 前端触发 AI 回复后不刷新 → 添加轮询和 UI 更新
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| `bot/nanobot/agent/loop.py` | 修复变量遮蔽、错误引用 |
+| `bot/nanobot/channels/websocket.py` | 新增 AI reply API、markdown 含 ID、字段映射 |
+| `bot/webui/src/components/NotesBookSheet.tsx` | AI 回复轮询、绿色对勾图标 |
+| `bot/webui/src/components/GlobalNotes.tsx` | ID 提取、session 过滤 |
+| `bot/webui/src/lib/api.ts` | 新增 fetchNotesAiReplyStatus |
+
+---
+
+*Update created: 2026-05-24*
+
 ## 2026-05-23 - 全局笔记本（Global Notes）
 
 本次更新在 WebUI 中添加了一个全局悬浮笔记本功能，用户可以在任何对话中快速记录笔记，支持引用消息内容和 ASR 时间戳。

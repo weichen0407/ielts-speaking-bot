@@ -1013,6 +1013,8 @@ class AgentLoop:
                     self._schedule_background,
                     active_session_keys=self._pending_queues.keys(),
                 )
+                # Check notes AI queue for pending tasks
+                await self._check_notes_ai_queue()
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
@@ -1414,6 +1416,9 @@ class AgentLoop:
         if ctx.session is not None:
             await self._maybe_spawn_periodic_subagents(ctx.session, ctx.msg)
 
+        # Check notes AI queue after each turn
+        await self._check_notes_ai_queue()
+
         return ctx.outbound
 
     def _assemble_outbound(
@@ -1499,6 +1504,116 @@ class AgentLoop:
 
         for trigger in triggers:
             await self._spawn_counter_subagent(session, msg, trigger, session_dir)
+
+    async def _check_notes_ai_queue(self) -> None:
+        """Check and process notes AI reply queue.
+
+        Reads pending tasks from user-notes/.notes_ai_queue.json and spawns
+        subagents to generate AI replies for each task.
+        """
+        import json
+
+        try:
+            project_root = Path(__file__).resolve().parent.parent.parent.parent
+            queue_file = project_root / "user-notes" / ".notes_ai_queue.json"
+
+            if not queue_file.exists():
+                return
+
+            try:
+                queue_data = json.loads(queue_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, IOError):
+                return
+
+            tasks = queue_data.get("tasks", [])
+            if not tasks:
+                return
+
+            # Process pending tasks
+            updated_tasks = []
+            for task_item in tasks:
+                if task_item.get("status") != "pending":
+                    updated_tasks.append(task_item)
+                    continue
+
+                # Spawn subagent for this task
+                task_id = task_item.get("task_id")
+                note_id = task_item.get("note_id")
+                date = task_item.get("date")
+                reply_type = task_item.get("reply_type", "encouragement")
+                note_content = task_item.get("note_content", "")
+                quoted_content = task_item.get("quoted_content")
+
+                logger.info(f"[NotesAI] Processing task {task_id} for note {note_id}")
+
+                try:
+                    # Read the subagent definition
+                    subagent_file = project_root / "subagents" / "cross_session" / "notes_ai_assistant_subagent.md"
+                    if not subagent_file.exists():
+                        logger.warning(f"[NotesAI] Subagent definition not found")
+                        task_item["status"] = "error"
+                        task_item["error"] = "Subagent definition not found"
+                        updated_tasks.append(task_item)
+                        continue
+
+                    subagent_content = subagent_file.read_text()
+                    # Replace {{ workspace }} in subagent definition with project root
+                    # (where user-notes/ directory lives), not the agent workspace
+                    project_root = Path(__file__).resolve().parent.parent.parent.parent
+                    subagent_content = subagent_content.replace("{{ workspace }}", str(project_root))
+
+                    # Build context with note data
+                    quoted_section = ""
+                    if quoted_content:
+                        quoted_section = f"Original Quoted Content:\n{quoted_content}\n\n"
+
+                    note_context = f"""# Input Data for AI Reply Generation
+
+Note ID: {note_id}
+Date: {date}
+Reply Type: {reply_type}
+
+Note Content:
+{note_content}
+
+{quoted_section}---
+"""
+
+                    # Task is the note context, extra_system_prompt is the subagent definition
+                    # (same pattern as memory subagent)
+                    task_prompt = "Generate AI reply for this note and save to files using write_file tool."
+                    extra_prompt = note_context + subagent_content
+
+                    # Spawn the subagent
+                    # Use "websocket" as origin_channel (a valid registered channel)
+                    # since announce_result=False means no message will actually be sent
+                    task_id_result = await self.subagents.spawn(
+                        task=task_prompt,
+                        label=f"AI Reply for note",
+                        origin_channel="websocket",
+                        origin_chat_id=f"notes-ai:{note_id}",
+                        session_key="notes-ai:direct",
+                        announce_result=False,
+                        extra_system_prompt=extra_prompt,
+                    )
+
+                    logger.info(f"[NotesAI] Spawned subagent for task {task_id}: {task_id_result[:8]}...")
+                    task_item["status"] = "done"
+                    task_item["result"] = {"task_id": task_id_result}
+
+                except Exception as e:
+                    logger.warning(f"[NotesAI] Error processing task {task_id}: {e}")
+                    task_item["status"] = "error"
+                    task_item["error"] = str(e)
+
+                updated_tasks.append(task_item)
+
+            # Write back updated queue
+            queue_data["tasks"] = updated_tasks
+            queue_file.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        except Exception as e:
+            logger.warning(f"[NotesAI] Error checking queue: {e}")
 
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)

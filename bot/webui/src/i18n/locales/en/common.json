@@ -46,6 +46,7 @@
     "home": "Home",
     "newChat": "New chat",
     "freeChat": "Free chat",
+    "notesBook": "Notes Book",
     "searchAria": "Search chats",
     "searchPlaceholder": "Search chats",
     "searchResults": "Results",
@@ -208,6 +209,21 @@
     "edit": "Edit",
     "quote": "Add to notes",
     "clearQuote": "Remove quote"
+  },
+  "notesBook": {
+    "title": "Notes Book",
+    "allDates": "All dates",
+    "clearFilter": "Clear",
+    "empty": "No notes yet.",
+    "noteDetail": "Note Detail",
+    "noContent": "(No content)",
+    "delete": "Delete",
+    "edit": "Edit",
+    "editNote": "Edit Note",
+    "cancel": "Cancel",
+    "save": "Save",
+    "aiReply": "Generate AI Reply",
+    "aiReplying": "Generating..."
   },
   "connection": {
     "idle": "Idle",

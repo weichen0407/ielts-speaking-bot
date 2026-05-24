@@ -33,6 +33,8 @@
     "toggleTheme": "切换主题",
     "home": "首页",
     "newChat": "新建对话",
+    "freeChat": "自由对话",
+    "notesBook": "笔记本",
     "searchAria": "搜索会话",
     "searchPlaceholder": "搜索会话",
     "searchResults": "搜索结果",
@@ -164,6 +166,21 @@
     "description": "此操作无法撤销。",
     "cancel": "取消",
     "confirm": "删除"
+  },
+  "notesBook": {
+    "title": "笔记本",
+    "allDates": "所有日期",
+    "clearFilter": "清除",
+    "empty": "暂无笔记",
+    "noteDetail": "笔记详情",
+    "noContent": "（无内容）",
+    "delete": "删除",
+    "edit": "编辑",
+    "editNote": "编辑笔记",
+    "cancel": "取消",
+    "save": "保存",
+    "aiReply": "AI 回复",
+    "aiReplying": "生成中..."
   },
   "connection": {
     "idle": "空闲",

@@ -117,6 +117,23 @@ export interface GlobalNotesResponse {
   content: string;
 }
 
+export interface AllGlobalNotesResponse {
+  dates: Array<{
+    date: string;
+    content: string;
+  }>;
+}
+
+export async function fetchAllGlobalNotes(
+  token: string,
+  base: string = "",
+): Promise<AllGlobalNotesResponse> {
+  return request<AllGlobalNotesResponse>(
+    `${base}/api/notes?all_dates=true`,
+    token,
+  );
+}
+
 export async function fetchGlobalNotes(
   token: string,
   date: string,
@@ -139,6 +156,80 @@ export async function saveGlobalNotes(
   const dataParam = encodeURIComponent(JSON.stringify(entries));
   return request<{ date: string; saved: boolean }>(
     `${base}/api/notes?date=${encodeURIComponent(date)}&data=${dataParam}`,
+    token,
+  );
+}
+
+// Notes AI Assistant API types
+export interface AiReplyEntry {
+  id: string;
+  noteId: string;
+  timestamp: number;
+  replyContent: string;
+  replyType: "encouragement" | "suggestion" | "question" | "correction";
+  originalNoteContent?: string;
+  quotedContent?: string;
+  date?: string;
+}
+
+export interface AiReplyResponse {
+  task_id: string;
+  status: string;
+  message?: string;
+}
+
+export interface AiReplyStatus {
+  task_id: string;
+  status: "done" | "running" | "error";
+  reply: AiReplyEntry | null;
+  error: string | null;
+}
+
+export async function triggerNotesAiReply(
+  token: string,
+  noteId: string,
+  date: string,
+  noteContent: string,
+  quotedContent: string | null,
+  replyType: string = "encouragement",
+  base: string = "",
+): Promise<AiReplyResponse> {
+  // Use GET with query params - websockets' HTTP parser only accepts GET
+  const params = new URLSearchParams({
+    note_id: noteId,
+    date: date,
+    reply_type: replyType,
+    note_content: noteContent,
+  });
+  if (quotedContent) {
+    params.set("quoted_content", quotedContent);
+  }
+  return request<AiReplyResponse>(
+    `${base}/api/notes/ai-reply?${params}`,
+    token,
+  );
+}
+
+export async function fetchNotesAiReplyStatus(
+  token: string,
+  taskId: string,
+  base: string = "",
+): Promise<AiReplyStatus> {
+  const params = new URLSearchParams({ task_id: taskId });
+  return request<AiReplyStatus>(
+    `${base}/api/notes/ai-reply/status?${params}`,
+    token,
+  );
+}
+
+export async function fetchNotesAiReplies(
+  token: string,
+  date: string,
+  base: string = "",
+): Promise<{ date: string; replies: AiReplyEntry[] }> {
+  const params = new URLSearchParams({ date: date });
+  return request<{ date: string; replies: AiReplyEntry[] }>(
+    `${base}/api/notes/ai-replies?${params}`,
     token,
   );
 }

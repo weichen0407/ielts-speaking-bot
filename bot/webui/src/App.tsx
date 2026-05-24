@@ -6,6 +6,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SessionNotesSheet } from "@/components/SessionNotesSheet";
+import { NotesBookSheet } from "@/components/NotesBookSheet";
 import { ArticleSelectDialog } from "@/components/ArticleSelectDialog";
 import { BenativeProgressIndicator } from "@/components/BenativeProgressIndicator";
 import { BenativeNotesSheet } from "@/components/BenativeNotesSheet";
@@ -323,6 +324,7 @@ function Shell({
     sessionKey: string | null;
     title: string;
   }>({ open: false, sessionKey: null, title: "" });
+  const [notesBookOpen, setNotesBookOpen] = useState(false);
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -443,6 +445,11 @@ function Shell({
 
   const onOpenSettings = useCallback(() => {
     setView("settings");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onOpenNotesBook = useCallback(() => {
+    setNotesBookOpen(true);
     setMobileSidebarOpen(false);
   }, []);
 
@@ -578,6 +585,7 @@ function Shell({
     onRequestDelete: (key: string, label: string) =>
       setPendingDelete({ key, label }),
     onOpenSettings,
+    onOpenNotesBook,
   };
   const showMainSidebar = view !== "settings";
 
@@ -732,6 +740,12 @@ function Shell({
           sessionTitle={activeSession?.title ?? headerTitle}
         />
         <GlobalNotesFloatingButton api={globalNotes} />
+
+        {/* Notes Book Sheet */}
+        <NotesBookSheet
+          open={notesBookOpen}
+          onOpenChange={setNotesBookOpen}
+        />
       </div>
       </QuoteProvider>
     </ThemeProvider>

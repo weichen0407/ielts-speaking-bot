@@ -5,6 +5,7 @@ import {
   Settings,
   Sparkles,
   SquarePen,
+  BookOpen,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +25,7 @@ interface SidebarProps {
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onOpenSettings: () => void;
+  onOpenNotesBook: () => void;
   onCollapse: () => void;
 }
 
@@ -112,6 +114,14 @@ export function Sidebar(props: SidebarProps) {
         >
           <Sparkles className="h-3.5 w-3.5" />
           {t("sidebar.freeChat")}
+        </Button>
+        <Button
+          onClick={props.onOpenNotesBook}
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          variant="ghost"
+        >
+          <BookOpen className="h-3.5 w-3.5" />
+          {t("sidebar.notesBook")}
         </Button>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

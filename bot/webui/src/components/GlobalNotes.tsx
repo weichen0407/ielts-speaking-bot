@@ -38,7 +38,7 @@ function getDateKey(): string {
 }
 
 // Parse markdown content back to entries
-function parseNotesContent(content: string): NoteEntry[] {
+export function parseNotesContent(content: string): NoteEntry[] {
   if (!content.trim()) return [];
 
   const entries: NoteEntry[] = [];
@@ -61,8 +61,14 @@ function parseNotesContent(content: string): NoteEntry[] {
     let quoteLines: string[] = [];
 
     for (const line of lines) {
-      // Parse header like: **[2024-01-15 14:30:45] | Session Title**
+      // Parse header like: **[2024-01-15 14:30:45] | Session Title** [id:xxx]
       if (line.startsWith('**[') && line.includes(']**')) {
+        // Extract id first
+        const idMatch = line.match(/\[id:([^\]]+)\]/);
+        if (idMatch) {
+          id = idMatch[1];
+          console.log('[GlobalNotes] Extracted ID from markdown:', id, 'from line:', line);
+        }
         const match = line.match(/\*\*\[([^\]]+)\]\s*\|?\s*([^*]*)\*\*/);
         if (match) {
           const dateStr = match[1];
@@ -427,6 +433,11 @@ export function GlobalNotesPanel({
     setEditingContent("");
   }, []);
 
+  // Filter entries by session when sessionTitle is provided
+  const displayEntries = sessionTitle
+    ? api.notes.entries.filter((entry) => entry.sessionTitle === sessionTitle)
+    : api.notes.entries;
+
   if (!api.isOpen) return null;
 
   return (
@@ -465,14 +476,14 @@ export function GlobalNotesPanel({
 
         {/* Notes list - show older entries at top */}
         <div className="max-h-96 min-h-[200px] overflow-y-auto p-3">
-          {api.notes.entries.length === 0 && !api.isLoading ? (
+          {displayEntries.length === 0 && !api.isLoading ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
               <FileText className="mx-auto mb-2 h-10 w-10 opacity-20" />
               <p>{t("globalNotes.empty")}</p>
             </div>
           ) : (
             <div className="space-y-3">
-              {api.notes.entries.map((entry) => (
+              {displayEntries.map((entry) => (
                 <div
                   key={entry.id}
                   className="group rounded-lg border border-border/50 bg-muted/20 p-3"
