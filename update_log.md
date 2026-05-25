@@ -1,5 +1,352 @@
 # Update Log
 
+## 2026-05-25 - Subagent 目录重组 + 数据迁移
+
+本次更新将 `subagents/` 重组为 `subagent/`，按照 single_session / cross_session 分类，每个 subagent 自包含 processor、md、data 三个子目录。同时整理了 shared/ 目录，将数据迁移到 persona/ 和 mode/ 下。
+
+---
+
+## 1. Subagent 目录重组
+
+### 新目录结构
+
+```
+subagent/
+├── _shared/                    # 共享框架（base.py, manager.py, registry.py, utils.py）
+├── _cursors/                  # cursor 状态文件
+│   ├── single_session/
+│   │   ├── vocab/
+│   │   ├── polisher/
+│   │   └── ...
+│   └── cross_session/
+│       ├── kg/
+│       ├── review/
+│       └── ...
+├── single_session/            # 原 subagents/session/
+│   ├── vocab/
+│   │   ├── processor/         # vocab processor 代码
+│   │   ├── md/               # vocab_subagent.md
+│   │   └── data/             # 产出数据
+│   ├── polisher/
+│   ├── quiz/
+│   ├── notes/
+│   ├── ielts_feedback/
+│   └── benative_review/
+└── cross_session/             # 原 subagents/cross_session/
+    ├── kg/
+    │   ├── processor/         # kg processor 代码
+    │   ├── md/               # kg_subagent.md
+    │   └── data/             # 产出数据
+    ├── review/
+    ├── memory_cron/
+    ├── daily_consolidator/
+    ├── progress_tracker/
+    ├── benative_article_fetcher/
+    ├── benative_translator/
+    ├── notes_ai_assistant/
+    └── progress_organizer/
+```
+
+### 改动说明
+
+- `subagents/session/` → `subagent/single_session/`
+- `subagents/cross_session/` → `subagent/cross_session/`
+- kg_subagent.md、review_subagent.md 从 `shared/subagents/` 合并到 `subagent/cross_session/{name}/md/`
+- `_shared/registry.py` 更新 import 路径：`nanobot.data_processor` → `subagent.single_session.{name}.processor`
+
+---
+
+## 2. shared/ 目录清理
+
+### 删除的内容
+
+| 原路径 | 说明 |
+|--------|------|
+| `shared/level2/data_processor/` | 已拆分到各 subagent/processor/ |
+| `shared/level3/kg/` | 已移到 subagent/cross_session/kg/processor/ |
+| `shared/level3/review/` | 已移到 subagent/cross_session/review/processor/ |
+| `shared/subagents/` | 已合并到 subagent/ |
+| `shared/memory/` | 改用 persona/memory/ |
+| `shared/.cursor_*.json` | 改用 subagent/_cursors/ |
+
+### 迁移到 persona/
+
+| 原路径 | 新路径 |
+|--------|--------|
+| `shared/progress.json` | `persona/progress.json` |
+| `shared/progress_bank.jsonl` | `persona/progress_bank.jsonl` |
+| `shared/user_responses.jsonl` | `persona/user_responses.jsonl` |
+
+### 迁移到 mode/
+
+| 原路径 | 新路径 |
+|--------|--------|
+| `shared/benative/` | `mode/benative/data/` |
+| `shared/freechat/` | `mode/freechat/data/` |
+
+### 迁移到 subagent/
+
+| 原路径 | 新路径 |
+|--------|--------|
+| `shared/daily/` | `subagent/cross_session/daily_consolidator/data/` |
+
+---
+
+## 3. 目录结构总览
+
+```
+项目根目录/
+├── persona/           # 用户数据
+│   ├── memory/       # 用户记忆（memory agent 管理）
+│   ├── sessions/     # session 记录（每个 session 有 thread.jsonl）
+│   ├── progress.json
+│   ├── progress_bank.jsonl
+│   └── user_responses.jsonl
+├── mode/             # 模式编排
+│   ├── benative/
+│   │   ├── context/
+│   │   ├── trigger/
+│   │   └── data/    # benative 数据
+│   ├── freechat/
+│   │   ├── context/
+│   │   ├── trigger/
+│   │   └── data/    # freechat 数据
+│   └── ielts/
+├── subagent/         # agent 模块
+│   ├── _shared/     # 共享框架
+│   ├── _cursors/    # cursor 状态
+│   ├── single_session/
+│   │   ├── vocab/
+│   │   ├── polisher/
+│   │   └── ...
+│   └── cross_session/
+│       ├── kg/
+│       ├── review/
+│       └── ...
+```
+
+---
+
+## 4. 更新的文件
+
+| 文件 | 改动 |
+|------|------|
+| `subagent/_shared/registry.py` | import 路径更新 |
+| `global/trigger/count/count.yaml` | prompt_file 路径更新 |
+| `.gitignore` | 无需更改（相关路径已在 gitignore） |
+
+---
+
+## 2026-05-25 - Phase 1 & 2: Unified Interaction Store + Data Processor Framework
+
+本次更新实现了文档中规划的 Phase 1 和 Phase 2 核心功能。
+
+---
+
+## Phase 1: Unified Interaction Store
+
+### 功能概述
+
+建立统一的交互日志 `shared/thread.jsonl`，所有用户和 AI 的对话内容都记录其中，支持跨会话查询。
+
+### 新增文件
+
+| File | Description |
+|------|-------------|
+| `shared/thread.jsonl` | 统一交互日志（append-only，gitignore） |
+
+### 修改文件
+
+**`bot/nanobot/session/manager.py`**
+- `Session._create_unified_interaction_record()`: 将 session message 转换为统一格式
+- `SessionManager._append_to_shared_interaction_log()`: 原子化追加到 shared/thread.jsonl
+- `SessionManager.save()`: 调用上述方法实现双写
+
+### 统一交互格式
+
+```json
+{
+  "id": "interaction_uuid",
+  "timestamp": "2026-05-25T10:00:00Z",
+  "source": {
+    "type": "session",
+    "mode": "ielts|freechat|benative|review",
+    "session_uuid": "xxx",
+    "message_index": 0
+  },
+  "role": "user|assistant",
+  "content": {
+    "type": "text|audio",
+    "text": "content",
+    "audio_url": null
+  },
+  "metadata": {
+    "topic": "food",
+    "intent": null,
+    "channel": "telegram",
+    "languages": ["en"]
+  }
+}
+```
+
+### 设计特点
+
+- **Best-effort**: shared/thread.jsonl 写入失败不影响 session 保存
+- **原子化**: 使用 temp file + rename 模式
+- **向后兼容**: session thread.jsonl 保持不变
+
+---
+
+## Phase 2: Data Processor Framework
+
+### 功能概述
+
+建立数据处理框架，从 `shared/thread.jsonl` 读取数据，各 Processor 按需提取生成输出。
+
+### 新增文件
+
+| File | Description |
+|------|-------------|
+| `bot/nanobot/data_processor/__init__.py` | Package init |
+| `bot/nanobot/data_processor/base.py` | BaseDataProcessor 抽象基类 |
+| `bot/nanobot/data_processor/registry.py` | 自动发现机制 |
+| `bot/nanobot/data_processor/manager.py` | ProcessorManager 管理器 |
+| `bot/nanobot/data_processor/utils.py` | parse_kv_pairs 工具函数 |
+| `bot/nanobot/data_processor/vocab/` | VocabProcessor (词汇处理) |
+| `bot/nanobot/data_processor/polisher/` | PolisherProcessor (语法处理) |
+| `bot/nanobot/data_processor/quiz/` | QuizProcessor (Quiz 生成) |
+| `bot/nanobot/data_processor/notes/` | NotesProcessor (笔记处理) |
+
+### 核心架构
+
+```
+BaseDataProcessor (抽象基类)
+    │
+    ├── VocabProcessor    → shared/vocab.jsonl
+    ├── PolisherProcessor → shared/polisher.jsonl
+    ├── QuizProcessor    → shared/knowledge_pool.jsonl
+    └── NotesProcessor   → shared/notes.jsonl
+```
+
+### 处理流程
+
+```
+shared/thread.jsonl
+    ↓
+read() → preprocess() → build_prompt() → call_llm() → parse_output() → serialize()
+    ↓
+shared/{processor}.jsonl
+```
+
+### Processor 触发配置
+
+**`global/trigger/count/count.yaml`** 新增：
+- `vocab_processor`: file_line_count >= 50 → shared/vocab.jsonl
+- `polisher_processor`: file_line_count >= 50 → shared/polisher.jsonl
+- `quiz_processor`: file_line_count >= 100 → shared/knowledge_pool.jsonl
+- `notes_processor`: file_line_count >= 50 → shared/notes.jsonl
+
+### Pydantic 验证
+
+- **Input Schema**: preprocess() 中验证输入数据
+- **Output Schema**: parse_llm_output() 中验证输出数据
+- 类型错误记录会被跳过
+
+---
+
+## Phase 3a: Knowledge Graph (NetworkX)
+
+### 功能概述
+
+从 Level 2 文件提取实体和关系，构建用户知识图谱。
+
+### 新增文件
+
+| File | Description |
+|------|-------------|
+| `bot/nanobot/kg/__init__.py` | Package init |
+| `bot/nanobot/kg/topics.py` | 预定义 IELTS topics 列表 |
+| `bot/nanobot/kg/entity_store.py` | EntityStore 实体存储 |
+| `bot/nanobot/kg/cursor.py` | CursorManager 增量追踪 |
+| `bot/nanobot/kg/extractor.py` | EntityExtractor LLM 输出解析 |
+| `bot/nanobot/kg/kg_updater.py` | KGUpdater 更新逻辑 |
+| `subagents/cross_session/kg_subagent.md` | KG Subagent prompt |
+
+### 数据结构
+
+```json
+// kg/entity_database.json
+{
+  "entities": [
+    {"id": "e1", "label": "Jerry", "type": "person", "topics": ["sports", "food"]}
+  ],
+  "relations": [
+    {"from": "e1", "to": "e2", "type": "likes", "topics": ["sports"]}
+  ]
+}
+```
+
+### Cursor 机制
+
+cron 和 count 共用同一 cursor，保证幂等性。
+
+---
+
+## Phase 3b: Review Mode (Spaced Repetition)
+
+### 功能概述
+
+从 Level 2 文件提取知识要点，按熟悉度抽样出题复习。
+
+### 新增文件
+
+| File | Description |
+|------|-------------|
+| `shared/review/__init__.py` | Package init |
+| `shared/review/store.py` | ReviewStore 知识点存储 |
+| `shared/review/cursor.py` | ReviewCursorManager 独立 cursor |
+| `shared/review/extractor.py` | ReviewExtractor LLM 输出解析 |
+| `shared/review/selector.py` | ReviewSelector 按熟悉度抽样 |
+| `subagents/cross_session/review_subagent.md` | Review Subagent prompt |
+
+### 数据结构
+
+```json
+// shared/review/review_points.jsonl
+{"id": "rp1", "content": "be quite fond of", "type": "expression", "topic": "food"}
+
+// shared/review/review_index.json
+{
+  "points": {
+    "rp1": {"familiarity": 0, "attempts": 2, "question_type": "sentence_use"}
+  }
+}
+```
+
+### 规则
+
+- **familiarity += 1**（答对）/ **+0**（答错）
+- **attempts += 1**（每次答题）
+- **threshold = 3**（变量，后续可能用于优先选择）
+- **不归零**
+
+---
+
+## Summary of Files Changed
+
+| File | Changes |
+|------|---------|
+| `.gitignore` | 添加 shared/thread.jsonl |
+| `bot/nanobot/session/manager.py` | Phase 1: 双写 shared/thread.jsonl |
+| `bot/nanobot/data_processor/` | Phase 2: 完整框架 + 4 个 Processor |
+| `bot/nanobot/kg/` | Phase 3a: 知识图谱模块 |
+| `shared/review/` | Phase 3b: 复习模式模块 |
+| `global/trigger/count/count.yaml` | 新增 KG/Review 触发器 |
+
+---
+
+*Update created: 2026-05-25*
+
 ## 2026-05-24 - AI 回复笔记 / QuickNote Session 过滤
 
 本次更新为全局笔记本添加了 AI 智能回复生成功能，并修复了 QuickNote 面板的 session 过滤问题。

@@ -118,6 +118,50 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
+    def _create_unified_interaction_record(
+        self,
+        message: dict[str, Any],
+        message_index: int,
+    ) -> dict[str, Any]:
+        """Transform a session message into the unified interaction format."""
+        content = message.get("content", "")
+
+        if isinstance(content, str):
+            content_type = "text"
+            text_content = content
+            audio_url = None
+        elif isinstance(content, dict):
+            content_type = content.get("type", "text")
+            text_content = content.get("text", "")
+            audio_url = content.get("audio_url")
+        else:
+            content_type = "text"
+            text_content = str(content)
+            audio_url = None
+
+        return {
+            "id": str(uuid.uuid4()),
+            "timestamp": message.get("timestamp", datetime.now().isoformat()),
+            "source": {
+                "type": "session",
+                "mode": self.metadata.get("mode", "freechat"),
+                "session_uuid": self.session_uuid or None,
+                "message_index": message_index,
+            },
+            "role": message.get("role", "assistant"),
+            "content": {
+                "type": content_type,
+                "text": text_content,
+                "audio_url": audio_url,
+            },
+            "metadata": {
+                "topic": self.metadata.get("topic"),
+                "intent": self.metadata.get("intent"),
+                "channel": self.metadata.get("channel"),
+                "languages": self.metadata.get("languages"),
+            },
+        }
+
     def get_history(
         self,
         max_messages: int = 120,
@@ -700,6 +744,9 @@ class SessionManager:
 
             os.replace(tmp_path, path)
 
+            # Also append to unified interaction log (best-effort)
+            self._append_to_shared_interaction_log(session)
+
             if fsync:
                 # fsync the directory so the rename is durable.
                 # On Windows, opening a directory with O_RDONLY raises
@@ -718,6 +765,43 @@ class SessionManager:
         self._cache[session.key] = session
         # Always update index on save so title changes are reflected
         self._update_session_index(session)
+
+    def _append_to_shared_interaction_log(self, session: Session) -> None:
+        """Append session messages to the unified shared/thread.jsonl (best-effort)."""
+        try:
+            shared_dir = self.workspace.parent / "shared"
+            shared_path = shared_dir / "thread.jsonl"
+            tmp_path = shared_path.with_suffix(".jsonl.tmp")
+
+            ensure_dir(shared_dir)
+
+            existing_lines: list[str] = []
+            if shared_path.exists():
+                with open(shared_path, "r", encoding="utf-8") as f:
+                    existing_lines = f.readlines()
+
+            new_lines: list[str] = []
+            for idx, msg in enumerate(session.messages):
+                record = session._create_unified_interaction_record(msg, idx)
+                new_lines.append(json.dumps(record, ensure_ascii=False) + "\n")
+
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.writelines(existing_lines)
+                f.writelines(new_lines)
+
+            os.replace(tmp_path, shared_path)
+
+            logger.debug(
+                "Appended {} interactions to shared/thread.jsonl for session {}",
+                len(new_lines),
+                session.key,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to append to shared/thread.jsonl for session {}: {}",
+                session.key,
+                exc,
+            )
 
     def flush_all(self) -> int:
         """Re-save every cached session with fsync for durable shutdown.

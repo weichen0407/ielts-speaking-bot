@@ -1,8 +1,0 @@
-{"category": "description", "intent": "description", "expression": "happy family", "session_uuid": "5c8ebcf5-ae75-4b38-bf99-b40c9e3a9a5f", "round": 1, "topic": "5c8ebcf5-ae75-4b38-bf99-b40c9e3a9a5f"}
-{"category": "emotion", "intent": "positive", "expression": "love my family", "session_uuid": "5c8ebcf5-ae75-4b38-bf99-b40c9e3a9a5f", "round": 1, "topic": "5c8ebcf5-ae75-4b38-bf99-b40c9e3a9a5f"}
-{"category": "description", "intent": "description", "expression": "study ai", "session_uuid": "3d2eb9b6-add1-4585-af1a-c38b0655e38e", "round": 1, "topic": "3d2eb9b6-add1-4585-af1a-c38b0655e38e"}
-{"category": "description", "intent": "description", "expression": "basically computer science", "session_uuid": "3d2eb9b6-add1-4585-af1a-c38b0655e38e", "round": 1, "topic": "3d2eb9b6-add1-4585-af1a-c38b0655e38e"}
-{"category": "emotion", "intent": "preference", "expression": "like to play volleyball", "session_uuid": "b9303575-645a-4d72-838b-4481af263cc5", "round": 1, "topic": "b9303575-645a-4d72-838b-4481af263cc5"}
-{"category": "emotion", "intent": "preference", "expression": "like humburgers", "session_uuid": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e", "round": 1, "topic": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e"}
-{"category": "cause", "intent": "reason", "expression": "its convenient", "session_uuid": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e", "round": 2, "topic": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e"}
-{"category": "emotion", "intent": "preference", "expression": "like eating beef and cheese", "session_uuid": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e", "round": 2, "topic": "d03b49ca-e74d-43ef-be29-1826eb2dcd8e"}

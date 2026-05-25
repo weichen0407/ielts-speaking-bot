@@ -17,6 +17,7 @@ persona/memory/*.jsonl
 
 # Shared runtime data
 shared/.cursor_*.json
+shared/thread.jsonl
 
 # WebUI build output
 bot/webui/dist/
