@@ -1,5 +1,85 @@
 # Update Log
 
+## 2026-05-26 - Subagent 模型统一配置
+
+本次更新添加了 subagent 模型配置机制，允许在 `config.json` 中统一配置每个 subagent 使用的模型。
+
+---
+
+## 1. 配置变更
+
+### config/schema.py
+
+在 `AgentsConfig` 中添加 `subagent_defaults` 字段：
+
+```python
+class AgentsConfig(Base):
+    defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    subagent_defaults: dict[str, str] = Field(
+        default_factory=dict,
+        description="Default model for each subagent. Maps subagent label to model name.",
+    )
+```
+
+### config.json 配置示例
+
+```json
+{
+  "agents": {
+    "subagent_defaults": {
+      "IELTS Score": "gpt-4o-mini",
+      "notes_ai": "deepseek-chat",
+      "vocabulary": "gpt-4o",
+      "default": "claude-opus-4-5"
+    }
+  }
+}
+```
+
+---
+
+## 2. 代码变更
+
+### agent/subagent.py
+
+- `SubagentManager.__init__` 添加 `subagent_defaults` 参数
+- `SubagentManager.spawn()` 添加自动模型查找逻辑
+
+### agent/loop.py
+
+- `AgentLoop.__init__` 添加 `subagent_defaults` 参数
+- `AgentLoop.from_config()` 传递 `subagent_defaults` 到 SubagentManager
+
+---
+
+## 3. 模型选择优先级
+
+1. `spawn()` 调用时显式传入的 `model` 参数
+2. `subagent_defaults` 中 label 对应的模型（如 `"IELTS Score"`）
+3. `subagent_defaults` 中 `"default"` 对应的模型
+4. 系统默认模型
+
+---
+
+## 4. 使用示例
+
+```python
+# 不需要显式指定模型，只需 label 匹配 config 中的 key
+task_id = await loop.subagents.spawn(
+    task=task_prompt,
+    label="IELTS Score",  # 会自动查找 subagent_defaults["IELTS Score"]
+    ...
+)
+```
+
+---
+
+## 5. 其他修复
+
+- `builtin.py` 删除 3 处重复的 `import json`（保留模块级别的一处）
+
+---
+
 ## 2026-05-26 - Trigger 整合到 Per-Mode 配置
 
 本次更新将所有 trigger 配置迁移到 per-mode `triggers.json` 文件，实现 Mode 统一管理调度。

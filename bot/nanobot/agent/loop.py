@@ -457,6 +457,7 @@ class AgentLoop:
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
         runtime_model_publisher: Callable[[str, str | None], None] | None = None,
+        subagent_defaults: dict[str, str] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -532,6 +533,7 @@ class AgentLoop:
             max_iterations=self.max_iterations,
             llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
             on_status_change=self._on_subagent_status_change,
+            subagent_defaults=subagent_defaults,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -637,6 +639,7 @@ class AgentLoop:
             model_preset=defaults.model_preset,
             provider_snapshot_loader=provider_snapshot_loader,
             preset_snapshot_loader=preset_snapshot_loader,
+            subagent_defaults=config.agents.subagent_defaults,
             **extra,
         )
 

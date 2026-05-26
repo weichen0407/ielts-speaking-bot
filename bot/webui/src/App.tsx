@@ -10,6 +10,7 @@ import { NotesBookSheet } from "@/components/NotesBookSheet";
 import { ArticleSelectDialog } from "@/components/ArticleSelectDialog";
 import { BenativeProgressIndicator } from "@/components/BenativeProgressIndicator";
 import { BenativeNotesSheet } from "@/components/BenativeNotesSheet";
+import { IeltsExamView } from "@/components/IeltsExamView";
 import {
   GlobalNotesFloatingButton,
   GlobalNotesPanel,
@@ -325,6 +326,7 @@ function Shell({
     title: string;
   }>({ open: false, sessionKey: null, title: "" });
   const [notesBookOpen, setNotesBookOpen] = useState(false);
+  const [ieltsExamOpen, setIeltsExamOpen] = useState(false);
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -450,6 +452,11 @@ function Shell({
 
   const onOpenNotesBook = useCallback(() => {
     setNotesBookOpen(true);
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onOpenIeltsExam = useCallback(() => {
+    setIeltsExamOpen(true);
     setMobileSidebarOpen(false);
   }, []);
 
@@ -586,6 +593,7 @@ function Shell({
       setPendingDelete({ key, label }),
     onOpenSettings,
     onOpenNotesBook,
+    onOpenIeltsExam,
   };
   const showMainSidebar = view !== "settings";
 
@@ -732,6 +740,30 @@ function Shell({
           sessionKey={benativeNotesSheetState.sessionKey}
           sessionTitle={benativeNotesSheetState.title}
         />
+
+        {/* IELTS Exam Sheet */}
+        <Sheet
+          open={ieltsExamOpen}
+          onOpenChange={setIeltsExamOpen}
+        >
+          <SheetContent className="p-0 w-full max-w-2xl h-full sm:max-w-full">
+            <IeltsExamView
+              onClose={() => setIeltsExamOpen(false)}
+              createChat={createChat}
+              sendMessage={(chatId, content) => {
+                if (chatId) {
+                  client.sendMessage(chatId, content);
+                }
+              }}
+              onExamStart={(chatId) => {
+                const key = `websocket:${chatId}`;
+                setActiveKey(key);
+                setView("chat");
+                setMobileSidebarOpen(false);
+              }}
+            />
+          </SheetContent>
+        </Sheet>
 
         {/* Global Notes - Floating Notebook */}
         <GlobalNotesPanel

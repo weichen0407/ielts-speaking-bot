@@ -318,6 +318,128 @@ export async function fetchBenativeResponses(
   );
 }
 
+// IELTS Exam API
+
+export interface IeltsExamQuestion {
+  number: number;
+  question: string;
+  depth: number;
+  asked: boolean;
+  answer?: string;
+  timeSpent?: number;
+}
+
+export interface IeltsExamCueCard {
+  topic: string;
+  bulletPoints: string[];
+  asked: boolean;
+  answer?: string;
+  prepTime?: number;
+  speakTime?: number;
+}
+
+export interface IeltsExam {
+  examId: string;
+  topic: string;
+  topicTitle?: string;
+  state: string;
+  currentPart: string;
+  currentQuestionIndex: number;
+  parts: {
+    part1: { questions: IeltsExamQuestion[] };
+    part2: { cueCard: IeltsExamCueCard };
+    part3: { questions: IeltsExamQuestion[] };
+  };
+}
+
+export async function startIeltsExam(
+  token: string,
+  topic?: string,
+  random: boolean = false,
+  base: string = "",
+): Promise<{ exam: IeltsExam; currentQuestion: { number: number; question: string } | null }> {
+  let url = `${base}/api/ielts/exam/start`;
+  const params: string[] = [];
+  if (topic) params.push(`topic=${encodeURIComponent(topic)}`);
+  if (random) params.push("random=true");
+  if (params.length > 0) url += `?${params.join("&")}`;
+
+  return request<{ exam: IeltsExam; currentQuestion: { number: number; question: string } | null }>(
+    url,
+    token,
+  );
+}
+
+export async function submitIeltsExamAnswer(
+  token: string,
+  examId: string,
+  answer: string,
+  timeSpent: number = 0,
+  base: string = "",
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `${base}/api/ielts/exam/answer`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ examId, answer, timeSpent }),
+    },
+  );
+}
+
+export async function advanceIeltsExam(
+  token: string,
+  examId: string,
+  base: string = "",
+): Promise<{
+  exam?: { examId: string; state: string; currentPart: string; currentQuestionIndex: number };
+  currentQuestion?: { number: number; question: string } | null;
+  cueCard?: { topic: string; bulletPoints: string[] } | null;
+  completed?: boolean;
+}> {
+  return request<{
+    exam?: { examId: string; state: string; currentPart: string; currentQuestionIndex: number };
+    currentQuestion?: { number: number; question: string } | null;
+    cueCard?: { topic: string; bulletPoints: string[] } | null;
+    completed?: boolean;
+  }>(
+    `${base}/api/ielts/exam/next`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ examId }),
+    },
+  );
+}
+
+export async function endIeltsExam(
+  token: string,
+  examId: string,
+  base: string = "",
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `${base}/api/ielts/exam/end`,
+    token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ examId }),
+    },
+  );
+}
+
+export async function listIeltsExams(
+  token: string,
+  base: string = "",
+): Promise<{ exams: { examId: string; topic: string; startedAt: string; endedAt: string; finalScore: object }[] }> {
+  return request<{ exams: { examId: string; topic: string; startedAt: string; endedAt: string; finalScore: object }[] }>(
+    `${base}/api/ielts/exam/list`,
+    token,
+  );
+}
+
 export async function fetchSettings(
   token: string,
   base: string = "",

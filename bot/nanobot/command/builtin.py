@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -52,6 +53,18 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "IELTS Mode",
         "Switch to IELTS speaking practice mode.",
         "graduation-cap",
+    ),
+    BuiltinCommandSpec(
+        "/ielts_exam",
+        "IELTS Exam",
+        "Start an IELTS speaking exam (full test simulation).",
+        "clipboard-list",
+    ),
+    BuiltinCommandSpec(
+        "/ielts_score",
+        "IELTS Score",
+        "Get AI evaluation and band scores for your IELTS speaking practice.",
+        "star",
     ),
     BuiltinCommandSpec(
         "/stop",
@@ -242,9 +255,13 @@ async def cmd_freechat(ctx: CommandContext) -> OutboundMessage | None:
     loop.counter_engine.set_mode("freechat")
     loop.sessions.save(session)
 
-    # Get mode-specific topic_bank path
+    # Get mode-specific topic_bank path (check context/ subdir first)
     mode = session.metadata.get("mode", "freechat")
-    topic_bank_path = loop.workspace / "mode" / mode / "topic_bank.md"
+    topic_bank_path = loop.workspace / "mode" / mode / "context" / "topic_bank.md"
+
+    if not topic_bank_path.exists():
+        # Fall back to mode root
+        topic_bank_path = loop.workspace / "mode" / mode / "topic_bank.md"
 
     if not topic_bank_path.exists():
         # Fall back to workspace root
@@ -398,19 +415,13 @@ async def cmd_freechat(ctx: CommandContext) -> OutboundMessage | None:
     session.metadata["title"] = topic
     loop.sessions.save(session)
 
-    # Build a conversational prompt that tells the agent to start the discussion naturally
-    # The agent should ask the question in a natural, encouraging way
-    intro_prompt = f"""Let's have a casual conversation about {topic}.
-
-Please start by asking me this question in a natural, friendly way - as if you're genuinely interested in my answer:
-
-"{question}"
-
-After I respond, ask follow-up questions to go deeper into this topic (ask "why", "how long", "how often", etc.). Keep the conversation flowing naturally like a friendly chat, not an interview. Use a warm, encouraging tone.
-
-If I seem hesitant or give short answers, gently encourage me to share more. If I go deep into a topic, explore it further with reflective questions (depth 3-4 level questions).
-
-Remember: This is IELTS speaking practice, so help me express myself more fluently and with better vocabulary, but don't correct me directly - just model better language naturally in your responses."""
+    # Use PromptInjector to render the freechat template
+    from nanobot.prompt_injector import PromptInjector
+    injector = PromptInjector(loop.workspace)
+    intro_prompt = injector.inject("freechat", {
+        "topic": topic,
+        "question": question,
+    })
 
     ctx.msg.content = intro_prompt
     return None
@@ -437,13 +448,258 @@ async def cmd_ielts(ctx: CommandContext) -> OutboundMessage | None:
     )
 
 
+async def cmd_ielts_exam(ctx: CommandContext) -> OutboundMessage | None:
+    """Start an IELTS speaking exam simulation.
+
+    Usage:
+    - /ielts_exam - Shows topic list for selection
+    - /ielts_exam random - Starts exam with random topic
+    - /ielts_exam <topic_number> - Starts exam with specific topic (e.g., /ielts_exam 01)
+
+    The exam follows the standard IELTS speaking format:
+    - Part 1: Introduction & Interview (3-4 questions)
+    - Part 2: Long Turn (cue card + 1-2 minute speech)
+    - Part 3: Discussion (4-5 questions)
+    """
+    from pathlib import Path
+
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    workspace = loop.workspace
+
+    args = ctx.args.strip() if ctx.args else ""
+
+    # Get topic bank path
+    topic_bank_path = workspace / "topic-bank"
+
+    # List available topics
+    topics = []
+    for topic_file in sorted(topic_bank_path.glob("*.md")):
+        topic_name = topic_file.stem  # e.g., "01_animals"
+        topic_title = topic_file.read_text(encoding="utf-8").split("\n")[0].replace("# ", "").strip()
+        topics.append({
+            "id": topic_file.stem,
+            "title": topic_title,
+            "file": str(topic_file),
+        })
+
+    if not topics:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="No topics found in topic-bank directory.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Initialize exam manager
+    from nanobot.ielts_exam import IeltsExamManager
+    exam_manager = IeltsExamManager(workspace)
+
+    if args == "random":
+        # Random topic - start exam immediately
+        import random
+        selected = random.choice(topics)
+        topic_file = Path(selected["file"])
+        topic_content = topic_file.read_text(encoding="utf-8")
+        exam = exam_manager.load_topic(topic_file)
+
+        # Store exam manager in session metadata for later use
+        session.metadata["ielts_exam_id"] = exam.exam_id
+        session.metadata["ielts_exam_state"] = exam.state.value
+        loop.sessions.save(session)
+
+        # Use PromptInjector to render the ielts_exam template
+        from nanobot.prompt_injector import PromptInjector
+        injector = PromptInjector(loop.workspace)
+        intro_prompt = injector.inject("ielts_exam", {
+            "topic_title": selected["title"],
+            "topic_content": topic_content,
+        })
+
+        metadata = dict(ctx.msg.metadata or {})
+        metadata["ielts_exam"] = {
+            "exam_id": exam.exam_id,
+            "topic": selected["title"],
+            "state": exam.state.value,
+            "current_part": exam.current_part.value,
+        }
+
+        ctx.msg.content = intro_prompt
+        ctx.msg.metadata = metadata
+        return None
+
+    elif args:
+        # Specific topic number - find and load that topic
+        selected = None
+        for topic in topics:
+            topic_num = topic["id"].split("_")[0]
+            if topic_num == args or topic["id"] == args:
+                selected = topic
+                break
+
+        if not selected:
+            # Show topic list with error message
+            content = f"## Topic not found: {args}\n\n"
+            content += "**Usage:** `/ielts_exam <topic_number>` or `/ielts_exam random`\n\n"
+            content += "### Available Topics:\n\n"
+            for topic in topics:
+                topic_num = topic["id"].split("_")[0]
+                content += f"- **{topic_num}**: {topic['title']}\n"
+            content += "\n*Or type `/ielts_exam random` for a random topic.*"
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content=content,
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+        topic_file = Path(selected["file"])
+        topic_content = topic_file.read_text(encoding="utf-8")
+        exam = exam_manager.load_topic(topic_file)
+
+        # Store exam manager in session metadata for later use
+        session.metadata["ielts_exam_id"] = exam.exam_id
+        session.metadata["ielts_exam_state"] = exam.state.value
+        loop.sessions.save(session)
+
+        # Use PromptInjector to render the ielts_exam template
+        from nanobot.prompt_injector import PromptInjector
+        injector = PromptInjector(loop.workspace)
+        intro_prompt = injector.inject("ielts_exam", {
+            "topic_title": selected["title"],
+            "topic_content": topic_content,
+        })
+
+        metadata = dict(ctx.msg.metadata or {})
+        metadata["ielts_exam"] = {
+            "exam_id": exam.exam_id,
+            "topic": selected["title"],
+            "state": exam.state.value,
+            "current_part": exam.current_part.value,
+        }
+
+        ctx.msg.content = intro_prompt
+        ctx.msg.metadata = metadata
+        return None
+
+    else:
+        # Show topic list for selection
+        content = "## IELTS Speaking Exam - Select a Topic\n\n"
+        content += "**Usage:** `/ielts_exam <topic_number>` or `/ielts_exam random`\n\n"
+        content += "### Available Topics:\n\n"
+
+        for i, topic in enumerate(topics, 1):
+            topic_num = topic["id"].split("_")[0]
+            content += f"- **{topic_num}**: {topic['title']}\n"
+
+        content += "\n*Or type `/ielts_exam random` for a random topic.*"
+
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+
+async def cmd_ielts_score(ctx: CommandContext) -> OutboundMessage | None:
+    """Get AI evaluation and band scores for IELTS speaking practice.
+
+    Reads the conversation history from the current session and spawns
+    an evaluator subagent to provide detailed feedback and band scores.
+    """
+
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+
+    # Read conversation history from thread.jsonl
+    try:
+        thread_path = loop.sessions._get_session_path(session.key)
+        if not thread_path.exists():
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content="No conversation history found for this session.",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+        # Read and parse thread.jsonl
+        lines = thread_path.read_text(encoding="utf-8").strip().split("\n")
+        messages = []
+        for line in lines:
+            try:
+                msg = json.loads(line)
+                if msg.get("role") and msg.get("content"):
+                    messages.append(f"**{msg['role'].capitalize()}:** {msg['content']}")
+            except json.JSONDecodeError:
+                continue
+
+        if not messages:
+            return OutboundMessage(
+                channel=ctx.msg.channel,
+                chat_id=ctx.msg.chat_id,
+                content="No messages found in conversation history.",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+        conversation = "\n\n".join(messages)
+
+    except Exception as e:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"Failed to read conversation history: {e}",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    # Load the evaluator prompt template
+    evaluator_prompt_path = loop.workspace / "subagent" / "cross_session" / "ielts_exam" / "context" / "ielts_score_subagent.md"
+    if not evaluator_prompt_path.exists():
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Evaluator prompt not found. Please ensure ielts_score_subagent.md exists.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    evaluator_prompt = evaluator_prompt_path.read_text(encoding="utf-8")
+
+    # Inject conversation into the prompt
+    task_prompt = evaluator_prompt.replace("{{conversation}}", conversation)
+
+    # Spawn the evaluator subagent (model resolved automatically from subagent_defaults by label)
+    try:
+        task_id = await loop.subagents.spawn(
+            task=task_prompt,
+            label="IELTS Score",
+            origin_channel=ctx.msg.channel,
+            origin_chat_id=ctx.msg.chat_id,
+            session_key=ctx.key,
+            announce_result=True,
+        )
+
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"🤖 IELTS evaluator started... Analyzing your speaking performance. This may take a moment.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    except Exception as e:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=f"Failed to start evaluator: {e}",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+
 async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
     """Switch to Be Native mode for authentic expression practice.
 
     Sets session mode to "benative" and shows available articles for practice.
     Usage: /benative [select <article_id>]
     """
-    import json
     from datetime import datetime
 
     loop = ctx.loop
@@ -1001,6 +1257,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/freechat", cmd_freechat)
     router.exact("/ielts", cmd_ielts)
+    router.exact("/ielts_exam", cmd_ielts_exam)
+    router.exact("/ielts_score", cmd_ielts_score)
     router.exact("/benative", cmd_benative)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)

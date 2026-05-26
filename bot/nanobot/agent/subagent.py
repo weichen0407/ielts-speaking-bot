@@ -87,6 +87,7 @@ class SubagentManager:
         max_iterations: int | None = None,
         llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
         on_status_change: Callable[[str, str, str, str | None, dict[str, str]], None] | None = None,
+        subagent_defaults: dict[str, str] | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -109,6 +110,7 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._subagent_defaults: dict[str, str] = subagent_defaults or {}
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -157,6 +159,13 @@ class SubagentManager:
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
+        # Resolve model: explicit param > subagent_defaults > default
+        resolved_model = model
+        if not resolved_model and label and label in self._subagent_defaults:
+            resolved_model = self._subagent_defaults[label]
+        if not resolved_model and "default" in self._subagent_defaults:
+            resolved_model = self._subagent_defaults["default"]
+
         status = SubagentStatus(
             task_id=task_id,
             label=display_label,
@@ -167,7 +176,7 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result, model)
+            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result, resolved_model)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:

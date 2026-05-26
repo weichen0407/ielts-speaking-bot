@@ -728,6 +728,27 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/benative/articles":
             return self._handle_benative_articles(request)
 
+        # IELTS Exam API
+        m = re.match(r"^/api/ielts/exam/start$", got)
+        if m:
+            return self._handle_ielts_exam_start(request)
+
+        m = re.match(r"^/api/ielts/exam/answer$", got)
+        if m:
+            return self._handle_ielts_exam_answer(request)
+
+        m = re.match(r"^/api/ielts/exam/next$", got)
+        if m:
+            return self._handle_ielts_exam_next(request)
+
+        m = re.match(r"^/api/ielts/exam/end$", got)
+        if m:
+            return self._handle_ielts_exam_end(request)
+
+        m = re.match(r"^/api/ielts/exam/list$", got)
+        if m:
+            return self._handle_ielts_exam_list(request)
+
         # Signed media fetch: ``<sig>`` is an HMAC over ``<payload>``; the
         # payload decodes to a path inside :func:`get_media_dir`. See
         # :meth:`_sign_media_path` for the inverse direction used to build
@@ -1798,6 +1819,236 @@ class WebSocketChannel(BaseChannel):
                     continue
 
         return _http_json_response({"articles": article_list})
+
+    def _handle_ielts_exam_start(self, request: WsRequest) -> Response:
+        """Start a new IELTS exam."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        import json
+        from nanobot.ielts_exam import IeltsExamManager
+
+        # Get query parameters
+        _, query = _parse_request_path(request.path)
+        topic_param = _query_first(query, "topic")
+        random_param = _query_first(query, "random")
+
+        workspace = self._session_manager.workspace
+        topic_bank = workspace / "topic-bank"
+        topics = sorted(topic_bank.glob("*.md"))
+
+        if not topics:
+            return _http_json_response({"error": "No topics found"}, status=404)
+
+        # Select topic
+        if random_param == "true" or not topic_param:
+            import random
+            selected = random.choice(topics)
+        else:
+            # Find topic by number
+            selected = None
+            for t in topics:
+                if t.stem.startswith(topic_param) or t.stem == topic_param:
+                    selected = t
+                    break
+            if not selected:
+                return _http_json_response({"error": f"Topic {topic_param} not found"}, status=404)
+
+        # Initialize exam manager and load topic
+        exam_manager = IeltsExamManager(workspace)
+        exam = exam_manager.load_topic(selected)
+
+        # Get current question
+        current_q = exam_manager.get_current_question()
+
+        return _http_json_response({
+            "exam": {
+                "examId": exam.exam_id,
+                "topic": selected.stem,
+                "topicTitle": selected.read_text(encoding="utf-8").split("\n")[0].replace("# ", "").strip(),
+                "state": exam.state.value,
+                "currentPart": exam.current_part.value,
+                "currentQuestionIndex": exam.current_question_index,
+                "parts": {
+                    "part1": {
+                        "questions": [
+                            {
+                                "number": q.number,
+                                "question": q.question,
+                                "depth": q.depth,
+                                "asked": q.asked,
+                            }
+                            for q in exam.parts.get("part1", {}).questions or []
+                        ]
+                    },
+                    "part2": {
+                        "cueCard": {
+                            "topic": exam.parts.get("part2", {}).cue_card.topic if exam.parts.get("part2", {}).cue_card else "",
+                            "bulletPoints": exam.parts.get("part2", {}).cue_card.bullet_points if exam.parts.get("part2", {}).cue_card else [],
+                            "asked": exam.parts.get("part2", {}).cue_card.asked if exam.parts.get("part2", {}).cue_card else False,
+                        }
+                    },
+                    "part3": {
+                        "questions": [
+                            {
+                                "number": q.number,
+                                "question": q.question,
+                                "depth": q.depth,
+                                "asked": q.asked,
+                            }
+                            for q in exam.parts.get("part3", {}).questions or []
+                        ]
+                    },
+                },
+            },
+            "currentQuestion": {
+                "number": current_q.number if current_q else None,
+                "question": current_q.question if current_q and hasattr(current_q, 'question') else None,
+            } if current_q else None,
+        })
+
+    def _handle_ielts_exam_answer(self, request: WsRequest) -> Response:
+        """Record an answer to the current exam question."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        import json
+        from nanobot.ielts_exam import IeltsExamManager
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return _http_json_response({"error": "Invalid JSON"}, status=400)
+
+        exam_id = body.get("examId")
+        answer = body.get("answer", "")
+        time_spent = body.get("timeSpent", 0)
+
+        if not exam_id:
+            return _http_json_response({"error": "examId required"}, status=400)
+
+        workspace = self._session_manager.workspace
+        exam_manager = IeltsExamManager(workspace)
+
+        # Load exam from disk
+        exam = exam_manager.get_exam_by_id(exam_id)
+        if not exam:
+            return _http_json_response({"error": "Exam not found"}, status=404)
+
+        exam_manager.set_active_exam(exam)
+
+        # Record answer
+        exam_manager.record_answer(answer, time_spent)
+
+        return _http_json_response({"success": True})
+
+    def _handle_ielts_exam_next(self, request: WsRequest) -> Response:
+        """Advance to the next step in the exam."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        import json
+        from nanobot.ielts_exam import IeltsExamManager
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return _http_json_response({"error": "Invalid JSON"}, status=400)
+
+        exam_id = body.get("examId")
+
+        if not exam_id:
+            return _http_json_response({"error": "examId required"}, status=400)
+
+        workspace = self._session_manager.workspace
+        exam_manager = IeltsExamManager(workspace)
+
+        # Load exam from disk
+        exam = exam_manager.get_exam_by_id(exam_id)
+        if not exam:
+            return _http_json_response({"error": "Exam not found"}, status=404)
+
+        exam_manager.set_active_exam(exam)
+
+        # Advance to next step
+        new_state = exam_manager.next_step()
+
+        if new_state.value == "completed":
+            return _http_json_response({"completed": True})
+
+        # Get current question for new state
+        current_q = exam_manager.get_current_question()
+
+        return _http_json_response({
+            "exam": {
+                "examId": exam.exam_id,
+                "state": exam.state.value,
+                "currentPart": exam.current_part.value,
+                "currentQuestionIndex": exam.current_question_index,
+            },
+            "currentQuestion": {
+                "number": current_q.number if current_q else None,
+                "question": current_q.question if current_q and hasattr(current_q, 'question') else None,
+            } if current_q and hasattr(current_q, 'question') else None,
+            "cueCard": {
+                "topic": current_q.topic if current_q and hasattr(current_q, 'topic') else None,
+                "bulletPoints": current_q.bullet_points if current_q and hasattr(current_q, 'bullet_points') else None,
+            } if current_q and hasattr(current_q, 'topic') else None,
+        })
+
+    def _handle_ielts_exam_end(self, request: WsRequest) -> Response:
+        """End the current exam early."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        import json
+        from nanobot.ielts_exam import IeltsExamManager
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return _http_json_response({"error": "Invalid JSON"}, status=400)
+
+        workspace = self._session_manager.workspace
+        exam_manager = IeltsExamManager(workspace)
+
+        exam_manager.end_exam()
+
+        return _http_json_response({"success": True})
+
+    def _handle_ielts_exam_list(self, request: WsRequest) -> Response:
+        """List all saved exam records."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+
+        from nanobot.ielts_exam import IeltsExamManager
+
+        workspace = self._session_manager.workspace
+        exam_manager = IeltsExamManager(workspace)
+        exams = exam_manager.list_exams()
+
+        return _http_json_response({
+            "exams": [
+                {
+                    "examId": e.exam_id,
+                    "topic": e.topic,
+                    "startedAt": e.started_at,
+                    "endedAt": e.ended_at,
+                    "finalScore": e.final_score,
+                }
+                for e in exams
+            ]
+        })
 
     def _handle_session_benative(self, request: WsRequest, key: str) -> Response:
         """Get benative progress for a session."""

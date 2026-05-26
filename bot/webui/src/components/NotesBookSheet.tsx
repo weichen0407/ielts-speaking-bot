@@ -367,7 +367,9 @@ function NoteCard({ entry, onClick, onDelete, onAiReply, isAiReplying }: NoteCar
             <span className="font-medium">{time}</span>
             {entry.sessionTitle && ` • ${entry.sessionTitle}`}
             {entry.aiReply && (
-              <Check className="ml-1 inline-block h-3 w-3 text-green-500" title="AI reply ready" />
+              <span title="AI reply ready">
+                <Check className="ml-1 inline-block h-3 w-3 text-green-500" />
+              </span>
             )}
           </p>
           {entry.content && (
