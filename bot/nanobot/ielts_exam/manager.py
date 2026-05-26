@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, UTC
 from enum import Enum
 import json
 import uuid
@@ -74,7 +74,7 @@ class ExamRecord:
             exam_id=str(uuid.uuid4()),
             topic=topic_name,
             topic_file=topic_file,
-            started_at=datetime.utcnow().isoformat() + "Z",
+            started_at=datetime.now(UTC).isoformat() + "Z",
         )
 
     def to_dict(self) -> dict:
@@ -414,7 +414,7 @@ class IeltsExamManager:
             part3 = exam.parts.get("part3")
             if part3 and exam.current_question_index >= len(part3.questions):
                 exam.state = ExamState.COMPLETED
-                exam.ended_at = datetime.utcnow().isoformat() + "Z"
+                exam.ended_at = datetime.now(UTC).isoformat() + "Z"
             self._save_exam(exam)
             return exam.state
 
@@ -460,6 +460,6 @@ class IeltsExamManager:
         """End the current exam early."""
         if self._active_exam:
             self._active_exam.state = ExamState.COMPLETED
-            self._active_exam.ended_at = datetime.utcnow().isoformat() + "Z"
+            self._active_exam.ended_at = datetime.now(UTC).isoformat() + "Z"
             self._save_exam(self._active_exam)
         self._active_exam = None

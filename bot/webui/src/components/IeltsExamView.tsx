@@ -1,6 +1,41 @@
 import { useState, useCallback } from 'react';
 import { Mic, AlertCircle, Square, Loader2 } from 'lucide-react';
 
+interface Topic {
+  slug: string;
+  name: string;
+}
+
+const IELTS_TOPICS: Topic[] = [
+  { slug: 'animals', name: 'Animals' },
+  { slug: 'art', name: 'Art' },
+  { slug: 'apps', name: 'Apps & Technology' },
+  { slug: 'books', name: 'Books & Reading' },
+  { slug: 'buildings', name: 'Buildings' },
+  { slug: 'challenges', name: 'Challenges' },
+  { slug: 'clothes', name: 'Clothes & Fashion' },
+  { slug: 'confidence', name: 'Confidence' },
+  { slug: 'crime', name: 'Crime & Law' },
+  { slug: 'education', name: 'Education' },
+  { slug: 'environment', name: 'Environment' },
+  { slug: 'family', name: 'Family' },
+  { slug: 'festivals', name: 'Festivals' },
+  { slug: 'films', name: 'Films & TV' },
+  { slug: 'food', name: 'Food & Cooking' },
+  { slug: 'friends', name: 'Friends' },
+  { slug: 'gardens', name: 'Gardens & Parks' },
+  { slug: 'games', name: 'Games & Hobbies' },
+  { slug: 'happiness', name: 'Happiness' },
+  { slug: 'health', name: 'Health' },
+  { slug: 'holidays', name: 'Holidays & Travel' },
+  { slug: 'internet', name: 'Internet' },
+  { slug: 'memory', name: 'Memory & Remembering' },
+  { slug: 'money', name: 'Money' },
+  { slug: 'music', name: 'Music' },
+  { slug: 'nature', name: 'Nature' },
+  { slug: 'newspaper', name: 'Newspaper & Reading' },
+];
+
 interface IeltsExamViewProps {
   onClose?: () => void;
   onExamStart?: (chatId: string) => void;
@@ -12,10 +47,10 @@ export function IeltsExamView({ onClose, onExamStart, createChat, sendMessage }:
   const [isStarting, setIsStarting] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
 
-  const handleStartExam = useCallback(async (topicNumber?: string) => {
+  const handleStartExam = useCallback(async (topicSlug?: string) => {
     if (isStarting) return;
     setIsStarting(true);
-    setSelectedTopic(topicNumber || 'random');
+    setSelectedTopic(topicSlug || 'random');
 
     try {
       let chatId: string;
@@ -26,8 +61,8 @@ export function IeltsExamView({ onClose, onExamStart, createChat, sendMessage }:
         chatId = '';
       }
 
-      const command = topicNumber
-        ? `/ielts_exam ${topicNumber}`
+      const command = topicSlug
+        ? `/ielts_exam ${topicSlug}`
         : '/ielts_exam random';
 
       if (sendMessage && chatId) {
@@ -103,24 +138,21 @@ export function IeltsExamView({ onClose, onExamStart, createChat, sendMessage }:
           </div>
 
           {/* Topic Grid */}
-          <div className="grid grid-cols-3 gap-3">
-            {Array.from({ length: 27 }, (_, i) => {
-              const topicNum = String(i + 1).padStart(2, '0');
-              return (
-                <button
-                  key={topicNum}
-                  onClick={() => handleStartExam(topicNum)}
-                  disabled={isStarting}
-                  className="p-3 border dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 text-center disabled:opacity-50"
-                >
-                  {isStarting && selectedTopic === topicNum ? (
-                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                  ) : (
-                    <span className="font-medium">{topicNum}</span>
-                  )}
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {IELTS_TOPICS.map((topic) => (
+              <button
+                key={topic.slug}
+                onClick={() => handleStartExam(topic.slug)}
+                disabled={isStarting}
+                className="p-3 border dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 text-center disabled:opacity-50"
+              >
+                {isStarting && selectedTopic === topic.slug ? (
+                  <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                ) : (
+                  <span className="font-medium text-sm">{topic.name}</span>
+                )}
+              </button>
+            ))}
           </div>
         </div>
       </div>

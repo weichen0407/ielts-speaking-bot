@@ -529,22 +529,22 @@ async def cmd_ielts_exam(ctx: CommandContext) -> OutboundMessage | None:
         return None
 
     elif args:
-        # Specific topic number - find and load that topic
+        # Specific topic - find by slug (e.g., "animals", "art") or full id (e.g., "01_animals")
         selected = None
         for topic in topics:
-            topic_num = topic["id"].split("_")[0]
-            if topic_num == args or topic["id"] == args:
+            topic_slug = topic["id"].split("_", 1)[-1]  # "01_animals" -> "animals"
+            if topic_slug == args.lower() or topic["id"] == args:
                 selected = topic
                 break
 
         if not selected:
             # Show topic list with error message
             content = f"## Topic not found: {args}\n\n"
-            content += "**Usage:** `/ielts_exam <topic_number>` or `/ielts_exam random`\n\n"
+            content += "**Usage:** `/ielts_exam <topic>` or `/ielts_exam random`\n\n"
             content += "### Available Topics:\n\n"
             for topic in topics:
-                topic_num = topic["id"].split("_")[0]
-                content += f"- **{topic_num}**: {topic['title']}\n"
+                topic_slug = topic["id"].split("_", 1)[-1]
+                content += f"- **{topic_slug}**: {topic['title']}\n"
             content += "\n*Or type `/ielts_exam random` for a random topic.*"
             return OutboundMessage(
                 channel=ctx.msg.channel,
@@ -585,12 +585,12 @@ async def cmd_ielts_exam(ctx: CommandContext) -> OutboundMessage | None:
     else:
         # Show topic list for selection
         content = "## IELTS Speaking Exam - Select a Topic\n\n"
-        content += "**Usage:** `/ielts_exam <topic_number>` or `/ielts_exam random`\n\n"
+        content += "**Usage:** `/ielts_exam <topic>` or `/ielts_exam random`\n\n"
         content += "### Available Topics:\n\n"
 
-        for i, topic in enumerate(topics, 1):
-            topic_num = topic["id"].split("_")[0]
-            content += f"- **{topic_num}**: {topic['title']}\n"
+        for topic in topics:
+            topic_slug = topic["id"].split("_", 1)[-1]
+            content += f"- **{topic_slug}**: {topic['title']}\n"
 
         content += "\n*Or type `/ielts_exam random` for a random topic.*"
 
