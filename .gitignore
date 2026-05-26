@@ -19,6 +19,9 @@ persona/memory/*.jsonl
 shared/.cursor_*.json
 shared/thread.jsonl
 
+# Session data (dynamically created)
+data/thread.jsonl
+
 # Subagent data (cursors and outputs)
 subagent/_cursors/
 subagent/single_session/*/data/

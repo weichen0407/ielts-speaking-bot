@@ -11,7 +11,7 @@ from nanobot.counter.types import CounterTrigger
 
 _TURN_COUNT_KEY = "_counter_turn_count"
 _LAST_TRIGGER_KEY_PREFIX = "_counter_last_trigger_"
-_DEFAULT_TRIGGERS_PATH = "trigger/count/count.yaml"
+_DEFAULT_TRIGGERS_PATH = "subagent/_trigger/triggers.yaml"
 
 
 class CounterEngine:

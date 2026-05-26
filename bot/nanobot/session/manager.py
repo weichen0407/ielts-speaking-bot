@@ -767,11 +767,14 @@ class SessionManager:
         self._update_session_index(session)
 
     def _append_to_shared_interaction_log(self, session: Session) -> None:
-        """Append session messages to the unified thread.jsonl at project root (best-effort)."""
+        """Append session messages to the unified thread.jsonl at data/ (best-effort)."""
         try:
             project_root = self.workspace.parent
-            shared_path = project_root / "thread.jsonl"
+            data_dir = project_root / "data"
+            shared_path = data_dir / "thread.jsonl"
             tmp_path = shared_path.with_suffix(".jsonl.tmp")
+
+            data_dir.mkdir(parents=True, exist_ok=True)
 
             existing_lines: list[str] = []
             if shared_path.exists():

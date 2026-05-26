@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 class VocabInput(BaseModel):
     """VocabProcessor 输入 Schema"""
+    id: str | None = None
     role: str
     content: str
     topic: str | None = None
@@ -12,8 +13,12 @@ class VocabInput(BaseModel):
 
 
 class VocabOutput(BaseModel):
-    """VocabProcessor 输出 Schema"""
+    """VocabProcessor 输出 Schema
+
+    LLM 输出格式（tab 分隔）：
+    original\timproved\ttype\treason
+    """
     original: str
     improved: str
-    word_type: str
-    notes: str | None = None
+    type: str
+    reason: str

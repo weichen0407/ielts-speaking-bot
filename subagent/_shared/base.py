@@ -8,6 +8,8 @@ import json
 
 from pydantic import BaseModel
 
+from .utils import ensure_output_dir
+
 T = TypeVar("T", bound=BaseModel)
 U = TypeVar("U", bound=BaseModel)
 
@@ -17,19 +19,20 @@ class BaseDataProcessor(ABC, Generic[T, U]):
     DataProcessor 基类
 
     定义通用流程：
-    1. read()        - 读取 thread.jsonl
-    2. preprocess()  - 预处理（去无用字段，过滤）
-    3. build_prompt()- 组装 prompt
-    4. call_llm()   - 调用 LLM
-    5. parse_output()- 解析 LLM 输出
-    6. serialize()   - 写回 jsonl 或生成 md
+    1. read()         - 读取 thread.jsonl
+    2. preprocess()    - 预处理（提取有用字段，减少 token）
+    3. build_prompt() - 组装 prompt 给 LLM
+    4. call_llm()     - 调用 LLM
+    5. parse_llm_output() - 解析 LLM 输出（第二工程层）
+    6. serialize()     - 写回 jsonl 和生成 md
 
     子类必须实现：
-    - name 属性      - 唯一标识
+    - name 属性           - 唯一标识
     - get_input_schema()  - 返回输入 Schema
-    - get_output_schema() - 返回输出 Schema
+    - get_output_schema() - 返回输出 Schema（告诉 LLM 几个字段）
     - build_user_prompt() - 组装用户 prompt
-    - parse_llm_output()  - 解析 LLM 输出
+    - parse_llm_output()  - 解析 LLM tab 分隔的输出
+    - to_md()            - 生成 md 格式报告
     """
 
     name: str = "base"
@@ -41,7 +44,7 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     @abstractmethod
     def get_output_schema(self) -> type[U]:
-        """子类返回输出 Schema"""
+        """子类返回输出 Schema（字段名列表，用于 parse）"""
         pass
 
     @abstractmethod
@@ -51,7 +54,12 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     @abstractmethod
     def parse_llm_output(self, raw_output: str) -> list[U]:
-        """子类实现 LLM 输出的解析逻辑"""
+        """子类实现 LLM 输出的解析逻辑（第二工程层）"""
+        pass
+
+    @abstractmethod
+    def to_md(self, parsed_data: list[U]) -> str:
+        """子类实现 md 格式输出"""
         pass
 
     def read(self, path: Path) -> list[dict]:
@@ -61,8 +69,8 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     def preprocess(self, raw_data: list[dict]) -> list[T]:
         """
-        预处理：
-        1. 过滤无用字段（id, ts, _type 等）
+        预处理（第一工程层）：
+        1. 提取有用字段（保留 id、content、topic 等）
         2. 验证 schema
         3. 返回 Pydantic 模型列表
         """
@@ -77,22 +85,33 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         return processed
 
     def _filter_fields(self, item: dict) -> dict:
-        """过滤通用字段，子类可 override"""
-        excluded = {"id", "timestamp", "source", "metadata"}
+        """
+        过滤通用字段，保留有用字段供 LLM 使用
+        子类可 override
+        """
+        # 需要保留的字段
         result = {}
-        for k, v in item.items():
-            if k in excluded:
-                if k == "source" and isinstance(v, dict):
-                    result["mode"] = v.get("mode")
-                elif k == "metadata" and isinstance(v, dict):
-                    result["topic"] = v.get("topic")
-                continue
-            if k == "content" and isinstance(v, dict):
-                result[k] = v.get("text", "")
-            elif k == "content" and isinstance(v, str):
-                result[k] = v
-            else:
-                result[k] = v
+        # id 必须保留，用于后续拼接
+        if "id" in item:
+            result["id"] = item["id"]
+        # content.text 是主要内容
+        if "content" in item:
+            if isinstance(item["content"], dict):
+                result["content"] = item["content"].get("text", "")
+            elif isinstance(item["content"], str):
+                result["content"] = item["content"]
+        # metadata 里的 topic
+        if "metadata" in item and isinstance(item["metadata"], dict):
+            if "topic" in item["metadata"]:
+                result["topic"] = item["metadata"].get("topic")
+            if "mode" in item["metadata"]:
+                result["mode"] = item["metadata"].get("mode")
+        # source 里的 mode 和 session_uuid
+        if "source" in item and isinstance(item["source"], dict):
+            if "mode" in item["source"]:
+                result["mode"] = item["source"].get("mode")
+            if "session_uuid" in item["source"]:
+                result["session_uuid"] = item["source"].get("session_uuid")
         return result
 
     def process_all(
@@ -100,9 +119,17 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         input_path: Path,
         output_path: Path,
         batch_size: int = 50,
-        format: str = "jsonl",
+        format: str = "both",
     ):
-        """处理所有批次"""
+        """
+        处理所有批次
+
+        Args:
+            input_path: thread.jsonl 路径
+            output_path: 输出路径（jsonl 时用）
+            batch_size: 每批处理多少条
+            format: "jsonl" | "md" | "both"
+        """
         all_data = self.read(input_path)
         total = len(all_data)
 
@@ -129,25 +156,32 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         self,
         data: list[U],
         output_path: Path,
-        format: str = "jsonl",
+        format: str = "both",
     ):
-        """序列化输出"""
-        if format == "jsonl":
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(output_path, "a", encoding="utf-8") as f:
-                for item in data:
-                    f.write(item.model_dump_json() + "\n")
-        elif format == "md":
-            self._serialize_md(data, output_path)
+        """
+        序列化输出
 
-    def _serialize_md(self, data: list[U], path: Path):
-        """生成 markdown，子类可 override"""
-        lines = ["# Output\n"]
-        for item in data:
-            lines.append(f"- {item.model_dump()}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
+        Args:
+            data: parse 后的 Pydantic 模型列表
+            output_path: jsonl 输出路径（md 路径自动推导）
+            format: "jsonl" | "md" | "both"
+        """
+        if format in ("jsonl", "both"):
+            self._serialize_jsonl(data, output_path)
+
+        if format in ("md", "both"):
+            md_path = output_path.with_suffix(".md")
+            md_content = self.to_md(data)
+            ensure_output_dir(md_path)
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(md_content)
+
+    def _serialize_jsonl(self, data: list[U], path: Path) -> None:
+        """追加写入 jsonl"""
+        ensure_output_dir(path)
+        with open(path, "a", encoding="utf-8") as f:
+            for item in data:
+                f.write(item.model_dump_json() + "\n")
 
     def get_system_prompt(self) -> str:
         """默认 system prompt，子类可 override"""

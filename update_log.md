@@ -1,5 +1,65 @@
 # Update Log
 
+## 2026-05-26 - Trigger 整合 + global/ 目录清理
+
+本次更新将所有 trigger 配置整合到 `subagent/_trigger/triggers.yaml`，并清理了废弃的 `global/` 目录。
+
+---
+
+## 1. Trigger 配置整合
+
+### 变更说明
+
+将 `global/trigger/count/count.yaml` 的内容移动到 `subagent/_trigger/triggers.yaml`，实现 subagent 自包含配置。
+
+### 文件变更
+
+| 文件 | 改动 |
+|------|------|
+| `subagent/_trigger/triggers.yaml` | 新建，整合所有 triggers |
+| `bot/nanobot/counter/engine.py` | `_DEFAULT_TRIGGERS_PATH` 改为 `subagent/_trigger/triggers.yaml` |
+
+---
+
+## 2. 数据目录重组
+
+### thread.jsonl 移动
+
+`thread.jsonl` 从项目根目录移动到 `data/thread.jsonl`，统一数据入口。
+
+| 文件 | 改动 |
+|------|------|
+| `bot/nanobot/session/manager.py` | `_append_to_shared_interaction_log` 写入 `data/thread.jsonl` |
+| `.gitignore` | 新增 `data/thread.jsonl`，移除 `thread.jsonl` |
+
+---
+
+## 3. global/ 目录清理
+
+### 删除内容
+
+| 原路径 | 说明 |
+|--------|------|
+| `global/trigger/` | 已整合到 `subagent/_trigger/triggers.yaml` |
+| `global/formats/daily_format.md` | 未使用，删除 |
+| `global/formats/polisher_format.md` | 未使用，删除 |
+| `global/formats/vocab_format.md` | 未使用，删除 |
+| `global/context/` | 空目录，删除 |
+
+### 迁移内容
+
+| 原路径 | 新路径 |
+|--------|--------|
+| `global/formats/memory_format.md` | `subagent/cross_session/memory_cron/formats/memory_format.md` |
+
+### 更新的引用
+
+| 文件 | 改动 |
+|------|------|
+| `bot/nanobot/agent/loop.py` | memory_format.md 路径更新为 `subagent/cross_session/memory_cron/formats/memory_format.md` |
+
+---
+
 ## 2026-05-25 - Subagent 目录重组 + 数据迁移
 
 本次更新将 `subagents/` 重组为 `subagent/`，按照 single_session / cross_session 分类，每个 subagent 自包含 processor、md、data 三个子目录。同时整理了 shared/ 目录，将数据迁移到 persona/ 和 mode/ 下。
