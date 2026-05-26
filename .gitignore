@@ -19,6 +19,12 @@ persona/memory/*.jsonl
 shared/.cursor_*.json
 shared/thread.jsonl
 
+# Subagent data (cursors and outputs)
+subagent/_cursors/
+subagent/single_session/*/data/
+subagent/cross_session/*/data/
+thread.jsonl
+
 # WebUI build output
 bot/webui/dist/
 bot/webui/node_modules/

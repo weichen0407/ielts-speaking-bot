@@ -767,13 +767,11 @@ class SessionManager:
         self._update_session_index(session)
 
     def _append_to_shared_interaction_log(self, session: Session) -> None:
-        """Append session messages to the unified shared/thread.jsonl (best-effort)."""
+        """Append session messages to the unified thread.jsonl at project root (best-effort)."""
         try:
-            shared_dir = self.workspace.parent / "shared"
-            shared_path = shared_dir / "thread.jsonl"
+            project_root = self.workspace.parent
+            shared_path = project_root / "thread.jsonl"
             tmp_path = shared_path.with_suffix(".jsonl.tmp")
-
-            ensure_dir(shared_dir)
 
             existing_lines: list[str] = []
             if shared_path.exists():
@@ -792,13 +790,13 @@ class SessionManager:
             os.replace(tmp_path, shared_path)
 
             logger.debug(
-                "Appended {} interactions to shared/thread.jsonl for session {}",
+                "Appended {} interactions to thread.jsonl for session {}",
                 len(new_lines),
                 session.key,
             )
         except Exception as exc:
             logger.warning(
-                "Failed to append to shared/thread.jsonl for session {}: {}",
+                "Failed to append to thread.jsonl for session {}: {}",
                 session.key,
                 exc,
             )

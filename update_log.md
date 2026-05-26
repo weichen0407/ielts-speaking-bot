@@ -132,8 +132,26 @@ subagent/
 | 文件 | 改动 |
 |------|------|
 | `subagent/_shared/registry.py` | import 路径更新 |
-| `global/trigger/count/count.yaml` | prompt_file 路径更新 |
-| `.gitignore` | 无需更改（相关路径已在 gitignore） |
+| `global/trigger/count/count.yaml` | prompt_file 路径更新、processor input/output 路径更新、task_template 路径更新 |
+| `bot/nanobot/session/manager.py` | thread.jsonl 改为项目根目录 |
+| `.gitignore` | 新增 subagent 数据路径忽略规则 |
+
+### count.yaml 路径更新汇总
+
+| 字段 | 原路径 | 新路径 |
+|------|--------|--------|
+| `path` (vocab/polisher/quiz/notes) | `shared/thread.jsonl` | `thread.jsonl` |
+| `output_path` (vocab) | `shared/vocab.jsonl` | `subagent/single_session/vocab/data/vocab.jsonl` |
+| `output_path` (polisher) | `shared/polisher.jsonl` | `subagent/single_session/polisher/data/polisher.jsonl` |
+| `output_path` (quiz) | `shared/knowledge_pool.jsonl` | `subagent/single_session/quiz/data/knowledge_pool.jsonl` |
+| `output_path` (notes) | `shared/notes.jsonl` | `subagent/single_session/notes/data/notes.jsonl` |
+| `path` (kg_builder/review_builder) | `shared/vocab.jsonl` | `subagent/single_session/vocab/data/vocab.jsonl` |
+| kg task_template | `{workspace}/kg/` | `{workspace}/subagent/cross_session/kg/data/` |
+| review task_template | `{workspace}/shared/review/` | `{workspace}/subagent/cross_session/review/data/` |
+| memory_cron task_template | `{workspace}/shared/memory/` | `{workspace}/persona/memory/` |
+| daily_consolidator task_template | `{workspace}/shared/daily/` | `{workspace}/subagent/cross_session/daily_consolidator/data/` |
+| progress_tracker path | `shared/user_responses.jsonl` | `persona/user_responses.jsonl` |
+| benative paths | `{workspace}/shared/benative/` | `{workspace}/mode/benative/data/benative/` |
 
 ---
 
@@ -147,7 +165,7 @@ subagent/
 
 ### 功能概述
 
-建立统一的交互日志 `shared/thread.jsonl`，所有用户和 AI 的对话内容都记录其中，支持跨会话查询。
+建立统一的交互日志 `thread.jsonl`（项目根目录），所有用户和 AI 的对话内容都记录其中，支持跨会话查询。
 
 ### 新增文件
 
