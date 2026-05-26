@@ -43,11 +43,17 @@ class CounterTarget:
     """What to do when the trigger fires."""
 
     subagent: str = ""
+    processor: str = ""  # Processor name (e.g., "vocab", "polisher")
     prompt_file: str = ""
     silent: bool = True
     task_template: str = ""
     depends_on: str | None = None  # Trigger ID that must complete before this fires
     model: str | None = None  # Override default model for this subagent (e.g. "gpt-4o-mini")
+    # Processor-specific fields
+    input_path: str = ""  # Single input file for processor
+    input_paths: list[str] = field(default_factory=list)  # Multiple input files for processor
+    output_path: str = ""  # Output file for processor
+    batch_size: int = 50  # Batch size for processor
 
 
 @dataclass
@@ -59,15 +65,20 @@ class CounterTrigger:
     enabled: bool = True
     condition: CounterCondition = field(default_factory=CounterCondition)
     target: CounterTarget = field(default_factory=CounterTarget)
+    # Internal fields (not from JSON)
+    _cursor: dict = field(default_factory=dict)  # cursor state from triggers.json
+    _triggers_file: "Path | None" = field(default=None)  # path to triggers.json
 
     @classmethod
     def from_dict(cls, data: dict) -> "CounterTrigger":
         condition = CounterCondition(**data.get("condition", {}))
         target = CounterTarget(**data.get("target", {}))
+        cursor = data.get("cursor", {})
         return cls(
             id=data["id"],
             name=data.get("name", data["id"]),
             enabled=data.get("enabled", True),
             condition=condition,
             target=target,
+            _cursor=cursor,
         )

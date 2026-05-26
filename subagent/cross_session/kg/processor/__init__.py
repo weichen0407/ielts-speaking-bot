@@ -5,6 +5,8 @@ from .cursor import CursorManager, KG_Cursor
 from .extractor import EntityExtractor, ExtractedEntity, ExtractedRelation
 from .kg_updater import KGUpdater
 from .topics import IELTS_TOPICS, ENTITY_TYPES, RELATION_TYPES
+from .kg_processor import KGProcessor
+from .schema import KGInput, KGOutput
 
 __all__ = [
     "EntityStore",
@@ -19,4 +21,7 @@ __all__ = [
     "IELTS_TOPICS",
     "ENTITY_TYPES",
     "RELATION_TYPES",
+    "KGProcessor",
+    "KGInput",
+    "KGOutput",
 ]

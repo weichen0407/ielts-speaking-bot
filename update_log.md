@@ -1,5 +1,376 @@
 # Update Log
 
+## 2026-05-26 - Trigger 整合到 Per-Mode 配置
+
+本次更新将所有 trigger 配置迁移到 per-mode `triggers.json` 文件，实现 Mode 统一管理调度。
+
+---
+
+## 1. 架构变更
+
+### 设计原则
+
+- **Subagent** 只负责执行，不关心何时被调用
+- **Processor** 是 Subagent 内部的 LLM 交互层（过滤输入、解析输出）
+- **Mode** 是编排层，决定何时调用哪个 Subagent
+- **Context** 注入到 Subagent（`subagent/*/context/` 目录）
+
+### 目录结构
+
+```
+mode/
+├── default/                    ← 内部使用，不暴露给用户
+│   ├── context/
+│   └── trigger/
+│       └── triggers.json      ← 全局 triggers (cron + file_line_count)
+│
+├── freechat/                   ← 用户 mode
+│   ├── context/
+│   └── trigger/
+│       └── triggers.json      ← vocab, polisher (turn_count)
+│
+└── ielts/
+    ├── context/
+    └── trigger/
+        └── triggers.json      ← vocab, polisher, ielts_feedback (turn_count)
+
+subagent/
+├── single_session/
+│   ├── vocab/
+│   │   ├── context/
+│   │   │   └── vocab_subagent.md  ← 注入的上下文
+│   │   └── processor/
+│   │       └── processor.py
+│   ├── polisher/
+│   ├── quiz/
+│   └── notes/
+│
+└── cross_session/
+    ├── kg/
+    │   ├── context/
+    │   └── processor/
+    ├── review/
+    ├── memory_cron/
+    ├── daily_consolidator/
+    └── ...
+```
+
+### CounterEngine 加载逻辑
+
+```
+CounterEngine 初始化
+    ↓
+_load_default_triggers() → mode/default/trigger/triggers.json (始终加载)
+    ↓
+set_mode("freechat")
+    ↓
+_load_mode_triggers() → mode/freechat/trigger/triggers.json (覆盖)
+    ↓
+所有 triggers (default + current mode) 都会被 check_triggers() 检查
+```
+
+---
+
+## 2. triggers.json 文件
+
+### mode/default/trigger/triggers.json
+
+| Trigger ID | Kind | 说明 |
+|------------|------|------|
+| memory_cron | cron | 每天 00:00 更新用户记忆 |
+| daily_consolidator | cron | 每 8 小时汇总 vocab/polisher |
+| progress_tracker | file_line_count | user_responses.jsonl 满 20 条 |
+| benative_article_fetcher | cron | 每天 12:00 抓取文章 |
+| benative_translator | cron | 每天 13:00 翻译文章 |
+
+### mode/freechat/trigger/triggers.json
+
+| Trigger ID | Kind | 说明 |
+|------------|------|------|
+| vocab_analysis | turn_count | 每 2 句话分析词汇 |
+| polish_feedback | turn_count | 每 3 句话分析语法 |
+
+### mode/ielts/trigger/triggers.json
+
+| Trigger ID | Kind | 说明 |
+|------------|------|------|
+| vocab_analysis | turn_count | 每 2 句话分析词汇 |
+| polish_feedback | turn_count | 每 3 句话分析语法 |
+| ielts_feedback | turn_count | 每 5 句话分析 IELTS |
+
+---
+
+## 3. Subagent 目录变更
+
+### md/ → context/
+
+所有 `md/` 目录重命名为 `context/`：
+
+```bash
+subagent/single_session/vocab/md → subagent/single_session/vocab/context
+subagent/cross_session/kg/md → subagent/cross_session/kg/context
+# ... 以此类推
+```
+
+### 旧文件删除
+
+- `subagent/*/triggers.json` → 已删除，trigger 配置移到 mode 目录
+- `subagent/_trigger/triggers.yaml` → 已删除
+
+---
+
+## 4. CounterEngine 更新
+
+### 变更内容
+
+```python
+class CounterEngine:
+    def __init__(self, workspace):
+        self._default_triggers_file = workspace / "mode" / "default" / "trigger" / "triggers.json"
+        self._load_default_triggers()  # 始终加载
+
+    def set_mode(self, mode):
+        self._load_mode_triggers(mode)  # 加载当前 mode triggers
+        # default triggers 始终保留
+```
+
+### prompt_file 路径更新
+
+```python
+# 旧路径
+subagent/{category}/{name}/md/{name}_subagent.md
+# 新路径
+subagent/{category}/{name}/context/{name}_subagent.md
+```
+
+---
+
+## 5. 流程总结
+
+```
+用户切换 mode (/freechat → /ielts)
+    ↓
+session.metadata["mode"] = "ielts"
+loop.counter_engine.set_mode("ielts")
+    ↓
+CounterEngine 重新加载:
+    - mode/default/trigger/triggers.json (不变)
+    - mode/ielts/trigger/triggers.json (新加载)
+    ↓
+CounterEngine.check_triggers() 检查所有 triggers
+    ↓
+满足条件 → spawn 对应 subagent
+    ↓
+Subagent 执行:
+    - 加载 context/context.md 注入上下文
+    - 使用 processor 处理 LLM 交互
+    - 写入 data/ 目录
+```
+
+---
+
+## 2. CounterEngine 更新
+
+### 变更内容
+
+- `_DEFAULT_TRIGGERS_PATH` 删除，不再使用单一 YAML 文件
+- `_load_all_triggers()` 改为扫描 `subagent/single_session/*/triggers.json` 和 `subagent/cross_session/*/triggers.json`
+- cursor 状态从 `triggers.json` 的 `cursor` 字段读取和写入
+- `_update_trigger_cursor()` 直接更新对应 trigger 的 cursor
+
+### 扫描目录
+
+```
+subagent/
+├── single_session/
+│   ├── vocab/triggers.json
+│   ├── polisher/triggers.json
+│   ├── quiz/triggers.json
+│   └── notes/triggers.json
+└── cross_session/
+    ├── kg/triggers.json
+    ├── review/triggers.json
+    ├── progress_tracker/triggers.json
+    ├── memory_cron/triggers.json
+    ├── daily_consolidator/triggers.json
+    └── benative_article_fetcher/triggers.json
+```
+
+---
+
+## 3. 数据目录重组
+
+### thread.jsonl 位置
+
+`thread.jsonl` 已移动到 `data/thread.jsonl`：
+- `bot/nanobot/session/manager.py` 中 `_append_to_shared_interaction_log` 写入 `data/thread.jsonl`
+- `.gitignore` 已包含 `data/thread.jsonl`
+
+### .gitignore 更新
+
+```
+# Session data (dynamically created)
+data/thread.jsonl
+thread.jsonl
+```
+
+---
+
+## 4. 清理内容
+
+| 原路径 | 说明 |
+|--------|------|
+| `subagent/_trigger/triggers.yaml` | 已删除，改用 per-subagent triggers.json |
+| `global/trigger/` | 目录不存在（已清理） |
+
+---
+
+## 2026-05-26 - Processor Trigger 执行机制 + Level 2/3 Processors 更新
+
+本次更新实现了 processor trigger 的自动执行机制，完善了 Level 2 和 Level 3 的 processors。
+
+---
+
+## 1. Processor Trigger 执行机制
+
+### 架构设计
+
+```
+CounterEngine.check_triggers() → _spawn_counter_subagent()
+                                        │
+                    ┌───────────────────┴───────────────────┐
+                    ▼                                       ▼
+           trigger.target.processor               trigger.target.subagent
+                    │                                       │
+                    ▼                                       ▼
+         _execute_processor()                    subagents.spawn()
+         - discover_processors()                - load_prompt()
+         - processor.process_all()            - build_task()
+         - chain dependents                     - chain dependents
+```
+
+### 新增文件/改动
+
+| 文件 | 改动 |
+|------|------|
+| `bot/nanobot/agent/loop.py` | 新增 `_execute_processor()` 方法，修改 `_spawn_counter_subagent()` 支持 processor/subagent 分流 |
+| `bot/nanobot/counter/types.py` | `CounterTarget` 新增 `processor`、`input_path`、`output_path`、`batch_size` 字段 |
+
+### 处理流程
+
+1. **Processor Trigger** (`trigger.target.processor` 存在)：
+   - 通过 `discover_processors()` 加载对应 processor 类
+   - 调用 `processor.process_all(input_path, output_path, batch_size, format="both")`
+   - 自动 chain `depends_on` 中依赖它的 triggers
+
+2. **Subagent Trigger** (`trigger.target.subagent` 存在)：
+   - 通过 `subagents.spawn()` 执行（现有逻辑）
+   - 等待 task_id 完成
+   - 自动 chain `depends_on` 中依赖它的 triggers
+
+---
+
+## 2. Level 2 Processors 更新
+
+### 设计原则
+
+- **两层工程**：
+  - 第一工程层：预处理，提取有用字段，减少 token
+  - 第二工程层：解析 LLM tab-separated 输出
+- **LLM 输出格式**：tab 分隔，纯文本，方便解析
+- **Processor Registry**：`discover_processors()` 自动发现 `subagent/single_session/*/processor/`
+
+### 更新的 Processors
+
+| Processor | 路径 | 输出字段 |
+|-----------|------|----------|
+| Vocab | `subagent/single_session/vocab/processor/` | `original`, `improved`, `type`, `reason` |
+| Polisher | `subagent/single_session/polisher/processor/` | `original`, `improved`, `grammar_type`, `explanation` |
+| Notes | `subagent/single_session/notes/processor/` | `title`, `content`, `category`, `reference`, `context` |
+| Quiz | `subagent/single_session/quiz/processor/` | `question`, `answer`, `difficulty`, `topic` |
+
+### System Prompt 格式 (Tab-Separated)
+
+```markdown
+You are a vocabulary analysis expert.
+Given user's conversation content, extract words and expressions that need improvement.
+Output format: tab-separated fields, one improvement per line.
+
+Format: original\timproved\ttype\treason
+
+Example:
+3 points	three-point shot	expression	在篮球语境中更专业
+is good	is on fire	collocation	更生动的表达
+```
+
+---
+
+## 3. Level 3 Subagents 更新
+
+### 更新的 Subagents
+
+| Subagent | 路径 | 输出格式 |
+|----------|------|----------|
+| KG Builder | `subagent/cross_session/kg/md/kg_subagent.md` | `{label}\t{entity_type}\t{topics}` |
+| Review Builder | `subagent/cross_session/review/md/review_subagent.md` | `{review_point}\t{question_type}\t{familiarity_hint}\t{topic}` |
+
+---
+
+## 4. Trigger YAML 配置
+
+### Processor Trigger 示例
+
+```yaml
+- id: vocab_processor
+  name: "Vocab Processor"
+  enabled: true
+  condition:
+    kind: file_line_count
+    count: 50
+    path: data/thread.jsonl
+  target:
+    processor: vocab
+    input_path: data/thread.jsonl
+    output_path: subagent/single_session/vocab/data/vocab.jsonl
+    batch_size: 50
+```
+
+### Subagent Trigger 示例 (with depends_on)
+
+```yaml
+- id: kg_builder
+  name: "Knowledge Graph Builder"
+  enabled: true
+  condition:
+    kind: file_line_count
+    count: 50
+    path: subagent/single_session/vocab/data/vocab.jsonl
+  target:
+    subagent: kg_subagent
+    prompt_file: subagent/cross_session/kg/md/kg_subagent.md
+    depends_on:
+      - vocab_processor
+      - polisher_processor
+      - notes_processor
+    model: "gpt-4o-mini"
+```
+
+---
+
+## 5. .gitignore 更新
+
+新增 Python 字节码缓存忽略：
+
+```gitignore
+# Python bytecode cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+```
+
+---
+
 ## 2026-05-26 - Trigger 整合 + global/ 目录清理
 
 本次更新将所有 trigger 配置整合到 `subagent/_trigger/triggers.yaml`，并清理了废弃的 `global/` 目录。

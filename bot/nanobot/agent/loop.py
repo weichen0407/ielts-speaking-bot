@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import inspect
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
@@ -189,9 +190,15 @@ class AgentLoop:
         trigger: CounterTrigger,
         session_dir: str,
     ) -> None:
-        """Spawn a counter subagent and immediately record its completion.
-        Dependent triggers are chained via a background task that waits for completion.
-        """
+        """Spawn a counter subagent or execute a processor, then chain dependents."""
+        target = trigger.target
+
+        # Handle processor trigger
+        if target.processor:
+            await self._execute_processor(session, msg, trigger, session_dir)
+            return
+
+        # Handle subagent trigger (existing logic)
         prompt = self.counter_engine.load_prompt(trigger)
         if not prompt:
             return
@@ -205,14 +212,14 @@ class AgentLoop:
         try:
             task_id = await self.subagents.spawn(
                 task=task,
-                label=trigger.target.subagent,
+                label=target.subagent,
                 origin_channel=msg.channel,
                 origin_chat_id=msg.chat_id,
                 session_key=session.key,
                 origin_message_id=msg_id,
                 extra_system_prompt=prompt,
-                announce_result=not trigger.target.silent,
-                model=trigger.target.model,
+                announce_result=not target.silent,
+                model=target.model,
             )
             self.counter_engine.record_trigger(session.metadata, trigger.id)
             logger.info(
@@ -220,12 +227,93 @@ class AgentLoop:
                 trigger.id,
                 session.key,
             )
-            # Chain dependent triggers in the background — does NOT block the user response
             self._schedule_background(
                 self._chain_dependent_triggers(session, msg, trigger.id, session_dir, task_id),
             )
         except Exception as e:
             logger.warning("Failed to spawn counter subagent [{}]: {}", trigger.id, e)
+
+    async def _execute_processor(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        trigger: CounterTrigger,
+        session_dir: str,
+    ) -> None:
+        """Execute a processor trigger."""
+        from pathlib import Path
+        from subagent._shared.registry import discover_processors
+
+        target = trigger.target
+        try:
+            processors = discover_processors()
+            processor_cls = processors.get(target.processor)
+            if not processor_cls:
+                logger.warning(
+                    "Processor [{}] not found in registry, available: {}",
+                    target.processor,
+                    list(processors.keys()),
+                )
+                return
+
+            processor = processor_cls()
+            output_path = Path(self.workspace) / target.output_path
+            batch_size = target.batch_size or 50
+
+            # Determine input paths (single or multiple)
+            if target.input_paths:
+                # Multiple input files (Level 3 processors)
+                input_paths = [Path(self.workspace) / p for p in target.input_paths]
+                logger.info(
+                    "Executing processor [{}] with inputs={}, output={}, batch_size={}",
+                    target.processor,
+                    input_paths,
+                    output_path,
+                    batch_size,
+                )
+                # Call with input_paths for multi-input processors
+                if hasattr(processor, 'process_all') and 'input_paths' in str(inspect.signature(processor.process_all)):
+                    processor.process_all(
+                        input_paths=input_paths,
+                        output_path=output_path,
+                        batch_size=batch_size,
+                        format="both",
+                    )
+                else:
+                    # Fallback for processors expecting single input_path
+                    processor.process_all(
+                        input_path=input_paths[0] if input_paths else Path(""),
+                        output_path=output_path,
+                        batch_size=batch_size,
+                        format="both",
+                    )
+            else:
+                # Single input file (Level 2 processors)
+                input_path = Path(self.workspace) / target.input_path
+                logger.info(
+                    "Executing processor [{}] with input={}, output={}, batch_size={}",
+                    target.processor,
+                    input_path,
+                    output_path,
+                    batch_size,
+                )
+                processor.process_all(
+                    input_path=input_path,
+                    output_path=output_path,
+                    batch_size=batch_size,
+                    format="both",
+                )
+
+            self.counter_engine.record_trigger(session.metadata, trigger.id)
+            logger.info(
+                "Processor [{}] completed, chaining dependents in background",
+                target.processor,
+            )
+            self._schedule_background(
+                self._chain_dependent_triggers(session, msg, trigger.id, session_dir, None),
+            )
+        except Exception as e:
+            logger.warning("Failed to execute processor [{}]: {}", target.processor, e)
 
     async def _chain_dependent_triggers(
         self,
@@ -233,16 +321,24 @@ class AgentLoop:
         msg: InboundMessage,
         completed_trigger_id: str,
         session_dir: str,
-        task_id: str,
+        task_id: str | None,
     ) -> None:
         """Wait for a subagent to complete, then spawn any dependent triggers."""
         try:
-            await self.subagents.wait_for_subagent(task_id)
-            logger.info(
-                "Subagent [{}] completed, checking for dependent triggers of {}",
-                task_id,
-                completed_trigger_id,
-            )
+            # For subagent triggers, wait for completion
+            if task_id is not None:
+                await self.subagents.wait_for_subagent(task_id)
+                logger.info(
+                    "Subagent [{}] completed, checking for dependent triggers of {}",
+                    task_id,
+                    completed_trigger_id,
+                )
+            else:
+                logger.info(
+                    "Processor [{}] completed (no task_id), checking for dependent triggers",
+                    completed_trigger_id,
+                )
+
             chained = [
                 t for t in self.counter_engine._triggers
                 if t.target.depends_on == completed_trigger_id

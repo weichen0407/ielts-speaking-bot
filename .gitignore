@@ -32,5 +32,11 @@ thread.jsonl
 bot/webui/dist/
 bot/webui/node_modules/
 
+# Python bytecode cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
 # User notes (dynamically created, should not be committed)
 user-notes/

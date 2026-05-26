@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "triggers": [
+    {
+      "id": "memory_cron",
+      "name": "Memory Cron",
+      "enabled": true,
+      "condition": {
+        "kind": "cron",
+        "count": "0 0 * * *",
+        "scope": "global"
+      },
+      "target": {
+        "subagent": "memory_cron",
+        "prompt_file": "subagent/cross_session/memory_cron/context/memory_cron_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Update user memory profile based on sessions modified since last run.\n\nModified sessions (JSON):\n{modified_sessions}\n\nRead each session's thread.jsonl and extract NEW facts/preferences.\nMerge into {workspace}/persona/memory/MEMORY.md.\n\nOnly process messages newer than cursor timestamp."
+      },
+      "cursor": {
+        "last_fired": null,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "daily_consolidator",
+      "name": "Daily Consolidator",
+      "enabled": true,
+      "condition": {
+        "kind": "cron",
+        "count": "0 */8 * * *",
+        "scope": "global"
+      },
+      "target": {
+        "subagent": "daily_consolidator",
+        "prompt_file": "subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Aggregate vocab.md and polisher.md from sessions modified since last run.\n\nModified sessions (JSON):\n{modified_sessions}\n\nWrite to: {workspace}/subagent/cross_session/daily_consolidator/data/daily/daily_{date}.md"
+      },
+      "cursor": {
+        "last_fired": null,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "progress_tracker",
+      "name": "Progress Tracker",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 20,
+        "scope": "global",
+        "path": "persona/user_responses.jsonl"
+      },
+      "target": {
+        "subagent": "progress_tracker",
+        "prompt_file": "subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Track user expression progress.\n\nInput: {workspace}/persona/user_responses.jsonl\nOutput: {workspace}/persona/progress_bank.jsonl"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "benative_article_fetcher",
+      "name": "Benative Article Fetcher",
+      "enabled": true,
+      "condition": {
+        "kind": "cron",
+        "count": "0 12 * * *",
+        "scope": "global"
+      },
+      "target": {
+        "subagent": "benative_article_fetcher",
+        "prompt_file": "subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Fetch news articles for benative mode practice.\n\nArticles directory: {workspace}/mode/benative/data/benative/articles/\nWrite article JSON files and update cursor."
+      },
+      "cursor": {
+        "last_fired": null,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "benative_translator",
+      "name": "Benative Translator",
+      "enabled": true,
+      "condition": {
+        "kind": "cron",
+        "count": "0 13 * * *",
+        "scope": "global"
+      },
+      "target": {
+        "subagent": "benative_translator",
+        "prompt_file": "subagent/cross_session/benative_translator/context/benative_translator_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Translate untranslated benative articles.\n\nArticles directory: {workspace}/mode/benative/data/benative/articles/\nPairs directory: {workspace}/mode/benative/data/benative/pairs/"
+      },
+      "cursor": {
+        "last_fired": null,
+        "last_checked": null
+      }
+    }
+  ]
+}

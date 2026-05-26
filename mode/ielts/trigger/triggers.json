@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "triggers": [
+    {
+      "id": "vocab_analysis",
+      "name": "Vocabulary Analysis",
+      "enabled": true,
+      "condition": {
+        "kind": "turn_count",
+        "count": 2,
+        "scope": "session"
+      },
+      "target": {
+        "subagent": "vocab",
+        "prompt_file": "subagent/single_session/vocab/context/vocab_subagent.md",
+        "task_template": "Analyze the conversation history and update vocabulary suggestions.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/vocab.md"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "polish_feedback",
+      "name": "Polish Feedback",
+      "enabled": true,
+      "condition": {
+        "kind": "turn_count",
+        "count": 3,
+        "scope": "session"
+      },
+      "target": {
+        "subagent": "polisher",
+        "prompt_file": "subagent/single_session/polisher/context/polisher_subagent.md",
+        "task_template": "Analyze recent user messages and show optimized versions with diff.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/polisher.md"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_feedback",
+      "name": "IELTS Feedback",
+      "enabled": true,
+      "condition": {
+        "kind": "turn_count",
+        "count": 5,
+        "scope": "session"
+      },
+      "target": {
+        "subagent": "ielts_feedback",
+        "prompt_file": "subagent/single_session/ielts_feedback/context/ielts_feedback_subagent.md",
+        "model": "gpt-4o-mini",
+        "task_template": "Provide IELTS-specific feedback on the conversation.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/ielts_feedback.md\n\nFocus on:\n- IELTS speaking criteria (Fluency, Vocabulary, Grammar, Pronunciation)\n- Part 2 style extended responses\n- Complex sentence structures used correctly"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    }
+  ]
+}

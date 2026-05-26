@@ -17,7 +17,7 @@ class VocabProcessor(BaseDataProcessor[VocabInput, VocabOutput]):
         return VocabOutput
 
     def get_system_prompt(self) -> str:
-        return """You are a vocabulary analysis expert.
+        return r"""You are a vocabulary analysis expert.
 Given user's conversation content, extract words and expressions that need improvement.
 Output format: tab-separated fields, one improvement per line.
 
@@ -32,12 +32,12 @@ Types:
 If no improvement needed for a message, output (none).
 
 Example:
-3 points\tthree-point shot\texpression\t在篮球语境中更专业
-is good\tis on fire\tcollocation\t更生动的表达
+3 points	three-point shot	expression	在篮球语境中更专业
+is good	is on fire	collocation	更生动的表达
 
 ---
 
-ate rice\thad dinner\tcollocation\t更自然的表达"""
+ate rice	had dinner	collocation	更自然的表达"""
 
     def build_user_prompt(self, data: list[VocabInput]) -> str:
         lines = []
