@@ -62,4 +62,6 @@ def test_safe_key_matches_internal_path(tmp_path: Path) -> None:
     sm = SessionManager(tmp_path)
     key = "telegram:abc/def"
     expected = sm._get_session_path(key).name
-    assert SessionManager.safe_key(key) + ".jsonl" == expected
+    # _get_session_path always returns thread.jsonl (session files are stored
+    # under session directories named by UUID/custom folder, not by safe_key)
+    assert expected == "thread.jsonl"

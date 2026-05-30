@@ -1,4 +1,6 @@
-"""KGProcessor - builds knowledge graph from Level 2 processed files."""
+"""KGProcessor - builds knowledge graph from Level 2 processed files.
+
+DEPRECATED: Use subagent.cross_session.wiki.processor.wiki_processor instead."""
 
 from pathlib import Path
 

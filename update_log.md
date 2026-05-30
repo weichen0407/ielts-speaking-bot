@@ -2315,6 +2315,229 @@ This update introduces a configurable counter-based trigger system for subagents
 
 *Update created: 2026-05-20*
 
+---
+
+## 2026-05-30 - 当前 Git 工作树状态总结
+
+本次记录用于同步当前 `git status`，工作树中包含一批功能开发、测试补充、运行态数据和待清理文件。整体状态是：已有较多未提交改动，建议下一步先按模块拆分 review，再分批提交。
+
+---
+
+## 1. Git Status 概览
+
+当前工作树包含：
+
+- 已修改文件：核心 agent loop、subagent manager、websocket API、counter engine、session manager、WebUI、trigger 配置、测试文件等。
+- 已删除文件：旧的 per-mode `count.yaml` 计数配置，以及若干被清理的 `__pycache__` 文件。
+- 新增未跟踪文件：wiki 工具与处理器、admin monitor WebUI、wiki WebUI、wiki 测试、运行态日志、根目录 agent 配置文件、脚本和文档。
+- 前端依赖变更：`bot/webui/package.json`、`bun.lock`、`pnpm-lock.yaml` 均有变动。
+
+主要统计：
+
+```text
+42 tracked files changed
+1372 insertions
+214 deletions
+```
+
+---
+
+## 2. 核心功能改动
+
+### Subagent 调用与监控
+
+- `bot/nanobot/agent/subagent.py`
+  - 增加 subagent run 持久化日志。
+  - 记录调用结果、usage、tool events、artifact 快照和增量。
+  - 输出到 `monitor/subagent_runs.jsonl` 或 persona 下对应 monitor 目录。
+
+- `bot/nanobot/channels/websocket.py`
+  - 增加 admin monitor API。
+  - 增加 trigger 配置读取与更新 API。
+  - 增加 wiki/notes 相关 API。
+  - 改善非 JSON 响应导致前端报 `Unexpected token '<'` 的排查路径。
+
+- `bot/webui/src/components/AdminMonitorView.tsx`
+  - 新增后台监控页面。
+  - 支持查看 trigger 配置、prompt 预览、subagent 调用记录和单次调用详情。
+
+### Trigger 与 Counter
+
+- `bot/nanobot/counter/engine.py`
+  - 支持按当前 mode 加载 trigger。
+  - 支持 trigger 文件变化后重新加载。
+  - 解决 workspace 从 `persona` 切到项目根目录后的路径问题。
+
+- `mode/freechat/trigger/triggers.json`
+- `mode/ielts/trigger/triggers.json`
+- `mode/default/trigger/triggers.json`
+  - 调整 subagent 触发配置。
+  - 移除部分硬编码模型配置。
+  - 明确 subagent 只分析用户消息，assistant 内容只作为上下文。
+
+- 删除旧计数配置：
+  - `mode/benative/trigger/count/count.yaml`
+  - `mode/freechat/trigger/count/count.yaml`
+  - `mode/ielts/trigger/count/count.yaml`
+
+### Session / Thread 日志
+
+- `bot/nanobot/session/manager.py`
+  - 在 workspace 为项目根目录时，继续把 persona/session 数据落到正确位置。
+  - 修复 `data/thread.jsonl` 的跨会话同步逻辑，避免同一 session 的历史片段重复追加。
+
+### Notes
+
+- `bot/nanobot/agent/tools/notes_ai_assistant.py`
+- `bot/nanobot/agent/loop.py`
+- `bot/webui/src/components/GlobalNotes.tsx`
+- `bot/webui/src/components/NotesBookSheet.tsx`
+- `bot/webui/src/App.tsx`
+  - 修复 notes AI subagent 路径。
+  - 右下角浮动 notes 与 wiki 可以同时存在。
+  - AI 生成的 note reply 完成后可刷新并显示在右侧浮动 notes 面板。
+
+---
+
+## 3. Wiki / LLM Wiki 相关新增
+
+新增了 LLM Wiki 的第一版工程骨架：
+
+- `bot/nanobot/agent/tools/wiki.py`
+- `bot/nanobot/agent/wiki_sync.py`
+- `subagent/cross_session/wiki/`
+  - `context/wiki_subagent.md`
+  - `processor/schema.py`
+  - `processor/wiki_store.py`
+  - `processor/wiki_processor.py`
+  - `processor/wiki_index.py`
+  - `processor/wiki_graph.py`
+  - `processor/wiki_retriever.py`
+  - `processor/wiki_search.py`
+  - `processor/wiki_updater.py`
+
+当前能力：
+
+- 从 thread/session 增量提取候选 wiki patch。
+- 写入 markdown wiki pages。
+- 每页带 frontmatter。
+- 支持 source sidecar、log、SQLite FTS index、graph 构建。
+- WebSocket 暴露 wiki API。
+- WebUI 有 `WikiMemoryPanel` 和 `WikiGraphView` 初版。
+
+当前已识别的后续问题：
+
+- wiki sync 目前仍和 subagent trigger 存在耦合，需要独立触发。
+- page type 还需要升级为更成熟的 `source/entity/concept/comparison/question/synthesis/decision/gap/meta` 体系。
+- 需要补充 raw sources、schema、lint、review、research/gap 流程。
+- WebUI 知识图谱效果还需要重做，D3 相关依赖已经被安装到前端依赖中，但还未完成 UI 重构。
+
+---
+
+## 4. WebUI 改动
+
+- `bot/webui/src/App.tsx`
+- `bot/webui/src/components/Sidebar.tsx`
+- `bot/webui/src/components/GlobalNotes.tsx`
+- `bot/webui/src/components/NotesBookSheet.tsx`
+- `bot/webui/src/components/AdminMonitorView.tsx`
+- `bot/webui/src/components/WikiGraphView.tsx`
+- `bot/webui/src/components/WikiMemoryPanel.tsx`
+- `bot/webui/src/lib/api.ts`
+
+主要变化：
+
+- 增加 Admin Monitor 入口。
+- 增加 subagent 调用记录展示。
+- 增加 trigger 配置展示与更新接口调用。
+- 增加 wiki memory / graph UI 初版。
+- 修复 notes 和 wiki 浮动入口互相覆盖的问题。
+- 对部分组件滚动区域做了修正。
+
+---
+
+## 5. 测试与脚本
+
+新增或修改测试：
+
+- `bot/tests/channels/test_admin_trigger_update.py`
+- `bot/tests/counter/test_counter_engine_mode.py`
+- `bot/tests/counter/test_counter_engine_reload.py`
+- `bot/tests/wiki/*`
+- 多个 agent、CLI、tool 测试适配 workspace root / persona path 变化。
+
+新增脚本：
+
+- `scripts/dedupe_thread_log.py`
+- `scripts/validate_subagent_config.py`
+
+已运行过的验证：
+
+```text
+uv run python -m pytest tests/counter/test_counter_engine_mode.py tests/counter/test_counter_engine_reload.py tests/session/test_session_fsync.py tests/agent/test_session_manager_history.py
+结果：36 passed
+
+pnpm run check
+结果：163 passed，存在既有 warning
+
+uv run python scripts/validate_subagent_config.py
+结果：配置校验通过
+```
+
+---
+
+## 6. 文档新增
+
+- `docs/runtime-data-map.md`
+- `docs/wiki-memory-implementation.md`
+- `docs/05-llm-wiki-memory-system-plan.md`
+- `docs/06-llm-wiki-implementation-roadmap.md`
+- `docs/07-llm-wiki-test-plan.md`
+
+这些文档主要记录：
+
+- 运行态数据分布。
+- LLM Wiki memory 的设计。
+- wiki 实现路线图。
+- wiki 测试计划。
+
+---
+
+## 7. 运行态和待清理文件
+
+当前 `git status` 中有一些文件看起来更像运行态数据，提交前建议确认是否应该纳入版本管理：
+
+- `monitor/subagent_runs.jsonl`
+- `session_index.jsonl`
+- `sessions/.../notes/*.md`
+- `user_responses.jsonl`
+- `memory/history.jsonl`
+- `trigger/cron/jobs.json`
+
+另外有若干根目录文件目前未跟踪，需要确认是否是项目规范文件还是本地 agent 配置：
+
+- `AGENTS.md`
+- `HEARTBEAT.md`
+- `SOUL.md`
+- `TOOLS.md`
+- `USER.md`
+
+建议下一步处理：
+
+1. 决定运行态数据是否进入 `.gitignore`。
+2. 清理或确认 `__pycache__` 删除项。
+3. 将功能改动分成几个提交：
+   - workspace/session/thread 修复
+   - trigger/counter/subagent monitor
+   - notes AI 修复
+   - wiki core 初版
+   - WebUI monitor/wiki 初版
+   - docs/tests/scripts
+
+---
+
+*Update created: 2026-05-30*
+
 This update adds Free Chat button to web UI, implements cross-session memory tracking, refactors subagent system for silent file-only output, and redesigns the topic bank.
 
 ---

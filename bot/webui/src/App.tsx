@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { AdminMonitorView } from "@/components/AdminMonitorView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { SessionNotesSheet } from "@/components/SessionNotesSheet";
@@ -17,6 +18,11 @@ import {
   QuoteProvider,
   useGlobalNotes,
 } from "@/components/GlobalNotes";
+import {
+  WikiMemoryFloatingButton,
+  WikiMemoryPanel,
+  useWikiMemoryPanel,
+} from "@/components/WikiMemoryPanel";
 
 import { useSessions } from "@/hooks/useSessions";
 import { useDeferredTitleRefresh } from "@/hooks/useDeferredTitleRefresh";
@@ -53,7 +59,7 @@ const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
 const TOKEN_REFRESH_MIN_DELAY_MS = 5_000;
-type ShellView = "chat" | "settings";
+type ShellView = "chat" | "settings" | "monitor";
 
 function bootstrapTokenExpiresAt(expiresInSeconds: number): number {
   return Date.now() + Math.max(0, expiresInSeconds) * 1000;
@@ -338,6 +344,9 @@ function Shell({
   // Global notes
   const globalNotes = useGlobalNotes();
 
+  // Wiki memory
+  const wikiMemory = useWikiMemoryPanel();
+
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -447,6 +456,11 @@ function Shell({
 
   const onOpenSettings = useCallback(() => {
     setView("settings");
+    setMobileSidebarOpen(false);
+  }, []);
+
+  const onOpenMonitor = useCallback(() => {
+    setView("monitor");
     setMobileSidebarOpen(false);
   }, []);
 
@@ -577,6 +591,12 @@ function Shell({
       });
       return;
     }
+    if (view === "monitor") {
+      document.title = t("app.documentTitle.chat", {
+        title: "Monitor",
+      });
+      return;
+    }
     document.title = activeSession
       ? t("app.documentTitle.chat", { title: headerTitle })
       : t("app.documentTitle.base");
@@ -594,6 +614,8 @@ function Shell({
     onOpenSettings,
     onOpenNotesBook,
     onOpenIeltsExam,
+    onOpenWikiMemory: wikiMemory.open,
+    onOpenMonitor,
   };
   const showMainSidebar = view !== "settings";
 
@@ -643,7 +665,7 @@ function Shell({
           <div
             className={cn(
               "absolute inset-0 flex flex-col",
-              view === "settings" && "invisible pointer-events-none",
+              view !== "chat" && "invisible pointer-events-none",
             )}
           >
             <ThreadShell
@@ -673,6 +695,11 @@ function Shell({
                 onRestart={onRestart}
                 isRestarting={isRestarting}
               />
+            </div>
+          )}
+          {view === "monitor" && (
+            <div className="absolute inset-0 flex flex-col">
+              <AdminMonitorView onBackToChat={onBackToChat} />
             </div>
           )}
         </main>
@@ -773,10 +800,15 @@ function Shell({
         />
         <GlobalNotesFloatingButton api={globalNotes} />
 
+        {/* Wiki Memory Panel */}
+        <WikiMemoryPanel api={wikiMemory} />
+        <WikiMemoryFloatingButton api={wikiMemory} />
+
         {/* Notes Book Sheet */}
         <NotesBookSheet
           open={notesBookOpen}
           onOpenChange={setNotesBookOpen}
+          onAiReplyComplete={() => void globalNotes.refresh()}
         />
       </div>
       </QuoteProvider>

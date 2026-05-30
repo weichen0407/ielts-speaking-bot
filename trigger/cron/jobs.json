@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "jobs": [
+    {
+      "id": "dream",
+      "name": "dream",
+      "enabled": true,
+      "schedule": {
+        "kind": "every",
+        "atMs": null,
+        "everyMs": 7200000,
+        "expr": null,
+        "tz": null
+      },
+      "payload": {
+        "kind": "system_event",
+        "message": "",
+        "deliver": false,
+        "channel": null,
+        "to": null,
+        "channelMeta": {},
+        "sessionKey": null
+      },
+      "state": {
+        "nextRunAtMs": 1780143175447,
+        "lastRunAtMs": 1780135975442,
+        "lastStatus": "ok",
+        "lastError": null,
+        "runHistory": [
+          {
+            "runAtMs": 1780078365218,
+            "status": "ok",
+            "durationMs": 2,
+            "error": null
+          },
+          {
+            "runAtMs": 1780087508117,
+            "status": "ok",
+            "durationMs": 1,
+            "error": null
+          },
+          {
+            "runAtMs": 1780095987589,
+            "status": "ok",
+            "durationMs": 1,
+            "error": null
+          },
+          {
+            "runAtMs": 1780103327257,
+            "status": "ok",
+            "durationMs": 2,
+            "error": null
+          },
+          {
+            "runAtMs": 1780110788063,
+            "status": "ok",
+            "durationMs": 1,
+            "error": null
+          },
+          {
+            "runAtMs": 1780120364369,
+            "status": "ok",
+            "durationMs": 5,
+            "error": null
+          },
+          {
+            "runAtMs": 1780127963617,
+            "status": "ok",
+            "durationMs": 1,
+            "error": null
+          },
+          {
+            "runAtMs": 1780135975442,
+            "status": "ok",
+            "durationMs": 4,
+            "error": null
+          }
+        ]
+      },
+      "createdAtMs": 1780070087407,
+      "updatedAtMs": 1780135975446,
+      "deleteAfterRun": false
+    }
+  ]
+}

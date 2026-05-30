@@ -6,6 +6,7 @@ import {
   Sparkles,
   SquarePen,
   BookOpen,
+  Activity,
   Mic,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +29,8 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenNotesBook: () => void;
   onOpenIeltsExam: () => void;
+  onOpenWikiMemory: () => void;
+  onOpenMonitor: () => void;
   onCollapse: () => void;
 }
 
@@ -132,6 +135,22 @@ export function Sidebar(props: SidebarProps) {
         >
           <Mic className="h-3.5 w-3.5" />
           IELTS Exam
+        </Button>
+        <Button
+          onClick={props.onOpenWikiMemory}
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          variant="ghost"
+        >
+          <BookOpen className="h-3.5 w-3.5" />
+          Wiki Memory
+        </Button>
+        <Button
+          onClick={props.onOpenMonitor}
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          variant="ghost"
+        >
+          <Activity className="h-3.5 w-3.5" />
+          Monitor
         </Button>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

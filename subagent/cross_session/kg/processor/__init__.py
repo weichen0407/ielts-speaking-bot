@@ -1,4 +1,8 @@
-"""Knowledge Graph - entity storage and query."""
+"""Knowledge Graph - entity storage and query.
+
+DEPRECATED: This module is superseded by subagent.cross_session.wiki.
+It is kept in place for reference only. Do not use for new development.
+"""
 
 from .entity_store import EntityStore, Entity, Relation
 from .cursor import CursorManager, KG_Cursor

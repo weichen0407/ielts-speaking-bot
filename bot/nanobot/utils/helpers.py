@@ -600,6 +600,16 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "history.jsonl")
+
+    # Sync nested template directories (prompts/, agent/) to bot/nanobot/templates/
+    for subdir in ("prompts", "agent"):
+        src_dir = tpl / subdir
+        if src_dir.is_dir():
+            dest_dir = workspace / "bot" / "nanobot" / "templates" / subdir
+            for item in src_dir.rglob("*.md"):
+                rel = item.relative_to(src_dir)
+                _write(item, dest_dir / rel)
+
     (workspace / "skills").mkdir(exist_ok=True)
 
     if added and not silent:

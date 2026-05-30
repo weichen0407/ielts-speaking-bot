@@ -1,5 +1,7 @@
 # Phase 3a: Knowledge Graph (NetworkX)
 
+> **⚠️ DEPRECATED** — This module is superseded by the LLM Wiki Memory System (`subagent/cross_session/wiki/`). It is kept in place for reference only. Do not use for new development.
+
 ## 实施顺序
 
 本模块是 **Phase 3a**，可与 Phase 3b 并行开发。

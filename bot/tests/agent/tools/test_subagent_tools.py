@@ -133,7 +133,7 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
 
     # First spawn succeeds
     result = await tool.execute(task="first task")
-    assert "started" in result
+    assert len(result) == 8  # task_id is 8-char UUID prefix
 
     # Second spawn should be rejected (default limit is 1)
     result = await tool.execute(task="second task")
@@ -252,6 +252,7 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
+    from nanobot.agent.subagent import SubagentStatus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -291,6 +292,15 @@ async def test_drain_pending_blocks_while_subagents_running(tmp_path):
     hang_task = asyncio.create_task(_hang_forever())
     loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-drain-1")
     loop.subagents._running_tasks["sub-drain-1"] = hang_task
+    # _task_statuses must also be set so _drain_pending can call
+    # get_announcing_count_by_session without AttributeError
+    loop.subagents._task_statuses["sub-drain-1"] = SubagentStatus(
+        task_id="sub-drain-1",
+        label="sub-drain-1",
+        task_description="sub-drain-1",
+        started_at=0.0,
+        announce_result=True,
+    )
 
     # Run _run_agent_loop — this defines the _drain_pending closure
     await loop._run_agent_loop(
@@ -389,6 +399,7 @@ async def test_drain_pending_timeout(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import Session
+    from nanobot.agent.subagent import SubagentStatus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -423,6 +434,15 @@ async def test_drain_pending_timeout(tmp_path):
     hang_task = asyncio.create_task(_hang_forever())
     loop.subagents._session_tasks.setdefault(session.key, set()).add("sub-timeout-1")
     loop.subagents._running_tasks["sub-timeout-1"] = hang_task
+    # _task_statuses must also be set so _drain_pending can call
+    # get_announcing_count_by_session without AttributeError
+    loop.subagents._task_statuses["sub-timeout-1"] = SubagentStatus(
+        task_id="sub-timeout-1",
+        label="sub-timeout-1",
+        task_description="sub-timeout-1",
+        started_at=0.0,
+        announce_result=True,
+    )
 
     await loop._run_agent_loop(
         [{"role": "user", "content": "test"}],

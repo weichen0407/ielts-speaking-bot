@@ -140,7 +140,7 @@ class Session:
             audio_url = None
 
         return {
-            "id": str(uuid.uuid4()),
+            "id": f"{self.session_uuid or self.key}:{message_index}",
             "timestamp": message.get("timestamp", datetime.now().isoformat()),
             "source": {
                 "type": "session",
@@ -345,7 +345,8 @@ class SessionManager:
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.data_root = self.workspace if self.workspace.name == "persona" else self.workspace / "persona"
+        self.sessions_dir = ensure_dir(self.data_root / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
         self._cache: dict[str, Session] = {}
 
@@ -744,8 +745,8 @@ class SessionManager:
 
             os.replace(tmp_path, path)
 
-            # Also append to unified interaction log (best-effort)
-            self._append_to_shared_interaction_log(session)
+            # Also sync to the unified interaction log (best-effort)
+            self._sync_shared_interaction_log(session)
 
             if fsync:
                 # fsync the directory so the rename is durable.
@@ -766,10 +767,16 @@ class SessionManager:
         # Always update index on save so title changes are reflected
         self._update_session_index(session)
 
-    def _append_to_shared_interaction_log(self, session: Session) -> None:
-        """Append session messages to the unified thread.jsonl at data/ (best-effort)."""
+    def _sync_shared_interaction_log(self, session: Session) -> None:
+        """Sync one session into data/thread.jsonl without duplicating old rows.
+
+        Session files are rewritten atomically on every save. The unified log used
+        to append the whole session on every save, so the same messages appeared
+        many times with fresh UUIDs. Keep records for other sessions, replace this
+        session's slice, and use stable ids derived from session_uuid + index.
+        """
         try:
-            project_root = self.workspace.parent
+            project_root = self.workspace.parent if self.workspace.name == "persona" else self.workspace
             data_dir = project_root / "data"
             shared_path = data_dir / "thread.jsonl"
             tmp_path = shared_path.with_suffix(".jsonl.tmp")
@@ -781,25 +788,41 @@ class SessionManager:
                 with open(shared_path, "r", encoding="utf-8") as f:
                     existing_lines = f.readlines()
 
+            session_uuid = session.session_uuid or session.metadata.get("session_uuid")
+            kept_lines: list[str] = []
+            for line in existing_lines:
+                try:
+                    record = json.loads(line)
+                    source = record.get("source") if isinstance(record, dict) else None
+                    if (
+                        session_uuid
+                        and isinstance(source, dict)
+                        and source.get("session_uuid") == session_uuid
+                    ):
+                        continue
+                except json.JSONDecodeError:
+                    pass
+                kept_lines.append(line)
+
             new_lines: list[str] = []
             for idx, msg in enumerate(session.messages):
                 record = session._create_unified_interaction_record(msg, idx)
                 new_lines.append(json.dumps(record, ensure_ascii=False) + "\n")
 
             with open(tmp_path, "w", encoding="utf-8") as f:
-                f.writelines(existing_lines)
+                f.writelines(kept_lines)
                 f.writelines(new_lines)
 
             os.replace(tmp_path, shared_path)
 
             logger.debug(
-                "Appended {} interactions to thread.jsonl for session {}",
+                "Synced {} interactions to thread.jsonl for session {}",
                 len(new_lines),
                 session.key,
             )
         except Exception as exc:
             logger.warning(
-                "Failed to append to thread.jsonl for session {}: {}",
+                "Failed to sync thread.jsonl for session {}: {}",
                 session.key,
                 exc,
             )
@@ -902,7 +925,7 @@ class SessionManager:
     @property
     def _responses_path(self) -> Path:
         """Path to the user responses file (cross-session)."""
-        return self.sessions_dir.parent / "user_responses.jsonl"
+        return self.data_root / "user_responses.jsonl"
 
     def append_user_expression(
         self,
@@ -970,7 +993,7 @@ class SessionManager:
         """Append a mode-specific response to the mode-specific responses file.
 
         Generic method that works for any mode. The responses are stored under
-        shared/{mode}/sessions/{session_uuid}/responses.jsonl.
+        persona/{mode}/sessions/{session_uuid}/responses.jsonl.
 
         Args:
             session: The current session.

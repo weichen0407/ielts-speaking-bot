@@ -98,8 +98,7 @@ class TestSpawn:
             final_content="done", messages=[], stop_reason="completed",
         ))
         result = await sm.spawn("do something")
-        assert "started" in result
-        assert "id:" in result
+        assert len(result) == 8  # task_id is 8-char UUID prefix
 
     @pytest.mark.asyncio
     async def test_creates_task_in_running_tasks(self, tmp_path):

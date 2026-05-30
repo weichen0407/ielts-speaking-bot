@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 interface NotesBookSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onAiReplyComplete?: () => void;
 }
 
 interface AllNotesEntry extends NoteEntry {
@@ -34,7 +35,7 @@ interface AllNotesEntry extends NoteEntry {
   aiReply?: AiReplyEntry;
 }
 
-export function NotesBookSheet({ open, onOpenChange }: NotesBookSheetProps) {
+export function NotesBookSheet({ open, onOpenChange, onAiReplyComplete }: NotesBookSheetProps) {
   const { t } = useTranslation();
   const { token } = useClient();
   const [allNotes, setAllNotes] = useState<AllNotesEntry[]>([]);
@@ -205,6 +206,7 @@ export function NotesBookSheet({ open, onOpenChange }: NotesBookSheetProps) {
                   })
                   .finally(() => {
                     setAiReplyLoading(null);
+                    onAiReplyComplete?.();
                   });
               } else if (status.status === "error") {
                 console.error("[NotesBook] AI reply error:", status.error);
@@ -228,7 +230,7 @@ export function NotesBookSheet({ open, onOpenChange }: NotesBookSheetProps) {
       .finally(() => {
         // Don't reset loading here, let poll handle it
       });
-  }, [token]);
+  }, [token, onAiReplyComplete]);
 
   return (
     <>

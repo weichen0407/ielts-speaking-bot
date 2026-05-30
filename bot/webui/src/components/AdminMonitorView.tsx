@@ -1,0 +1,459 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  Activity,
+  Bot,
+  ChevronLeft,
+  Clock3,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Settings2,
+  Wrench,
+  type LucideIcon,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  fetchAdminMonitor,
+  updateAdminTrigger,
+  type AdminMonitorPayload,
+  type AdminPrompt,
+  type AdminSubagentRun,
+  type AdminTrigger,
+} from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
+
+interface AdminMonitorViewProps {
+  onBackToChat: () => void;
+}
+
+function formatJson(value: unknown): string {
+  if (!value || (typeof value === "object" && Object.keys(value as Record<string, unknown>).length === 0)) {
+    return "-";
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function shortTime(value?: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function triggerSchedule(trigger: AdminTrigger): string {
+  const condition = trigger.condition ?? {};
+  const kind = String(condition.kind ?? "manual");
+  const count = condition.count;
+  if (kind === "turn_count") return `every ${count} turns`;
+  if (kind === "file_line_count") return `every ${count} new lines`;
+  if (kind === "cron") return String(count ?? "cron");
+  return kind;
+}
+
+function triggerKey(trigger: AdminTrigger): string {
+  return `${trigger.source}:${trigger.id}`;
+}
+
+function runKey(run: AdminSubagentRun): string {
+  return `${run.timestamp}:${run.task_id}`;
+}
+
+export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
+  const { token } = useClient();
+  const [payload, setPayload] = useState<AdminMonitorPayload | null>(null);
+  const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null);
+  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [modeFilter, setModeFilter] = useState("all");
+  const [countDraft, setCountDraft] = useState("");
+  const [savingTrigger, setSavingTrigger] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const next = await fetchAdminMonitor(token);
+      setPayload(next);
+      setError(null);
+      setSelectedTriggerKey((current) => current ?? (next.triggers[0] ? triggerKey(next.triggers[0]) : null));
+      setSelectedPromptId((current) => current ?? next.prompts[0]?.id ?? null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const modes = useMemo(() => {
+    const values = new Set(payload?.triggers.map((t) => t.mode).filter(Boolean));
+    return ["all", ...Array.from(values).sort()];
+  }, [payload]);
+
+  const filteredTriggers = useMemo(() => {
+    const all = payload?.triggers ?? [];
+    if (modeFilter === "all") return all;
+    return all.filter((trigger) => trigger.mode === modeFilter);
+  }, [payload, modeFilter]);
+
+  const selectedTrigger = useMemo(
+    () => payload?.triggers.find((trigger) => triggerKey(trigger) === selectedTriggerKey) ?? filteredTriggers[0],
+    [payload, selectedTriggerKey, filteredTriggers],
+  );
+
+  const promptById = useMemo(() => {
+    const map = new Map<string, AdminPrompt>();
+    for (const prompt of payload?.prompts ?? []) map.set(prompt.id, prompt);
+    return map;
+  }, [payload]);
+
+  const selectedPrompt = useMemo(() => {
+    if (selectedTrigger?.prompt_id && promptById.has(selectedTrigger.prompt_id)) {
+      return promptById.get(selectedTrigger.prompt_id) ?? null;
+    }
+    return payload?.prompts.find((prompt) => prompt.id === selectedPromptId) ?? null;
+  }, [payload, promptById, selectedPromptId, selectedTrigger]);
+
+  useEffect(() => {
+    const count = selectedTrigger?.condition?.count;
+    setCountDraft(typeof count === "number" ? String(count) : "");
+  }, [selectedTrigger]);
+
+  const saveSelectedTriggerCount = useCallback(async () => {
+    if (!selectedTrigger) return;
+    const count = Number.parseInt(countDraft, 10);
+    if (!Number.isFinite(count) || count < 1) {
+      setError("触发轮数必须是大于等于 1 的整数");
+      return;
+    }
+    setSavingTrigger(true);
+    try {
+      await updateAdminTrigger(token, {
+        source: selectedTrigger.source,
+        id: selectedTrigger.id,
+        count,
+      });
+      await load();
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingTrigger(false);
+    }
+  }, [countDraft, load, selectedTrigger, token]);
+
+  const activeCount = payload?.subagent_statuses.filter((s) => s.phase === "started").length ?? 0;
+  const enabledCount = payload?.triggers.filter((t) => t.enabled).length ?? 0;
+  const promptCount = payload?.prompts.length ?? 0;
+  const activityCount = payload?.recent_activity.length ?? 0;
+  const subagentRuns = payload?.subagent_runs ?? [];
+  const selectedRun = useMemo(
+    () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
+    [selectedRunKey, subagentRuns],
+  );
+
+  useEffect(() => {
+    setSelectedRunKey((current) => current ?? (subagentRuns[0] ? runKey(subagentRuns[0]) : null));
+  }, [subagentRuns]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <header className="flex shrink-0 items-center justify-between border-b px-5 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={onBackToChat} className="h-8 w-8">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-semibold">监控后台</h1>
+            <p className="truncate text-xs text-muted-foreground">
+              subagent 触发规则、prompt、工具调用和最近执行痕迹
+            </p>
+          </div>
+        </div>
+        <Button onClick={load} disabled={loading} size="sm" variant="outline" className="gap-2">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+          刷新
+        </Button>
+      </header>
+
+      {error ? (
+        <div className="m-5 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-4">
+        <Metric icon={Settings2} label="启用触发器" value={enabledCount} />
+        <Metric icon={FileText} label="Prompt 文件" value={promptCount} />
+        <Metric icon={Bot} label="运行中 subagent" value={activeCount} />
+        <Metric icon={Activity} label="最近活动" value={activityCount} />
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 pb-5 xl:grid-cols-[420px_minmax(0,1fr)] xl:overflow-hidden">
+        <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border bg-card">
+          <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Clock3 className="h-4 w-4" />
+              触发规则
+            </div>
+            <select
+              value={modeFilter}
+              onChange={(event) => setModeFilter(event.target.value)}
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+            >
+              {modes.map((mode) => (
+                <option key={mode} value={mode}>{mode}</option>
+              ))}
+            </select>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
+            {loading && !payload ? (
+              <div className="flex h-32 items-center justify-center text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            ) : null}
+            {filteredTriggers.map((trigger) => (
+              <button
+                key={`${trigger.source}:${trigger.id}`}
+                onClick={() => {
+                  setSelectedTriggerKey(triggerKey(trigger));
+                  if (trigger.prompt_id) setSelectedPromptId(trigger.prompt_id);
+                }}
+                className={cn(
+                  "mb-2 w-full rounded-md border p-3 text-left transition-colors",
+                  selectedTrigger ? triggerKey(selectedTrigger) === triggerKey(trigger) : false
+                    ? "border-primary/50 bg-primary/5"
+                    : "border-border/60 hover:bg-muted/50",
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{trigger.name ?? trigger.id}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{trigger.source}</p>
+                  </div>
+                  <span className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium",
+                    trigger.enabled ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground",
+                  )}>
+                    {trigger.enabled ? "enabled" : "off"}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-muted-foreground">
+                  <span className="rounded bg-muted px-1.5 py-0.5">{trigger.mode}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5">{triggerSchedule(trigger)}</span>
+                  {trigger.subagent ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.subagent}</span> : null}
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid min-h-0 grid-rows-[minmax(260px,0.95fr)_minmax(280px,0.85fr)] gap-4 overflow-visible xl:overflow-hidden">
+          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-[minmax(320px,0.8fr)_minmax(360px,1fr)]">
+            <Panel title="调用详情" icon={Bot}>
+              {selectedTrigger ? (
+                <div className="space-y-3 text-sm">
+                  <KeyValue label="Subagent" value={selectedTrigger.subagent || "-"} />
+                  <KeyValue label="Model" value={selectedTrigger.model || "default"} />
+                  <KeyValue label="Prompt" value={selectedTrigger.prompt_file || "-"} />
+                  <KeyValue label="Source" value={selectedTrigger.source} />
+                  {selectedTrigger.condition?.kind === "turn_count" ? (
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">触发轮数</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={countDraft}
+                          onChange={(event) => setCountDraft(event.target.value)}
+                          className="h-8 w-24 rounded-md border bg-background px-2 text-sm"
+                        />
+                        <Button size="sm" onClick={saveSelectedTriggerCount} disabled={savingTrigger}>
+                          {savingTrigger ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                          保存
+                        </Button>
+                      </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground">
+                        保存后下一次用户回复会热加载配置；测试时可以改成 1。
+                      </p>
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">Condition</p>
+                    <pre className="max-h-32 overflow-auto rounded-md bg-muted p-2 text-[11px]">{formatJson(selectedTrigger.condition)}</pre>
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">Task Template</p>
+                    <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-[11px]">
+                      {selectedTrigger.task_template || "-"}
+                    </pre>
+                  </div>
+                </div>
+              ) : (
+                <EmptyText text="没有可用触发规则" />
+              )}
+            </Panel>
+
+            <Panel title="Prompt 预览" icon={FileText}>
+              {selectedPrompt ? (
+                <div className="flex h-full min-h-0 flex-col gap-2">
+                  <div className="shrink-0">
+                    <p className="truncate text-sm font-medium">{selectedPrompt.path}</p>
+                    {selectedPrompt.truncated ? (
+                      <p className="text-xs text-amber-600">内容已截断显示</p>
+                    ) : null}
+                  </div>
+                  <textarea
+                    readOnly
+                    value={selectedPrompt.content || selectedPrompt.error || ""}
+                    className="min-h-0 flex-1 resize-none rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-5 outline-none"
+                  />
+                </div>
+              ) : (
+                <EmptyText text="选择一个触发规则查看 prompt" />
+              )}
+            </Panel>
+          </div>
+
+          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3">
+            <Panel title="Subagent 调用列表" icon={Bot}>
+              <div className="h-full overflow-y-auto pr-1">
+                {subagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
+                {subagentRuns.map((run) => (
+                  <button
+                    key={runKey(run)}
+                    onClick={() => setSelectedRunKey(runKey(run))}
+                    className={cn(
+                      "mb-2 w-full rounded-md border p-2 text-left text-xs transition-colors",
+                      selectedRun && runKey(selectedRun) === runKey(run)
+                        ? "border-primary/50 bg-primary/5"
+                        : "border-border/70 hover:bg-muted/50",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{run.label}</span>
+                      <span className={cn(
+                        "shrink-0 rounded px-1.5 py-0.5",
+                        run.error || run.stop_reason === "tool_error" || run.stop_reason === "error"
+                          ? "bg-red-500/10 text-red-600"
+                          : "bg-emerald-500/10 text-emerald-600",
+                      )}>{run.stop_reason || run.phase}</span>
+                    </div>
+                    <p className="mt-1 truncate text-muted-foreground">{shortTime(run.timestamp)} · {run.model || "default model"}</p>
+                    <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-muted-foreground">
+                      {run.error || run.result || "-"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="本次调用详情" icon={Activity}>
+              <div className="h-full overflow-y-auto">
+                {!selectedRun ? <EmptyText text="选择一次 subagent 调用查看详情" /> : null}
+                {selectedRun ? (
+                  <div className="space-y-3 text-xs">
+                    <div className="rounded-md border p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{selectedRun.label}</span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{selectedRun.task_id}</span>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">{shortTime(selectedRun.timestamp)} · {selectedRun.model || "default model"}</p>
+                      {selectedRun.error ? <p className="mt-2 text-red-600">{selectedRun.error}</p> : null}
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">Subagent 回复</p>
+                      <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">{selectedRun.result || "-"}</pre>
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">写入文件增量</p>
+                      {(selectedRun.artifacts ?? []).length === 0 ? <p className="text-muted-foreground">没有捕获到写入文件</p> : null}
+                      {(selectedRun.artifacts ?? []).map((artifact) => (
+                        <div key={artifact.path} className="mb-2 rounded-md border p-2">
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span className="truncate font-medium">{artifact.path}</span>
+                            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{artifact.status}</span>
+                          </div>
+                          {artifact.error ? <p className="text-red-600">{artifact.error}</p> : null}
+                          <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                            {artifact.delta || artifact.content || "-"}
+                          </pre>
+                          {artifact.truncated ? <p className="mt-1 text-[11px] text-amber-600">内容已截断显示</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">Task</p>
+                      <pre className="max-h-32 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">{selectedRun.task || "-"}</pre>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </Panel>
+
+            <Panel title="最近工具 / subagent 活动" icon={Wrench}>
+              <div className="h-full overflow-y-auto">
+                {(payload?.recent_activity ?? []).length === 0 ? <EmptyText text="最近 session 里没有可展示活动" /> : null}
+                {(payload?.recent_activity ?? []).map((item, index) => (
+                  <div key={`${item.session_id}:${item.timestamp}:${index}`} className="mb-2 rounded-md border p-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{item.label}</span>
+                      <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{item.kind}</span>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">{shortTime(item.timestamp)} · {item.session_id}</p>
+                    {item.detail ? <p className="mt-1 line-clamp-3 whitespace-pre-wrap">{item.detail}</p> : null}
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
+  return (
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {label}
+      </div>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function Panel({ title, icon: Icon, children }: { title: string; icon: LucideIcon; children: ReactNode }) {
+  return (
+    <div className="flex min-h-0 flex-col rounded-lg border bg-card">
+      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-sm font-medium">
+        <Icon className="h-4 w-4" />
+        {title}
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden p-3">{children}</div>
+    </div>
+  );
+}
+
+function KeyValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mt-0.5 break-all text-sm">{value}</p>
+    </div>
+  );
+}
+
+function EmptyText({ text }: { text: string }) {
+  return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{text}</div>;
+}

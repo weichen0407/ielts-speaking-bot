@@ -7,13 +7,13 @@
       "enabled": true,
       "condition": {
         "kind": "turn_count",
-        "count": 2,
+        "count": 1,
         "scope": "session"
       },
       "target": {
         "subagent": "vocab",
         "prompt_file": "subagent/single_session/vocab/context/vocab_subagent.md",
-        "task_template": "Analyze the conversation history and update vocabulary suggestions.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/vocab.md"
+        "task_template": "Analyze the conversation history and update vocabulary suggestions.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/vocab.md"
       },
       "cursor": {
         "offset": 0,
@@ -26,13 +26,13 @@
       "enabled": true,
       "condition": {
         "kind": "turn_count",
-        "count": 3,
+        "count": 1,
         "scope": "session"
       },
       "target": {
         "subagent": "polisher",
         "prompt_file": "subagent/single_session/polisher/context/polisher_subagent.md",
-        "task_template": "Analyze recent user messages and show optimized versions with diff.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/polisher.md"
+        "task_template": "Analyze recent user messages and show optimized versions with diff.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/polisher.md"
       },
       "cursor": {
         "offset": 0,

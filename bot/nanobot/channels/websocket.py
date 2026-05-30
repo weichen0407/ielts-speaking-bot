@@ -17,13 +17,16 @@ import shutil
 import ssl
 import time
 import uuid
+from datetime import datetime
 from collections.abc import Callable
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
+import yaml
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
@@ -501,6 +504,7 @@ class WebSocketChannel(BaseChannel):
             static_dist_path.resolve() if static_dist_path is not None else None
         )
         self._runtime_model_name = runtime_model_name
+        self._subagent_status_history: list[dict[str, Any]] = []
         # Process-local secret used to HMAC-sign media URLs. The signed URL is
         # the capability — anyone who holds a valid URL can fetch that one
         # file, nothing else. The secret regenerates on restart so links
@@ -748,6 +752,29 @@ class WebSocketChannel(BaseChannel):
         m = re.match(r"^/api/ielts/exam/list$", got)
         if m:
             return self._handle_ielts_exam_list(request)
+
+        # Wiki API
+        m = re.match(r"^/api/wiki/search$", got)
+        if m:
+            return self._handle_wiki_search(request)
+        m = re.match(r"^/api/wiki/page$", got)
+        if m:
+            return self._handle_wiki_page(request)
+        m = re.match(r"^/api/wiki/graph$", got)
+        if m:
+            return self._handle_wiki_graph(request)
+        m = re.match(r"^/api/wiki/patch$", got)
+        if m:
+            return self._handle_wiki_patch(request)
+        m = re.match(r"^/api/wiki/rebuild-index$", got)
+        if m:
+            return self._handle_wiki_rebuild_index(request)
+
+        # Admin / monitor API
+        if got == "/api/admin/monitor":
+            return self._handle_admin_monitor(request)
+        if got == "/api/admin/triggers":
+            return self._handle_admin_trigger_update(request)
 
         # Signed media fetch: ``<sig>`` is an HMAC over ``<payload>``; the
         # payload decodes to a path inside :func:`get_media_dir`. See
@@ -1440,8 +1467,6 @@ class WebSocketChannel(BaseChannel):
         - by-session/{session-key}.md: Notes grouped by session
         """
         from urllib.parse import parse_qs, unquote
-        from datetime import datetime
-
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         if self._session_manager is None:
@@ -1683,11 +1708,8 @@ class WebSocketChannel(BaseChannel):
         query_params = parse_qs(query_string)
 
         date = query_params.get("date", [""])[0]
-        if not date:
-            date = datetime.now().strftime("%Y-%m-%d")
 
         project_root = Path(__file__).resolve().parent.parent.parent.parent
-        ai_replies_dir = project_root / "user-notes" / "ai-replies" / "by-date"
         index_file = project_root / "user-notes" / "ai-replies" / "index.json"
 
         logger.info(f"[NotesAI] _handle_notes_ai_replies_list: date={date}, query_params={dict(query_params)}")
@@ -1705,7 +1727,7 @@ class WebSocketChannel(BaseChannel):
             import json
             try:
                 index_data = json.loads(index_file.read_text(encoding="utf-8"))
-                raw_replies = list(index_data.get("replies", {}).values())
+                raw_replies = [dict(r) for r in index_data.get("replies", {}).values()]
                 logger.info(f"[NotesAI] Raw replies from index: {len(raw_replies)} items")
                 # Transform to match frontend's AiReplyEntry interface
                 from datetime import datetime
@@ -1722,8 +1744,7 @@ class WebSocketChannel(BaseChannel):
                             r["timestamp"] = int(dt.timestamp() * 1000)
                         except Exception:
                             r["timestamp"] = 0
-                    # Extract date from timestamp for filtering
-                    if ts:
+                    if not r.get("date") and ts:
                         try:
                             dt = datetime.fromisoformat(ts.replace("+08:00", "").replace("Z", ""))
                             r["date"] = dt.strftime("%Y-%m-%d")
@@ -2150,6 +2171,463 @@ class WebSocketChannel(BaseChannel):
                     responses.append(json.loads(line))
 
         return _http_json_response({"responses": responses})
+
+    # -- Wiki API handlers ----------------------------------------------------
+
+    def _wiki_root(self) -> Path:
+        """Get the wiki root path (project_root/persona/wiki)."""
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+        return project_root / "persona" / "wiki"
+
+    def _ensure_subagent_importable(self) -> None:
+        """Ensure the repo-root subagent package is on sys.path for wiki handlers."""
+        repo_root = str(Path(__file__).resolve().parent.parent.parent.parent)
+        if repo_root not in sys.path:
+            sys.path.insert(0, repo_root)
+
+    def _handle_wiki_search(self, request: WsRequest) -> Response:
+        """GET /api/wiki/search?q=...&mode=...&topic=...&type=...&tags=...&limit=..."""
+        from urllib.parse import parse_qs
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find("?") + 1 :] if "?" in request.path else ""
+        params = parse_qs(query_string)
+
+        try:
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.wiki_search import WikiSearch
+
+            searcher = WikiSearch(wiki_root=self._wiki_root())
+            tags_str = params.get("tags", [None])[0]
+            tags = tags_str.split(",") if tags_str else None
+            results = searcher.search(
+                query=params.get("q", [""])[0],
+                mode=params.get("mode", [None])[0] or None,
+                topic=params.get("topic", [None])[0] or None,
+                page_type=params.get("type", [None])[0] or None,
+                tags=tags,
+                limit=int(params.get("limit", [10])[0]),
+            )
+            return _http_json_response({"results": [r.model_dump() for r in results]})
+        except Exception as e:
+            logger.exception("[Wiki] search error: %s", e)
+            return _http_json_response({"results": [], "error": str(e)})
+
+    def _handle_wiki_page(self, request: WsRequest) -> Response:
+        """GET /api/wiki/page?slug=..."""
+        from urllib.parse import parse_qs
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find("?") + 1 :] if "?" in request.path else ""
+        params = parse_qs(query_string)
+        slug = params.get("slug", [None])[0]
+
+        if not slug:
+            return _http_error(400, "missing slug parameter")
+
+        try:
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.wiki_store import WikiStore
+
+            store = WikiStore(workspace=self._wiki_root().parent, wiki_root=self._wiki_root())
+            page = store.read_page(slug)
+            if page is None:
+                return _http_error(404, "page not found")
+            meta, body = page
+            return _http_json_response({"meta": meta.model_dump(), "content": body})
+        except Exception as e:
+            logger.exception("[Wiki] page error: %s", e)
+            return _http_error(500, str(e))
+
+    def _handle_wiki_graph(self, request: WsRequest) -> Response:
+        """GET /api/wiki/graph?mode=...&topic=...&type=...&tags=..."""
+        from urllib.parse import parse_qs
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find("?") + 1 :] if "?" in request.path else ""
+        params = parse_qs(query_string)
+
+        try:
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.wiki_graph import build_wiki_graph
+
+            tags_str = params.get("tags", [None])[0]
+            tags = tags_str.split(",") if tags_str else None
+
+            graph = build_wiki_graph(
+                wiki_root=self._wiki_root(),
+                mode=params.get("mode", [None])[0] or None,
+                topic=params.get("topic", [None])[0] or None,
+                page_type=params.get("type", [None])[0] or None,
+                tags=tags,
+            )
+            return _http_json_response(graph)
+        except Exception as e:
+            logger.exception("[Wiki] graph error: %s", e)
+            return _http_json_response({"nodes": [], "edges": [], "error": str(e)})
+
+    def _handle_wiki_patch(self, request: WsRequest) -> Response:
+        """GET /api/wiki/patch?data=<urlencoded JSON>"""
+        from urllib.parse import parse_qs, unquote
+
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query_string = request.path[request.path.find("?") + 1 :] if "?" in request.path else ""
+        params = parse_qs(query_string)
+        data_param = params.get("data", [""])[0]
+
+        if not data_param:
+            return _http_error(400, "missing data parameter")
+
+        try:
+            import json
+
+            patch_data = json.loads(unquote(data_param))
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.schema import WikiPatch
+            from subagent.cross_session.wiki.processor.wiki_index import WikiIndex
+            from subagent.cross_session.wiki.processor.wiki_store import WikiStore
+
+            patch = WikiPatch(**patch_data)
+            store = WikiStore(workspace=self._wiki_root().parent, wiki_root=self._wiki_root())
+            ok = store.apply_patch(patch)
+            if ok:
+                index = WikiIndex(wiki_root=self._wiki_root())
+                index.index_page(patch.slug)
+                return _http_json_response({"ok": True, "slug": patch.slug})
+            else:
+                return _http_json_response({"ok": False, "slug": patch.slug}, status=422)
+        except Exception as e:
+            logger.exception("[Wiki] patch error: %s", e)
+            return _http_error(400, str(e))
+
+    def _handle_wiki_rebuild_index(self, request: WsRequest) -> Response:
+        """GET /api/wiki/rebuild-index"""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        try:
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.wiki_index import WikiIndex
+
+            index = WikiIndex(wiki_root=self._wiki_root())
+            count = index.rebuild()
+            return _http_json_response({"ok": True, "chunks_indexed": count})
+        except Exception as e:
+            logger.exception("[Wiki] rebuild error: %s", e)
+            return _http_error(500, str(e))
+
+    # -- Admin / monitor API ----------------------------------------------------
+
+    def _project_root(self) -> Path:
+        return Path(__file__).resolve().parent.parent.parent.parent
+
+    def _safe_read_text(self, path: Path, *, max_chars: int = 20_000) -> tuple[str, bool]:
+        text = path.read_text(encoding="utf-8")
+        truncated = len(text) > max_chars
+        return text[:max_chars], truncated
+
+    def _read_config_file(self, path: Path) -> Any:
+        if path.suffix.lower() == ".json":
+            return json.loads(path.read_text(encoding="utf-8"))
+        if path.suffix.lower() in {".yaml", ".yml"}:
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return {}
+
+    def _monitor_trigger_files(self, root: Path) -> list[Path]:
+        files: list[Path] = []
+        for mode_dir in sorted((root / "mode").glob("*")):
+            trigger_dir = mode_dir / "trigger"
+            if not trigger_dir.exists():
+                continue
+            for rel in ("triggers.json", "cron/cron.yaml"):
+                candidate = trigger_dir / rel
+                if candidate.exists():
+                    files.append(candidate)
+        return files
+
+    def _monitor_context_prompt_files(self, root: Path) -> list[Path]:
+        files = sorted(root.glob("subagent/*/*/context/*.md"))
+        files.extend(sorted(root.glob("mode/*/context/*.md")))
+        return files
+
+    def _normalize_prompt_path(self, root: Path, raw: str | None) -> Path | None:
+        if not raw:
+            return None
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return candidate if candidate.is_relative_to(root) else None
+        direct = root / candidate
+        if direct.exists():
+            return direct
+        # Some older YAML configs use "subagents/session/..." while the repo now
+        # stores canonical prompts under subagent/{scope}/{name}/context.
+        name = candidate.name
+        matches = sorted(root.glob(f"subagent/**/context/{name}"))
+        return matches[0] if matches else direct
+
+    def _monitor_triggers(self, root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        triggers: list[dict[str, Any]] = []
+        prompt_refs: dict[str, dict[str, Any]] = {}
+        for path in self._monitor_trigger_files(root):
+            try:
+                config = self._read_config_file(path)
+            except Exception as e:
+                triggers.append({
+                    "id": path.stem,
+                    "mode": path.parts[-4] if len(path.parts) >= 4 else "",
+                    "source": str(path.relative_to(root)),
+                    "enabled": False,
+                    "error": str(e),
+                })
+                continue
+
+            mode = path.relative_to(root).parts[1] if len(path.relative_to(root).parts) > 1 else ""
+            raw_items = config.get("triggers") or config.get("cron_jobs") or []
+            if not isinstance(raw_items, list):
+                raw_items = []
+            for idx, item in enumerate(raw_items):
+                if not isinstance(item, dict):
+                    continue
+                target = item.get("target") if isinstance(item.get("target"), dict) else {}
+                condition = item.get("condition") if isinstance(item.get("condition"), dict) else {}
+                prompt_file = target.get("prompt_file") if isinstance(target, dict) else None
+                prompt_path = self._normalize_prompt_path(root, prompt_file)
+                prompt_id = str(prompt_path.relative_to(root)) if prompt_path and prompt_path.exists() else (prompt_file or "")
+                if prompt_path and prompt_path.exists() and prompt_id not in prompt_refs:
+                    try:
+                        content, truncated = self._safe_read_text(prompt_path)
+                        prompt_refs[prompt_id] = {
+                            "id": prompt_id,
+                            "path": prompt_id,
+                            "title": prompt_path.stem,
+                            "content": content,
+                            "truncated": truncated,
+                        }
+                    except OSError as e:
+                        prompt_refs[prompt_id] = {
+                            "id": prompt_id,
+                            "path": prompt_id,
+                            "title": prompt_path.stem,
+                            "content": "",
+                            "truncated": False,
+                            "error": str(e),
+                        }
+                triggers.append({
+                    "id": str(item.get("id") or f"{path.stem}-{idx + 1}"),
+                    "name": item.get("name") or item.get("id") or f"Trigger {idx + 1}",
+                    "mode": mode,
+                    "source": str(path.relative_to(root)),
+                    "enabled": item.get("enabled", True),
+                    "condition": condition,
+                    "subagent": target.get("subagent") if isinstance(target, dict) else None,
+                    "model": target.get("model") if isinstance(target, dict) else None,
+                    "prompt_file": prompt_file,
+                    "prompt_id": prompt_id,
+                    "task_template": target.get("task_template") if isinstance(target, dict) else None,
+                    "cursor": item.get("cursor") if isinstance(item.get("cursor"), dict) else None,
+                    "error": None,
+                })
+        return triggers, list(prompt_refs.values())
+
+    def _monitor_recent_activity(self, root: Path, *, limit: int = 80) -> list[dict[str, Any]]:
+        activity: list[dict[str, Any]] = []
+        sessions_root = root / "persona" / "sessions"
+        if not sessions_root.exists():
+            return activity
+        thread_files = sorted(
+            sessions_root.glob("*/thread.jsonl"),
+            key=lambda p: p.stat().st_mtime if p.exists() else 0,
+            reverse=True,
+        )[:25]
+        for thread_path in thread_files:
+            session_id = thread_path.parent.name
+            try:
+                lines = thread_path.read_text(encoding="utf-8").splitlines()[-120:]
+            except OSError:
+                continue
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                metadata = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+                timestamp = msg.get("timestamp") or metadata.get("timestamp")
+                if metadata.get("injected_event") == "subagent_result":
+                    activity.append({
+                        "kind": "subagent_result",
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "label": "subagent result",
+                        "detail": (msg.get("content") or "")[:600],
+                        "status": "ok",
+                    })
+                for event in metadata.get("_tool_events") or []:
+                    if not isinstance(event, dict):
+                        continue
+                    activity.append({
+                        "kind": "tool",
+                        "session_id": session_id,
+                        "timestamp": timestamp,
+                        "label": event.get("name") or "tool",
+                        "detail": str(event.get("detail") or event.get("status") or "")[:600],
+                        "status": event.get("status") or "",
+                    })
+        return sorted(activity, key=lambda x: x.get("timestamp") or "", reverse=True)[:limit]
+
+    def _monitor_subagent_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+        runs: list[dict[str, Any]] = []
+        paths = [
+            root / "persona" / "monitor" / "subagent_runs.jsonl",
+            root / "monitor" / "subagent_runs.jsonl",
+        ]
+        for path in paths:
+            if not path.exists():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+            except OSError:
+                continue
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    item = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(item, dict):
+                    runs.append(item)
+        runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        return runs[:limit]
+
+    def _handle_admin_monitor(self, request: WsRequest) -> Response:
+        """GET /api/admin/monitor - trigger, prompt, and recent execution overview."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            root = self._project_root()
+            triggers, trigger_prompts = self._monitor_triggers(root)
+            known_prompt_ids = {p["id"] for p in trigger_prompts}
+            extra_prompts: list[dict[str, Any]] = []
+            for path in self._monitor_context_prompt_files(root):
+                prompt_id = str(path.relative_to(root))
+                if prompt_id in known_prompt_ids:
+                    continue
+                try:
+                    content, truncated = self._safe_read_text(path)
+                    extra_prompts.append({
+                        "id": prompt_id,
+                        "path": prompt_id,
+                        "title": path.stem,
+                        "content": content,
+                        "truncated": truncated,
+                    })
+                except OSError as e:
+                    extra_prompts.append({
+                        "id": prompt_id,
+                        "path": prompt_id,
+                        "title": path.stem,
+                        "content": "",
+                        "truncated": False,
+                        "error": str(e),
+                    })
+
+            return _http_json_response({
+                "generated_at": datetime.now().isoformat(),
+                "workspace": str(root),
+                "triggers": triggers,
+                "prompts": trigger_prompts + extra_prompts,
+                "subagent_statuses": list(reversed(self._subagent_status_history[-100:])),
+                "subagent_runs": self._monitor_subagent_runs(root),
+                "recent_activity": self._monitor_recent_activity(root),
+            })
+        except Exception as e:
+            logger.exception("[Admin] monitor error: %s", e)
+            return _http_error(500, str(e))
+
+    def _handle_admin_trigger_update(self, request: WsRequest) -> Response:
+        """GET /api/admin/triggers - update trigger enabled/count fields.
+
+        This gateway is served by websockets' lightweight HTTP parser, which is
+        GET-oriented. Keep mutations query-string based like the settings routes.
+        """
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+
+        source = str(_query_first(query, "source") or "").strip()
+        trigger_id = str(_query_first(query, "id") or "").strip()
+        if not source or not trigger_id:
+            return _http_json_response({"error": "source and id are required"}, status=400)
+
+        root = self._project_root()
+        path = (root / source).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            return _http_error(403, "Forbidden")
+        if not path.exists() or path not in self._monitor_trigger_files(root):
+            return _http_json_response({"error": "unknown trigger source"}, status=404)
+
+        try:
+            config = self._read_config_file(path)
+        except Exception as e:
+            return _http_json_response({"error": f"failed to read config: {e}"}, status=400)
+        items = config.get("triggers") or config.get("cron_jobs") or []
+        if not isinstance(items, list):
+            return _http_json_response({"error": "config does not contain trigger list"}, status=400)
+
+        target_item: dict[str, Any] | None = None
+        for item in items:
+            if isinstance(item, dict) and str(item.get("id") or "") == trigger_id:
+                target_item = item
+                break
+        if target_item is None:
+            return _http_json_response({"error": "trigger not found"}, status=404)
+
+        if "enabled" in query:
+            target_item["enabled"] = (_query_first(query, "enabled") or "").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+
+        if "count" in query:
+            try:
+                count = int(_query_first(query, "count") or "")
+            except (TypeError, ValueError):
+                return _http_json_response({"error": "count must be an integer"}, status=400)
+            if count < 1:
+                return _http_json_response({"error": "count must be >= 1"}, status=400)
+            condition = target_item.setdefault("condition", {})
+            if not isinstance(condition, dict):
+                condition = {}
+                target_item["condition"] = condition
+            condition["count"] = count
+            condition.pop("every", None)
+            condition.pop("threshold", None)
+
+        try:
+            if path.suffix.lower() == ".json":
+                path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            elif path.suffix.lower() in {".yaml", ".yml"}:
+                path.write_text(yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+            else:
+                return _http_json_response({"error": "unsupported trigger file type"}, status=400)
+        except OSError as e:
+            return _http_json_response({"error": f"failed to write config: {e}"}, status=500)
+
+        return _http_json_response({"ok": True, "trigger": target_item})
 
     def _serve_static(self, request_path: str) -> Response | None:
         """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""
@@ -2765,9 +3243,6 @@ class WebSocketChannel(BaseChannel):
         error: str | None = None,
     ) -> None:
         """Notify clients that a subagent started or completed."""
-        conns = list(self._subs.get(chat_id, ()))
-        if not conns:
-            return
         body: dict[str, Any] = {
             "event": "subagent_status",
             "chat_id": chat_id,
@@ -2777,6 +3252,19 @@ class WebSocketChannel(BaseChannel):
         }
         if error:
             body["error"] = error
+        self._subagent_status_history.append({
+            "timestamp": datetime.now().isoformat(),
+            "chat_id": chat_id,
+            "task_id": task_id,
+            "label": label,
+            "phase": phase,
+            "error": error,
+        })
+        if len(self._subagent_status_history) > 200:
+            del self._subagent_status_history[:-200]
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" subagent_status ")

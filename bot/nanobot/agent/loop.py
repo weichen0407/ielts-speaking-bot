@@ -49,6 +49,7 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
 from nanobot.utils.webui_turn_helpers import (
     WebuiTurnCoordinator,
+    WEBUI_TITLE_AUTO_GENERATED_METADATA_KEY,
     build_bus_progress_callback,
     mark_webui_session,
 )
@@ -180,6 +181,10 @@ class AgentLoop:
         # Generate title from first user message and store in metadata
         title = self._generate_session_title(session)
         session.metadata[self.TITLE_KEY] = title
+        # Mark as auto-generated so maybe_generate_webui_title_after_turn still runs
+        # when session.metadata["webui"] is True (avoids duplicate early-return on first turn)
+        if session.metadata.get("webui") is True:
+            session.metadata[WEBUI_TITLE_AUTO_GENERATED_METADATA_KEY] = True
         self.sessions.save(session)
         logger.info("Applied session title: {}", title)
 
@@ -205,7 +210,7 @@ class AgentLoop:
 
         task = self.counter_engine.build_task(trigger, session_dir)
         prompt = prompt.replace("{{ session_dir }}", session_dir)
-        prompt = prompt.replace("{{ workspace }}", str(self.workspace))
+        prompt = prompt.replace("{{ workspace }}", str(self.counter_engine.workspace))
 
         msg_id = msg.metadata.get("message_id") if msg.metadata else None
 
@@ -257,13 +262,13 @@ class AgentLoop:
                 return
 
             processor = processor_cls()
-            output_path = Path(self.workspace) / target.output_path
+            output_path = Path(self.counter_engine.workspace) / target.output_path
             batch_size = target.batch_size or 50
 
             # Determine input paths (single or multiple)
             if target.input_paths:
                 # Multiple input files (Level 3 processors)
-                input_paths = [Path(self.workspace) / p for p in target.input_paths]
+                input_paths = [Path(self.counter_engine.workspace) / p for p in target.input_paths]
                 logger.info(
                     "Executing processor [{}] with inputs={}, output={}, batch_size={}",
                     target.processor,
@@ -289,7 +294,7 @@ class AgentLoop:
                     )
             else:
                 # Single input file (Level 2 processors)
-                input_path = Path(self.workspace) / target.input_path
+                input_path = Path(self.counter_engine.workspace) / target.input_path
                 logger.info(
                     "Executing processor [{}] with input={}, output={}, batch_size={}",
                     target.processor,
@@ -1593,6 +1598,7 @@ class AgentLoop:
         if raw == "/freechat":
             return
 
+        self.counter_engine.ensure_mode(session.metadata.get("mode"))
         self.counter_engine.increment_turn(session.metadata)
         triggers = self.counter_engine.check_triggers(session.metadata)
 
@@ -1603,6 +1609,32 @@ class AgentLoop:
 
         for trigger in triggers:
             await self._spawn_counter_subagent(session, msg, trigger, session_dir)
+
+        # Wiki sync: every 3 turns, sync conversation to wiki in background
+        turn_count = self.counter_engine.get_turn_count(session.metadata)
+        if turn_count > 0 and turn_count % 3 == 0:
+            self._schedule_background(
+                self._sync_wiki_for_session(session, session_dir)
+            )
+
+    async def _sync_wiki_for_session(
+        self,
+        session: Session,
+        session_dir: str,
+    ) -> None:
+        """Background task: sync session conversation to wiki."""
+        try:
+            from nanobot.agent.wiki_sync import sync_session_to_wiki
+
+            await sync_session_to_wiki(
+                session_key=session.session_uuid or session.key,
+                session_dir=session_dir,
+                workspace=Path(self.counter_engine.workspace),
+                provider=self.provider,
+                model=self.model,
+            )
+        except Exception as e:
+            logger.debug("Wiki sync background task failed: {}", e)
 
     async def _check_notes_ai_queue(self) -> None:
         """Check and process notes AI reply queue.
@@ -1647,7 +1679,7 @@ class AgentLoop:
 
                 try:
                     # Read the subagent definition
-                    subagent_file = project_root / "subagents" / "cross_session" / "notes_ai_assistant_subagent.md"
+                    subagent_file = project_root / "subagent" / "cross_session" / "notes_ai_assistant" / "context" / "notes_ai_assistant_subagent.md"
                     if not subagent_file.exists():
                         logger.warning(f"[NotesAI] Subagent definition not found")
                         task_item["status"] = "error"
@@ -1697,8 +1729,11 @@ Note Content:
                     )
 
                     logger.info(f"[NotesAI] Spawned subagent for task {task_id}: {task_id_result[:8]}...")
-                    task_item["status"] = "done"
+                    task_item["status"] = "running"
                     task_item["result"] = {"task_id": task_id_result}
+                    self._schedule_background(
+                        self._finalize_notes_ai_task(queue_file, task_id, task_id_result)
+                    )
 
                 except Exception as e:
                     logger.warning(f"[NotesAI] Error processing task {task_id}: {e}")
@@ -1713,6 +1748,39 @@ Note Content:
 
         except Exception as e:
             logger.warning(f"[NotesAI] Error checking queue: {e}")
+
+    async def _finalize_notes_ai_task(
+        self,
+        queue_file: Path,
+        queue_task_id: str,
+        subagent_task_id: str,
+    ) -> None:
+        """Mark a notes AI queue item done after its subagent actually finishes."""
+        import json
+
+        try:
+            status = await self.subagents.wait_for_subagent(subagent_task_id)
+            try:
+                queue_data = json.loads(queue_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                return
+            changed = False
+            for task_item in queue_data.get("tasks", []):
+                if task_item.get("task_id") != queue_task_id:
+                    continue
+                task_item["status"] = "error" if status.error else "done"
+                task_item["result"] = {
+                    "task_id": subagent_task_id,
+                    "reply": status.result,
+                }
+                if status.error:
+                    task_item["error"] = status.error
+                changed = True
+                break
+            if changed:
+                queue_file.write_text(json.dumps(queue_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.debug("Notes AI task finalize failed: {}", e)
 
     async def _state_compact(self, ctx: TurnContext) -> str:
         ctx.session, pending = self.auto_compact.prepare_session(ctx.session, ctx.session_key)

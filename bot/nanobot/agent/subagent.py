@@ -2,9 +2,11 @@
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -35,8 +37,11 @@ class SubagentStatus:
     iteration: int = 0
     tool_events: list = field(default_factory=list)   # [{name, status, detail}, ...]
     usage: dict = field(default_factory=dict)          # token usage
+    model: str | None = None
     stop_reason: str | None = None
     error: str | None = None
+    result: str | None = None
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
     announce_result: bool = True  # whether this subagent will inject messages
     completion_event: asyncio.Event = field(default=None)
 
@@ -172,6 +177,7 @@ class SubagentManager:
             task_description=task,
             started_at=time.monotonic(),
             announce_result=announce_result,
+            model=resolved_model or self.model,
         )
         self._task_statuses[task_id] = status
 
@@ -195,7 +201,7 @@ class SubagentManager:
         if self._on_status_change:
             self._on_status_change(task_id, display_label, "started", None, origin)
 
-        logger.info("Spawned subagent [{}]: {} (model={})", task_id, display_label, model)
+        logger.info("Spawned subagent [{}]: {} (model={})", task_id, display_label, resolved_model or self.model)
         return task_id
 
     async def _run_subagent(
@@ -212,6 +218,8 @@ class SubagentManager:
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+        output_paths = self._extract_output_paths(task)
+        before_artifacts = self._read_artifact_snapshots(output_paths)
 
         async def _on_checkpoint(payload: dict) -> None:
             status.phase = payload.get("phase", status.phase)
@@ -250,21 +258,24 @@ class SubagentManager:
 
             if result.stop_reason == "tool_error":
                 status.tool_events = list(result.tool_events)
+                status.result = self._format_partial_progress(result)
                 if announce_result:
                     await self._announce_result(
                         task_id, label, task,
-                        self._format_partial_progress(result),
+                        status.result,
                         origin, "error", origin_message_id,
                     )
             elif result.stop_reason == "error":
+                status.result = result.error or "Error: subagent execution failed."
                 if announce_result:
                     await self._announce_result(
                         task_id, label, task,
-                        result.error or "Error: subagent execution failed.",
+                        status.result,
                         origin, "error", origin_message_id,
                     )
             else:
                 final_result = result.final_content or "Task completed but no final response was generated."
+                status.result = final_result
                 logger.info("Subagent [{}] completed successfully", task_id)
                 if announce_result:
                     await self._announce_result(task_id, label, task, final_result, origin, "ok", origin_message_id)
@@ -272,13 +283,115 @@ class SubagentManager:
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
+            status.result = f"Error: {e}"
             logger.exception("Subagent [{}] failed", task_id)
             if announce_result:
-                await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
+                await self._announce_result(task_id, label, task, status.result, origin, "error", origin_message_id)
         finally:
+            status.artifacts = self._build_artifact_changes(output_paths, before_artifacts)
+            self._append_monitor_run(task_id, label, task, origin, status)
             if self._on_status_change:
                 self._on_status_change(task_id, label, status.phase, status.error, origin)
             status.completion_event.set()
+
+    def _append_monitor_run(
+        self,
+        task_id: str,
+        label: str,
+        task: str,
+        origin: dict[str, str],
+        status: SubagentStatus,
+    ) -> None:
+        """Persist a compact subagent run record for the WebUI monitor."""
+        try:
+            monitor_dir = self.workspace / "persona" / "monitor"
+            if self.workspace.name == "persona":
+                monitor_dir = self.workspace / "monitor"
+            monitor_dir.mkdir(parents=True, exist_ok=True)
+            record = {
+                "timestamp": datetime.now().isoformat(),
+                "task_id": task_id,
+                "label": label,
+                "phase": status.phase,
+                "model": status.model,
+                "stop_reason": status.stop_reason,
+                "error": status.error,
+                "origin": origin,
+                "task": task,
+                "result": status.result,
+                "usage": status.usage,
+                "tool_events": status.tool_events,
+                "artifacts": status.artifacts,
+                "announce_result": status.announce_result,
+            }
+            path = monitor_dir / "subagent_runs.jsonl"
+            with path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.debug("Failed to append subagent monitor run: {}", e)
+
+    def _extract_output_paths(self, task: str) -> list[Path]:
+        """Best-effort extraction of files a subagent is expected to write."""
+        paths: list[Path] = []
+        for line in task.splitlines():
+            if "Write to:" not in line and "Output:" not in line:
+                continue
+            _, raw = line.split(":", 1)
+            raw = raw.strip().strip("`")
+            match = re.search(r"(/[^`\s]+)", raw)
+            if not match:
+                continue
+            path = Path(match.group(1)).expanduser()
+            if path not in paths:
+                paths.append(path)
+        return paths[:8]
+
+    def _read_artifact_snapshots(self, paths: list[Path]) -> dict[str, str | None]:
+        snapshots: dict[str, str | None] = {}
+        for path in paths:
+            try:
+                snapshots[str(path)] = path.read_text(encoding="utf-8") if path.exists() else None
+            except OSError:
+                snapshots[str(path)] = None
+        return snapshots
+
+    def _build_artifact_changes(
+        self,
+        paths: list[Path],
+        before: dict[str, str | None],
+    ) -> list[dict[str, Any]]:
+        artifacts: list[dict[str, Any]] = []
+        for path in paths:
+            key = str(path)
+            previous = before.get(key)
+            try:
+                current = path.read_text(encoding="utf-8") if path.exists() else None
+            except OSError as exc:
+                artifacts.append({"path": key, "status": "error", "error": str(exc)})
+                continue
+            if current is None:
+                artifacts.append({"path": key, "status": "missing", "content": ""})
+                continue
+            if previous == current:
+                status = "unchanged"
+                delta = ""
+            elif previous is None:
+                status = "created"
+                delta = current
+            elif current.startswith(previous):
+                status = "appended"
+                delta = current[len(previous):]
+            else:
+                status = "changed"
+                delta = current
+            artifacts.append({
+                "path": key,
+                "status": status,
+                "content": current[-20000:],
+                "delta": delta[-12000:],
+                "truncated": len(current) > 20000 or len(delta) > 12000,
+            })
+        return artifacts
 
     async def wait_for_subagent(self, task_id: str) -> SubagentStatus:
         """Wait for a subagent to complete and return its final status.

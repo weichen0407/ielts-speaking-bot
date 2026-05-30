@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { fetchGlobalNotes, saveGlobalNotes } from "@/lib/api";
+import { fetchGlobalNotes, fetchNotesAiReplies, saveGlobalNotes, type AiReplyEntry } from "@/lib/api";
 import { useClient } from "@/providers/ClientProvider";
 
 export interface NoteEntry {
@@ -19,6 +19,8 @@ export interface NoteEntry {
   messageRef?: string;
   /** Quoted content when referencing a message */
   quotedContent?: string;
+  /** AI reply generated from the notes book, if available */
+  aiReply?: AiReplyEntry;
 }
 
 export interface GlobalNotesData {
@@ -143,6 +145,7 @@ export interface UseGlobalNotesApi {
   deleteNote: (id: string) => void;
   updateNote: (id: string, content: string) => void;
   clearNotes: () => void;
+  refresh: () => Promise<void>;
   dateKey: string;
 }
 
@@ -155,14 +158,23 @@ export function useGlobalNotes(): UseGlobalNotesApi {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>("");
 
-  // Load notes from server on mount
-  useEffect(() => {
-    if (!token) return;
+  const loadNotes = useCallback(() => {
+    if (!token) return Promise.resolve();
 
     setIsLoading(true);
-    fetchGlobalNotes(token, dateKey)
-      .then((data) => {
-        const entries = parseNotesContent(data.content);
+    return Promise.all([
+      fetchGlobalNotes(token, dateKey),
+      fetchNotesAiReplies(token, "").catch(() => ({ date: "", replies: [] as AiReplyEntry[] })),
+    ])
+      .then(([data, aiRepliesData]) => {
+        const aiReplyMap = new Map<string, AiReplyEntry>();
+        for (const reply of aiRepliesData.replies) {
+          aiReplyMap.set(reply.noteId, reply);
+        }
+        const entries = parseNotesContent(data.content).map((entry) => ({
+          ...entry,
+          aiReply: aiReplyMap.get(entry.id),
+        }));
         setNotes({ entries, lastUpdated: Date.now() });
         lastSavedRef.current = data.content;
       })
@@ -172,6 +184,21 @@ export function useGlobalNotes(): UseGlobalNotesApi {
       })
       .finally(() => setIsLoading(false));
   }, [token, dateKey]);
+
+  // Load notes from server on mount
+  useEffect(() => {
+    void loadNotes();
+  }, [loadNotes]);
+
+  // While the floating notes panel is open, lightly refresh so Notes Book AI
+  // replies appear here after the background subagent finishes.
+  useEffect(() => {
+    if (!isOpen) return;
+    const id = window.setInterval(() => {
+      void loadNotes();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [isOpen, loadNotes]);
 
   // Save notes to server immediately (real-time)
   const saveNotes = useCallback((entries: NoteEntry[]) => {
@@ -305,6 +332,7 @@ export function useGlobalNotes(): UseGlobalNotesApi {
     deleteNote,
     updateNote,
     clearNotes,
+    refresh: loadNotes,
     dateKey,
   };
 }
@@ -531,6 +559,16 @@ export function GlobalNotesPanel({
                           </p>
                           {entry.content && (
                             <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{entry.content}</p>
+                          )}
+                          {entry.aiReply && (
+                            <div className="mt-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5">
+                              <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-600">
+                                AI Reply
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-foreground">
+                                {entry.aiReply.replyContent}
+                              </p>
+                            </div>
                           )}
                         </div>
                         <div className="flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">

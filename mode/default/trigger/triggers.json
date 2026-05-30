@@ -13,7 +13,6 @@
       "target": {
         "subagent": "memory_cron",
         "prompt_file": "subagent/cross_session/memory_cron/context/memory_cron_subagent.md",
-        "model": "gpt-4o-mini",
         "task_template": "Update user memory profile based on sessions modified since last run.\n\nModified sessions (JSON):\n{modified_sessions}\n\nRead each session's thread.jsonl and extract NEW facts/preferences.\nMerge into {workspace}/persona/memory/MEMORY.md.\n\nOnly process messages newer than cursor timestamp."
       },
       "cursor": {
@@ -33,7 +32,6 @@
       "target": {
         "subagent": "daily_consolidator",
         "prompt_file": "subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md",
-        "model": "gpt-4o-mini",
         "task_template": "Aggregate vocab.md and polisher.md from sessions modified since last run.\n\nModified sessions (JSON):\n{modified_sessions}\n\nWrite to: {workspace}/subagent/cross_session/daily_consolidator/data/daily/daily_{date}.md"
       },
       "cursor": {
@@ -54,12 +52,11 @@
       "target": {
         "subagent": "progress_tracker",
         "prompt_file": "subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md",
-        "model": "gpt-4o-mini",
         "task_template": "Track user expression progress.\n\nInput: {workspace}/persona/user_responses.jsonl\nOutput: {workspace}/persona/progress_bank.jsonl"
       },
       "cursor": {
-        "offset": 0,
-        "last_checked": null
+        "offset": 23,
+        "last_checked": "2026-05-29T15:30:50.045924Z"
       }
     },
     {
@@ -74,7 +71,6 @@
       "target": {
         "subagent": "benative_article_fetcher",
         "prompt_file": "subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md",
-        "model": "gpt-4o-mini",
         "task_template": "Fetch news articles for benative mode practice.\n\nArticles directory: {workspace}/mode/benative/data/benative/articles/\nWrite article JSON files and update cursor."
       },
       "cursor": {
@@ -94,7 +90,6 @@
       "target": {
         "subagent": "benative_translator",
         "prompt_file": "subagent/cross_session/benative_translator/context/benative_translator_subagent.md",
-        "model": "gpt-4o-mini",
         "task_template": "Translate untranslated benative articles.\n\nArticles directory: {workspace}/mode/benative/data/benative/articles/\nPairs directory: {workspace}/mode/benative/data/benative/pairs/"
       },
       "cursor": {

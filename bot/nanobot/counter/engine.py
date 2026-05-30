@@ -13,6 +13,30 @@ _TURN_COUNT_KEY = "_counter_turn_count"
 _LAST_TRIGGER_KEY_PREFIX = "_counter_last_trigger_"
 
 
+def _resolve_trigger_workspace(workspace: Path) -> Path:
+    """Return the root that owns mode/ and subagent/ runtime config.
+
+    Some installs keep the nanobot data workspace at project_root/persona while
+    prompts and trigger config live one directory up. Support that layout
+    without forcing callers to change their configured data workspace.
+    """
+    workspace = Path(workspace)
+    has_runtime_config = (
+        (workspace / "mode" / "default" / "trigger" / "triggers.json").exists()
+        or (workspace / "subagent").exists()
+    )
+    if has_runtime_config:
+        return workspace
+    parent = workspace.parent
+    parent_has_runtime_config = (
+        (parent / "mode" / "default" / "trigger" / "triggers.json").exists()
+        or (parent / "subagent").exists()
+    )
+    if workspace.name == "persona" and parent_has_runtime_config:
+        return parent
+    return workspace
+
+
 class CounterEngine:
     """Loads trigger config and evaluates which triggers should fire.
 
@@ -24,11 +48,13 @@ class CounterEngine:
     """
 
     def __init__(self, workspace: Path) -> None:
-        self.workspace = Path(workspace)
+        self.data_workspace = Path(workspace)
+        self.workspace = _resolve_trigger_workspace(self.data_workspace)
         self._triggers: list[CounterTrigger] = []
         self._current_mode: str | None = None
         self._default_triggers_file = self.workspace / "mode" / "default" / "trigger" / "triggers.json"
         self._mode_triggers_file: Path | None = None
+        self._trigger_file_mtimes: dict[Path, int] = {}
         self._load_default_triggers()
 
     def _load_default_triggers(self) -> None:
@@ -76,6 +102,7 @@ class CounterEngine:
                 )
                 self._triggers.append(trigger)
 
+            self._trigger_file_mtimes[triggers_file] = triggers_file.stat().st_mtime_ns
             logger.debug("Loaded {} trigger(s) from {}", len(triggers_raw), triggers_file)
         except Exception:
             logger.exception("Failed to load triggers from {}", triggers_file)
@@ -92,6 +119,33 @@ class CounterEngine:
             len(enabled),
         )
 
+    def ensure_mode(self, mode: str | None) -> None:
+        """Ensure mode-specific triggers are loaded for the active session."""
+        if mode == self._current_mode:
+            return
+        self.set_mode(mode)
+
+    def reload_triggers(self) -> None:
+        """Reload trigger files for the current mode."""
+        self._triggers = []
+        self._trigger_file_mtimes = {}
+        self._load_default_triggers()
+        if self._current_mode:
+            self._load_mode_triggers(self._current_mode)
+
+    def reload_if_changed(self) -> None:
+        """Reload trigger config when a loaded trigger file changed on disk."""
+        files = [self._default_triggers_file]
+        if self._mode_triggers_file is not None:
+            files.append(self._mode_triggers_file)
+        for path in files:
+            if not path.exists():
+                continue
+            mtime = path.stat().st_mtime_ns
+            if self._trigger_file_mtimes.get(path) != mtime:
+                self.reload_triggers()
+                return
+
     def increment_turn(self, session_metadata: dict[str, Any]) -> int:
         """Bump the per-session turn counter and return the new count."""
         count = session_metadata.get(_TURN_COUNT_KEY, 0) + 1
@@ -104,6 +158,7 @@ class CounterEngine:
 
     def check_triggers(self, session_metadata: dict[str, Any]) -> list[CounterTrigger]:
         """Evaluate all enabled triggers and return those that should fire now."""
+        self.reload_if_changed()
         turn_count = self.get_turn_count(session_metadata)
         firing: list[CounterTrigger] = []
 

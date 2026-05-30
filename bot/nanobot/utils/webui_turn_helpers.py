@@ -25,6 +25,7 @@ from nanobot.utils.llm_runtime import LLMRuntime
 WEBUI_SESSION_METADATA_KEY = "webui"
 WEBUI_TITLE_METADATA_KEY = "title"
 WEBUI_TITLE_USER_EDITED_METADATA_KEY = "title_user_edited"
+WEBUI_TITLE_AUTO_GENERATED_METADATA_KEY = "title_auto_generated"
 TITLE_MAX_CHARS = 60
 TITLE_GENERATION_MAX_TOKENS = 96
 TITLE_GENERATION_REASONING_EFFORT = "none"
@@ -86,9 +87,6 @@ async def maybe_generate_webui_title(
     if session.metadata.get(WEBUI_SESSION_METADATA_KEY) is not True:
         return False
     if session.metadata.get(WEBUI_TITLE_USER_EDITED_METADATA_KEY) is True:
-        return False
-    current_title = session.metadata.get(WEBUI_TITLE_METADATA_KEY)
-    if isinstance(current_title, str) and current_title.strip():
         return False
 
     user_text, assistant_text = _title_inputs(session)

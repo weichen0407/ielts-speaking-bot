@@ -33,6 +33,19 @@ async function request<T>(
   if (!res.ok) {
     throw new ApiError(res.status, `HTTP ${res.status}`);
   }
+  const contentType = typeof res.headers?.get === "function"
+    ? (res.headers.get("content-type") ?? "")
+    : "application/json";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const text = await res.text();
+    const looksLikeHtml = /^\s*<!doctype|\s*<html/i.test(text);
+    throw new ApiError(
+      res.status,
+      looksLikeHtml
+        ? "API returned the WebUI HTML shell instead of JSON. Restart the nanobot gateway so the latest backend routes are loaded."
+        : `API returned ${contentType || "a non-JSON response"}`,
+    );
+  }
   return (await res.json()) as T;
 }
 
@@ -107,6 +120,107 @@ export async function fetchSessionNotes(
 ): Promise<SessionNotes> {
   return request<SessionNotes>(
     `${base}/api/sessions/${encodeURIComponent(key)}/notes`,
+    token,
+  );
+}
+
+export interface AdminTrigger {
+  id: string;
+  name?: string;
+  mode: string;
+  source: string;
+  enabled: boolean;
+  condition?: Record<string, unknown>;
+  subagent?: string | null;
+  model?: string | null;
+  prompt_file?: string | null;
+  prompt_id?: string;
+  task_template?: string | null;
+  cursor?: Record<string, unknown> | null;
+  error?: string | null;
+}
+
+export interface AdminPrompt {
+  id: string;
+  path: string;
+  title: string;
+  content: string;
+  truncated: boolean;
+  error?: string;
+}
+
+export interface AdminSubagentStatus {
+  timestamp: string;
+  chat_id: string;
+  task_id: string;
+  label: string;
+  phase: string;
+  error?: string | null;
+}
+
+export interface AdminSubagentRun {
+  timestamp: string;
+  task_id: string;
+  label: string;
+  phase: string;
+  model?: string | null;
+  stop_reason?: string | null;
+  error?: string | null;
+  origin?: Record<string, unknown>;
+  task?: string;
+  result?: string | null;
+  usage?: Record<string, unknown>;
+  tool_events?: unknown[];
+  artifacts?: Array<{
+    path: string;
+    status: string;
+    content?: string;
+    delta?: string;
+    truncated?: boolean;
+    error?: string;
+  }>;
+  announce_result?: boolean;
+}
+
+export interface AdminActivity {
+  kind: "subagent_result" | "tool" | string;
+  session_id: string;
+  timestamp?: string | null;
+  label: string;
+  detail: string;
+  status?: string;
+}
+
+export interface AdminMonitorPayload {
+  generated_at: string;
+  workspace: string;
+  triggers: AdminTrigger[];
+  prompts: AdminPrompt[];
+  subagent_statuses: AdminSubagentStatus[];
+  subagent_runs: AdminSubagentRun[];
+  recent_activity: AdminActivity[];
+}
+
+export async function fetchAdminMonitor(
+  token: string,
+  base: string = "",
+): Promise<AdminMonitorPayload> {
+  return request<AdminMonitorPayload>(`${base}/api/admin/monitor`, token);
+}
+
+export async function updateAdminTrigger(
+  token: string,
+  update: { source: string; id: string; count?: number; enabled?: boolean },
+  base: string = "",
+): Promise<{ ok: boolean; trigger: AdminTrigger }> {
+  const params = new URLSearchParams({
+    source: update.source,
+    id: update.id,
+  });
+  if (typeof update.count === "number") params.set("count", String(update.count));
+  if (typeof update.enabled === "boolean") params.set("enabled", update.enabled ? "true" : "false");
+  return request<{ ok: boolean; trigger: AdminTrigger }>(
+    `${base}/api/admin/triggers?${params.toString()}`,
     token,
   );
 }
@@ -436,6 +550,151 @@ export async function listIeltsExams(
 ): Promise<{ exams: { examId: string; topic: string; startedAt: string; endedAt: string; finalScore: object }[] }> {
   return request<{ exams: { examId: string; topic: string; startedAt: string; endedAt: string; finalScore: object }[] }>(
     `${base}/api/ielts/exam/list`,
+    token,
+  );
+}
+
+// Wiki Memory API types
+
+export interface WikiSearchResult {
+  slug: string;
+  title: string;
+  type: string;
+  mode: string;
+  section: string;
+  snippet: string;
+  score: number;
+  tags: string[];
+  topics: string[];
+}
+
+export interface WikiPageMeta {
+  slug: string;
+  title: string;
+  type: string;
+  mode: string;
+  tags: string[];
+  topics: string[];
+  links: string[];
+  updated_at: string;
+  confidence: "low" | "medium" | "high";
+}
+
+export interface WikiPageResponse {
+  meta: WikiPageMeta;
+  content: string;
+}
+
+export interface WikiGraphNode {
+  id: string;
+  label: string;
+  kind: "page" | "tag" | "topic" | "mode";
+  type?: string;
+  mode?: string;
+  tags?: string[];
+  topics?: string[];
+  updated_at?: string;
+  summary?: string;
+  size: number;
+}
+
+export interface WikiGraphEdge {
+  source: string;
+  target: string;
+  kind: "link" | "has_tag" | "has_topic" | "has_mode";
+}
+
+export interface WikiGraphResponse {
+  nodes: WikiGraphNode[];
+  edges: WikiGraphEdge[];
+}
+
+export interface WikiPatchResponse {
+  ok: boolean;
+  slug: string;
+}
+
+export interface WikiRebuildResponse {
+  ok: boolean;
+  chunks_indexed: number;
+}
+
+export async function fetchWikiSearch(
+  token: string,
+  params: {
+    q?: string;
+    mode?: string;
+    topic?: string;
+    type?: string;
+    tags?: string;
+    limit?: number;
+  } = {},
+  base: string = "",
+): Promise<{ results: WikiSearchResult[]; error?: string }> {
+  const searchParams = new URLSearchParams();
+  if (params.q) searchParams.set("q", params.q);
+  if (params.mode) searchParams.set("mode", params.mode);
+  if (params.topic) searchParams.set("topic", params.topic);
+  if (params.type) searchParams.set("type", params.type);
+  if (params.tags) searchParams.set("tags", params.tags);
+  if (params.limit !== undefined) searchParams.set("limit", String(params.limit));
+  return request<{ results: WikiSearchResult[]; error?: string }>(
+    `${base}/api/wiki/search?${searchParams}`,
+    token,
+  );
+}
+
+export async function fetchWikiPage(
+  token: string,
+  slug: string,
+  base: string = "",
+): Promise<WikiPageResponse> {
+  const params = new URLSearchParams({ slug });
+  return request<WikiPageResponse>(
+    `${base}/api/wiki/page?${params}`,
+    token,
+  );
+}
+
+export async function fetchWikiGraph(
+  token: string,
+  params: {
+    mode?: string;
+    topic?: string;
+    type?: string;
+    tags?: string;
+  } = {},
+  base: string = "",
+): Promise<WikiGraphResponse> {
+  const searchParams = new URLSearchParams();
+  if (params.mode) searchParams.set("mode", params.mode);
+  if (params.topic) searchParams.set("topic", params.topic);
+  if (params.type) searchParams.set("type", params.type);
+  if (params.tags) searchParams.set("tags", params.tags);
+  return request<WikiGraphResponse>(
+    `${base}/api/wiki/graph?${searchParams}`,
+    token,
+  );
+}
+
+export async function applyWikiPatch(
+  token: string,
+  patch: Record<string, unknown>,
+  base: string = "",
+): Promise<WikiPatchResponse> {
+  const dataParam = encodeURIComponent(JSON.stringify(patch));
+  return request<WikiPatchResponse>(
+    `${base}/api/wiki/patch?data=${dataParam}`,
+    token,
+  );
+}
+
+export async function rebuildWikiIndex(
+  token: string,
+  base: string = "",
+): Promise<WikiRebuildResponse> {
+  return request<WikiRebuildResponse>(
+    `${base}/api/wiki/rebuild-index`,
     token,
   );
 }

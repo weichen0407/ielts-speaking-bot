@@ -91,7 +91,7 @@ class NotesAiAssistantTool(Tool, ContextAware):
 
         # Read the subagent definition
         workspace = Path(__file__).resolve().parent.parent.parent.parent.parent
-        subagent_file = workspace / "subagents" / "cross_session" / "notes_ai_assistant_subagent.md"
+        subagent_file = workspace / "subagent" / "cross_session" / "notes_ai_assistant" / "context" / "notes_ai_assistant_subagent.md"
 
         if not subagent_file.exists():
             return f"Error: Subagent definition not found at {subagent_file}"

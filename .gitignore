@@ -21,6 +21,13 @@ shared/thread.jsonl
 
 # Session data (dynamically created)
 data/thread.jsonl
+data/thread.jsonl.bak-*
+*.jsonl.tmp
+
+# Local Python environments and test caches
+.venv/
+bot/.venv/
+.pytest_cache/
 
 # Subagent data (cursors and outputs)
 subagent/_cursors/

@@ -768,7 +768,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
     assert result.exit_code == 0
-    assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
+    assert seen["cron_store"] == config.workspace_path / "trigger" / "cron" / "jobs.json"
 
 
 def test_agent_workspace_override_does_not_migrate_legacy_cron(
@@ -821,9 +821,9 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     )
 
     assert result.exit_code == 0
-    assert seen["cron_store"] == override / "cron" / "jobs.json"
+    assert seen["cron_store"] == override / "trigger" / "cron" / "jobs.json"
     assert legacy_file.exists()
-    assert not (override / "cron" / "jobs.json").exists()
+    assert not (override / "trigger" / "cron" / "jobs.json").exists()
 
 
 def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
@@ -876,9 +876,9 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
     assert result.exit_code == 0
-    assert seen["cron_store"] == custom_workspace / "cron" / "jobs.json"
+    assert seen["cron_store"] == custom_workspace / "trigger" / "cron" / "jobs.json"
     assert legacy_file.exists()
-    assert not (custom_workspace / "cron" / "jobs.json").exists()
+    assert not (custom_workspace / "trigger" / "cron" / "jobs.json").exists()
 
 
 def test_agent_overrides_workspace_path(mock_agent_runtime):
@@ -1105,7 +1105,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
+    assert seen["cron_store"] == config.workspace_path / "trigger" / "cron" / "jobs.json"
 
 
 def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
@@ -1403,9 +1403,9 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     )
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == override / "cron" / "jobs.json"
+    assert seen["cron_store"] == override / "trigger" / "cron" / "jobs.json"
     assert legacy_file.exists()
-    assert not (override / "cron" / "jobs.json").exists()
+    assert not (override / "trigger" / "cron" / "jobs.json").exists()
 
 
 def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
@@ -1439,9 +1439,9 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == custom_workspace / "cron" / "jobs.json"
+    assert seen["cron_store"] == custom_workspace / "trigger" / "cron" / "jobs.json"
     assert legacy_file.exists()
-    assert not (custom_workspace / "cron" / "jobs.json").exists()
+    assert not (custom_workspace / "trigger" / "cron" / "jobs.json").exists()
 
 
 def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
@@ -1455,7 +1455,7 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
-    workspace_cron = config.workspace_path / "cron" / "jobs.json"
+    workspace_cron = config.workspace_path / "trigger" / "cron" / "jobs.json"
 
     with patch("nanobot.config.paths.get_cron_dir", return_value=legacy_dir):
         _migrate_cron_store(config)
@@ -1475,7 +1475,7 @@ def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> 
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "workspace")
-    workspace_cron = config.workspace_path / "cron" / "jobs.json"
+    workspace_cron = config.workspace_path / "trigger" / "cron" / "jobs.json"
     workspace_cron.parent.mkdir(parents=True)
     workspace_cron.write_text('{"new": true}')
 
