@@ -89,6 +89,52 @@ def test_counter_engine_resolves_project_root_when_workspace_is_persona(tmp_path
     assert f"Workspace: {tmp_path}" in engine.build_task(trigger, str(persona_dir / "sessions" / "abc"))
 
 
+def test_counter_engine_uses_capability_registry_trigger_paths(tmp_path: Path) -> None:
+    config_file = tmp_path / "config" / "capabilities.yaml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(
+        """
+version: 1
+modes:
+  default:
+    trigger_file: custom/default-triggers.json
+  freechat:
+    trigger_file: custom/freechat-triggers.json
+""".strip(),
+        encoding="utf-8",
+    )
+    default_trigger = tmp_path / "custom" / "default-triggers.json"
+    default_trigger.parent.mkdir(parents=True)
+    default_trigger.write_text(json.dumps({"version": 1, "triggers": []}), encoding="utf-8")
+    freechat_trigger = tmp_path / "custom" / "freechat-triggers.json"
+    freechat_trigger.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "vocab_analysis",
+                        "enabled": True,
+                        "condition": {"kind": "turn_count", "count": 1, "scope": "session"},
+                        "target": {"subagent": "vocab"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    engine = CounterEngine(tmp_path / "persona")
+    metadata = {"mode": "freechat"}
+
+    engine.ensure_mode(metadata["mode"])
+    engine.increment_turn(metadata)
+
+    firing = engine.check_triggers(metadata)
+    assert [trigger.id for trigger in firing] == ["vocab_analysis"]
+    assert firing[0]._triggers_file == freechat_trigger
+
+
 def test_file_line_count_cursor_is_stored_under_persona_trigger(tmp_path: Path) -> None:
     trigger_file = tmp_path / "mode" / "default" / "trigger" / "triggers.json"
     trigger_file.parent.mkdir(parents=True)
@@ -128,3 +174,45 @@ def test_file_line_count_cursor_is_stored_under_persona_trigger(tmp_path: Path) 
     assert json.loads(cursor_path.read_text(encoding="utf-8"))["offset"] == 2
     unchanged = json.loads(trigger_file.read_text(encoding="utf-8"))
     assert unchanged["triggers"][0]["cursor"]["offset"] == 0
+
+
+def test_file_line_count_cursor_resets_when_source_was_recreated(tmp_path: Path) -> None:
+    trigger_file = tmp_path / "mode" / "default" / "trigger" / "triggers.json"
+    trigger_file.parent.mkdir(parents=True)
+    trigger_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "progress_tracker",
+                        "enabled": True,
+                        "condition": {
+                            "kind": "file_line_count",
+                            "count": 2,
+                            "scope": "global",
+                            "path": "persona/user_responses.jsonl",
+                        },
+                        "target": {"subagent": "progress_tracker"},
+                        "cursor": {"offset": 10},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "persona" / "user_responses.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text("{}\n{}\n", encoding="utf-8")
+
+    engine = CounterEngine(tmp_path)
+
+    firing = engine.check_triggers({})
+
+    assert [trigger.id for trigger in firing] == ["progress_tracker"]
+    decisions = [
+        json.loads(line)
+        for line in (tmp_path / "monitor" / "trigger_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert decisions[-1]["details"]["unprocessed"] == 2
+    assert decisions[-1]["details"]["reset_detected"] is True

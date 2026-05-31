@@ -77,6 +77,20 @@ def trigger_files(root: Path | str | None = None) -> list[Path]:
     return discovered
 
 
+def mode_trigger_file(root: Path | str | None, mode: str) -> Path | None:
+    project_root = project_root_for(root)
+    capabilities = load_capabilities(project_root)
+    modes = capabilities.get("modes") if isinstance(capabilities.get("modes"), dict) else {}
+    item = modes.get(mode)
+    if isinstance(item, dict):
+        path = _resolve_existing(project_root, item.get("trigger_file"))
+        if path:
+            return path
+
+    fallback = project_root / "mode" / mode / "trigger" / "triggers.json"
+    return fallback if fallback.exists() else None
+
+
 def context_prompt_files(root: Path | str | None = None) -> list[Path]:
     project_root = project_root_for(root)
     capabilities = load_capabilities(project_root)

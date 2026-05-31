@@ -727,6 +727,12 @@ def _run_gateway(
     from nanobot.session.manager import SessionManager
 
     port = port if port is not None else config.gateway.port
+    if port is not None:
+        websocket_cfg = getattr(config.channels, "websocket", None)
+        if isinstance(websocket_cfg, dict):
+            websocket_cfg["port"] = port
+        elif websocket_cfg is not None:
+            setattr(websocket_cfg, "port", port)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)

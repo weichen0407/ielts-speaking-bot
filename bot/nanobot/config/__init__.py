@@ -4,6 +4,7 @@ from nanobot.config.loader import get_config_path, load_config
 from nanobot.config.capabilities import (
     context_prompt_files,
     load_capabilities,
+    mode_trigger_file,
     monitor_log,
     observability_log,
     project_root_for,
@@ -31,6 +32,7 @@ __all__ = [
     "project_root_for",
     "trigger_files",
     "context_prompt_files",
+    "mode_trigger_file",
     "observability_log",
     "monitor_log",
     "get_config_path",

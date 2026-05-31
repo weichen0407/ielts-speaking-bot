@@ -6,6 +6,7 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.config.capabilities import mode_trigger_file, project_root_for
 from nanobot.counter.types import CounterTrigger, CounterCondition, CounterTarget
 from nanobot.utils.trigger_monitor import append_trigger_decision
 
@@ -22,6 +23,10 @@ def _resolve_trigger_workspace(workspace: Path) -> Path:
     without forcing callers to change their configured data workspace.
     """
     workspace = Path(workspace)
+    registry_root = project_root_for(workspace)
+    if (registry_root / "config" / "capabilities.yaml").exists():
+        return registry_root
+
     has_runtime_config = (
         (workspace / "mode" / "default" / "trigger" / "triggers.json").exists()
         or (workspace / "subagent").exists()
@@ -59,10 +64,13 @@ class CounterEngine:
         self._count_cursor_dir = self.data_root / "trigger" / "count"
         self._triggers: list[CounterTrigger] = []
         self._current_mode: str | None = None
-        self._default_triggers_file = self.workspace / "mode" / "default" / "trigger" / "triggers.json"
+        self._default_triggers_file = self._trigger_file_for_mode("default")
         self._mode_triggers_file: Path | None = None
         self._trigger_file_mtimes: dict[Path, int] = {}
         self._load_default_triggers()
+
+    def _trigger_file_for_mode(self, mode: str) -> Path:
+        return mode_trigger_file(self.workspace, mode) or self.workspace / "mode" / mode / "trigger" / "triggers.json"
 
     def _load_default_triggers(self) -> None:
         """Load default mode triggers (always loaded)."""
@@ -74,7 +82,7 @@ class CounterEngine:
         """Load mode-specific triggers."""
         # Remove existing mode-specific triggers
         self._triggers = [t for t in self._triggers if self._default_triggers_file == t._triggers_file]
-        self._mode_triggers_file = self.workspace / "mode" / mode / "trigger" / "triggers.json"
+        self._mode_triggers_file = self._trigger_file_for_mode(mode)
         if self._mode_triggers_file.exists():
             self._load_triggers_file(self._mode_triggers_file)
             logger.debug("Loaded mode-specific triggers from {}", self._mode_triggers_file)
@@ -227,6 +235,13 @@ class CounterEngine:
                 cursor_offset = trigger._cursor.get("offset", 0)
                 with open(file_path, encoding="utf-8") as f:
                     total_lines = sum(1 for _ in f)
+                reset_detected = cursor_offset > total_lines
+                if reset_detected:
+                    logger.info(
+                        "file_line_count cursor reset detected: trigger_id={}, path={}, cursor={}, total={}",
+                        trigger.id, file_path, cursor_offset, total_lines,
+                    )
+                    cursor_offset = 0
                 unprocessed = total_lines - cursor_offset
 
                 logger.info(
@@ -250,6 +265,7 @@ class CounterEngine:
                             "total_lines": total_lines,
                             "unprocessed": unprocessed,
                             "count": resolved_count,
+                            "reset_detected": reset_detected,
                         },
                     )
                 else:
@@ -267,6 +283,7 @@ class CounterEngine:
                             "total_lines": total_lines,
                             "unprocessed": unprocessed,
                             "count": resolved_count,
+                            "reset_detected": reset_detected,
                         },
                     )
                 continue
