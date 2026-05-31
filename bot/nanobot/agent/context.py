@@ -253,4 +253,3 @@ class ContextBuilder:
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
-

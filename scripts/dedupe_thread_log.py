@@ -1,7 +1,7 @@
 """Deduplicate the derived unified interaction log.
 
 The canonical conversation history is stored per session under
-persona/sessions/<session_uuid>/thread.jsonl. data/thread.jsonl is a derived
+persona/sessions/<session_uuid>/thread.jsonl. persona/events/thread.jsonl is a derived
 cross-session index used by processors and dashboards, so it is safe to rebuild
 or compact when old append-only writes created duplicate rows.
 """
@@ -70,7 +70,7 @@ def main() -> None:
     parser.add_argument(
         "path",
         nargs="?",
-        default="data/thread.jsonl",
+        default="persona/events/thread.jsonl",
         help="Path to the derived JSONL log.",
     )
     args = parser.parse_args()

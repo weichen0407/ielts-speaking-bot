@@ -14,8 +14,13 @@ persona/progress_bank.jsonl
 persona/progress.json
 persona/.cursor_*.json
 persona/memory/*.jsonl
+persona/events/thread.jsonl
+persona/events/*.tmp
+persona/trigger/cron/jobs.json
+persona/trigger/cron/.cursor_*.json
+persona/trigger/count/.cursor_*.json
 
-# Shared runtime data
+# Legacy runtime data
 shared/.cursor_*.json
 shared/thread.jsonl
 session_index.jsonl
@@ -24,8 +29,9 @@ sessions/
 monitor/*.jsonl
 memory/*.jsonl
 trigger/cron/jobs.json
+trigger/cron/.cursor_*.json
 
-# Session data (dynamically created)
+# Legacy session data (dynamically created)
 data/thread.jsonl
 data/thread.jsonl.bak-*
 *.jsonl.tmp

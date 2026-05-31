@@ -1,563 +1,227 @@
-# IELTS Speaking Bot - Architecture
+# IELTS Speaking Bot - Current Architecture
 
-## 1. 全链路流程总览
+> Updated: 2026-05-31  
+> Scope: current implementation, not historical prototypes.
 
-```
-User Message
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  Session-Level Processing (turn_count based)                     │
-│                                                                  │
-│  session/metadata["_counter_turn_count"]++                     │
-│       │                                                         │
-│       ├───── turn_count % 2 == 0 ─── vocab_subagent          │
-│       │                                    └──► notes/vocab.md │
-│       │                                                         │
-│       ├───── turn_count % 3 == 0 ─── polisher_subagent        │
-│       │                                    └──► notes/polisher.md
-│       │                                                         │
-│       └───── turn_count % 10 == 0 ── memory_subagent (已禁用)  │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  user_responses.jsonl                                          │
-│  (每条用户消息追加一行)                                         │
-│  {"session_uuid","round","topic","content","timestamp"}         │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress_tracker (file_line_count ≥ 2)                         │
-│  gpt-4o-mini, silent                                          │
-│  输入: contents[] (content字段，仅文本)                         │
-│  输出: save_progress_entries(contents, entries)                  │
-│  cursor: .cursor_progress_tracker.json (offset)                 │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress_bank.jsonl                                            │
-│  (每条highlight一行)                                           │
-│  {"category","intent","expression","content","meta"}            │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ├──────────────────┐
-       │                  │
-       ▼                  ▼ (cron: midnight daily)
-┌──────────────┐  ┌─────────────────────────┐
-│ progress_    │  │  CronJobs (jobs.json)    │
-│ organizer    │  │                         │
-│ (disabled)   │  │  ┌─ memory_cron ────────┼──► MEMORY.md
-│              │  │  │  (midnight)           │     (facts & preferences)
-│              │  │  │                      │
-│              │  │  └─ daily_              │     daily/
-└──────────────┘  │     consolidator          └──► daily_YYYY-MM-DD.md
-       │         │     (every 8h)              (vocab + polish聚合)
-       │         │
-       │         └─ progress_organizer ─────┐
-       │              (midnight)            │  (已禁用，依赖depends_on)
-       │                                   ▼
-       │                           ┌──────────────┐
-       │                           │ progress.json │
-       │                           │ (merged)      │
-       │                           └──────────────┘
-       │
-       └───────────────────────────────────────────► daily/
-                                                    (vocab + polish聚合)
+## 1. Mental Model
+
+The project has five runtime layers:
+
+1. **Chat runtime**: receives user messages, builds context, calls the main LLM, streams replies, and saves session history.
+2. **Trigger runtime**: checks mode-specific and global trigger definitions after user turns or cron ticks.
+3. **Subagent runtime**: runs smaller background LLM jobs for vocab, polish, IELTS feedback, memory, daily consolidation, and similar tasks.
+4. **Wiki runtime**: ingests new conversation events into structured wiki memory and graph data.
+5. **Monitor runtime**: records observability logs for trigger decisions, subagent runs, wiki sync, token usage, and recent activity.
+
+The canonical user-owned runtime root is `persona/`. The canonical observability root is `monitor/`.
+
+## 2. Canonical Paths
+
+| Data | Canonical Path | Notes |
+| --- | --- | --- |
+| Per-session thread | `persona/sessions/{session_uuid}/thread.jsonl` | Raw session conversation history. |
+| Session metadata | `persona/sessions/{session_uuid}/metadata.json` | Includes mode, title, counters, and webui metadata. |
+| Session index | `persona/session_index.jsonl` | Fast list of known sessions. |
+| Global event stream | `persona/events/thread.jsonl` | Cross-session derived event stream with stable IDs. |
+| User response stream | `persona/user_responses.jsonl` | User-only answers for learning/progress/wiki flows. |
+| Benative articles | `persona/benative/articles/` | Source articles for Be Native practice. |
+| Benative pairs | `persona/benative/pairs/` | Sentence-level English/Chinese translation pairs. |
+| Benative responses | `persona/benative/sessions/{session_uuid}/responses.jsonl` | User translation attempts for review. |
+| Long-term memory | `persona/memory/MEMORY.md` | User memory read by the main agent. |
+| Trigger runtime state | `persona/trigger/` | Cron jobs and count/file cursor state. |
+| Wiki memory | `persona/wiki/` | Raw sources, pages, indexes, graph, and sync state. |
+| Subagent monitor | `monitor/subagent_runs.jsonl` | System observability log. |
+| Trigger monitor | `monitor/trigger_decisions.jsonl` | System observability log. |
+
+Legacy root-level `data/`, `sessions/`, `memory/`, and `trigger/` test data have been removed from the active architecture.
+
+## 3. User Turn Flow
+
+```mermaid
+flowchart TD
+  A["User message"] --> B["SessionManager loads session"]
+  B --> C["AgentLoop increments turn counter"]
+  C --> D["ContextBuilder builds system prompt"]
+  D --> E["Main LLM responds"]
+  E --> F["SessionManager saves thread.jsonl"]
+  F --> G["Sync persona/events/thread.jsonl"]
+  F --> H["Append user response streams"]
+  C --> I["CounterEngine.check_triggers()"]
+  I --> J["monitor/trigger_decisions.jsonl"]
+  I --> K{"Eligible?"}
+  K -->|"yes"| L["SubagentManager.spawn()"]
+  L --> M["Subagent writes notes/wiki/memory/progress outputs"]
+  L --> N["monitor/subagent_runs.jsonl"]
+  G --> O["Wiki sync ingest/query/save/lint"]
+  O --> P["persona/wiki/state/sync_log.jsonl"]
 ```
 
----
+Important rule: only user turns should drive user-learning analysis. Assistant replies are saved to session history, but user-response extraction and most learning triggers should be based on user-authored content.
 
-## 2. Session-Level Subagents (turn_count based)
+## 4. Trigger Runtime
 
-```
-User Message (每条消息)
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CounterEngine.check_triggers() — session.metadata               │
-│  (turn_count: 每N条消息触发一次)                               │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ├───── turn_count % 2 == 0 ───┬─── vocab_subagent ──► session/notes/vocab.md
-       │                               │
-       ├───── turn_count % 3 == 0 ───┼─── polisher_subagent ──► session/notes/polisher.md
-       │                               │
-       └───── turn_count % 10 == 0 ──┴─── memory_subagent (已禁用)
+Trigger definitions live in:
 
-每个 Session 独立计数
-```
+| Scope | Path |
+| --- | --- |
+| Default/global | `mode/default/trigger/triggers.json` |
+| Freechat | `mode/freechat/trigger/triggers.json` |
+| IELTS | `mode/ielts/trigger/triggers.json` |
+| Benative | `mode/benative/trigger/triggers.json` |
 
-**触发条件**：
-- `vocab_analysis`: `kind: turn_count, count: 2`
-- `polish_feedback`: `kind: turn_count, count: 3`
-- `memory_update`: `kind: turn_count, count: 10` (已禁用，改用 memory_cron)
+Supported trigger kinds:
 
----
+| Kind | Meaning | Cursor/State |
+| --- | --- | --- |
+| `turn_count` | Fire every N user turns in a session. | Session metadata key `_counter_last_trigger_{id}`. |
+| `file_line_count` | Fire when a source file gains N new lines. | `persona/trigger/count/.cursor_{id}.json`. |
+| `cron` | Fire from `CronService`. | `persona/trigger/cron/jobs.json` and per-job cursor files. |
 
-## 3. user_responses + progress_tracker (file_line_count)
+Every trigger check should write a decision to `monitor/trigger_decisions.jsonl`:
 
-```
-User Response
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  session/notes/user_responses.jsonl                            │
-│  (每条用户消息追加一行)                                         │
-│  {"session_uuid":"...","round":1,"topic":"...","content":"...",│
-│   "timestamp":"..."}                                          │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CounterEngine — file_line_count                               │
-│  condition: kind=file_line_count, path=user_responses.jsonl    │
-│  count=2 (当文件≥2行时触发)                                    │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress_tracker_subagent (gpt-4o-mini)                        │
-│  输入: contents[] (content字段，仅文本)                         │
-│  输出: save_progress_entries(contents, entries)                 │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress_bank.jsonl                                            │
-│  {"category","intent","expression","content","meta"}            │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  .cursor_progress_tracker.json  (offset cursor)                 │
-│  {"offset": 150}                                               │
-└─────────────────────────────────────────────────────────────────┘
+- `skipped`: disabled, invalid count, wrong time, missing source, etc.
+- `no_delta`: checked correctly but no new content is available.
+- `eligible`: condition is met and the trigger is ready to run.
+- `spawned`: subagent or processor was launched/completed.
+- `failed`: prompt missing, processor error, subagent spawn error, cron error.
+
+The WebUI monitor reads this log through `/api/admin/monitor`.
+
+## 5. Subagent Runtime
+
+Subagent prompts and processors are organized by role:
+
+| Role | Path | Examples |
+| --- | --- | --- |
+| Single-session LLM subagents | `subagent/single_session/{name}/context/` | `vocab`, `polisher`, `ielts_feedback`, `benative_review` |
+| Cross-session LLM subagents | `subagent/cross_session/{name}/context/` | `memory_cron`, `daily_consolidator` |
+| Deterministic processors | `subagent/cross_session/{name}/processor/` | wiki processors, review processors |
+| Shared subagent helpers | `subagent/_shared/` | base classes, registries, utilities |
+
+`SubagentManager` records each completed run in `monitor/subagent_runs.jsonl`, including:
+
+- task id
+- label
+- model
+- task prompt
+- result
+- token usage
+- tool events
+- written artifact deltas
+- error status
+
+The current model target is `deepseek-v4-flash` unless a trigger or config explicitly overrides it.
+
+## 6. Cron Runtime
+
+Cron jobs are stored at:
+
+```text
+persona/trigger/cron/jobs.json
 ```
 
-**progress_bank.jsonl 条目格式**：
-```json
-{
-  "category": "emotion",
-  "intent": "preference",
-  "expression": "be fond of",
-  "content": "I'm really fond of collecting vintage sneakers",
-  "meta": {
-    "session_uuid": "...",
-    "round": 4,
-    "topic": "hobbies",
-    "timestamp": "2026-05-21T..."
-  }
-}
+Current cron jobs are executed by `CronService`, then dispatched in `bot/nanobot/cli/commands.py`.
+
+Cron delta handling is incremental:
+
+- `memory_cron` uses session thread deltas and only processes sessions with new messages.
+- `daily_consolidator` uses session note deltas and only processes changed vocab/polisher notes.
+- Cursor state is stored under `persona/trigger/cron/`.
+- No-delta runs are still logged to `monitor/trigger_decisions.jsonl`.
+
+This means hourly or daily cron jobs should not reprocess the full historical corpus unless the cursor is deleted or reset.
+
+## 7. Wiki Runtime
+
+Wiki is a structured memory layer under `persona/wiki/`.
+
+Canonical wiki page root:
+
+```text
+persona/wiki/wiki/
 ```
 
----
+Core wiki files:
 
-## 4. progress_organizer (cron-based, disabled)
+| Path | Purpose |
+| --- | --- |
+| `persona/wiki/raw/` | Raw source records when present. |
+| `persona/wiki/wiki/` | Markdown wiki pages with frontmatter. |
+| `persona/wiki/index/wiki.sqlite` | Search/query index. |
+| `persona/wiki/state/` | Sync state and cursors. |
+| `persona/wiki/state/sync_log.jsonl` | Wiki sync observability log. |
+| `persona/wiki/log.jsonl` | Wiki operation log. |
 
-```
-progress_bank.jsonl
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CronService — jobs.json                                       │
-│  schedule: "0 0 * * *" (midnight daily)                        │
-│  job.id: "progress_organizer"                                  │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  on_cron_job (commands.py)                                      │
-│  → finds trigger in counter_engine                             │
-│  → spawns subagent                                            │
-│  → waits for completion                                        │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress_organizer_subagent (gpt-4o-mini)                      │
-│  输入: contents[] (expression字段)                               │
-│  输出: save_progress_organizer_entries(contents, entries)        │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  progress.json                                                  │
-│  (categories结构: emotion→preference→[{expression,content,meta}]) │
-└─────────────────────────────────────────────────────────────────┘
+Current wiki flow:
+
+```mermaid
+flowchart LR
+  A["persona/events/thread.jsonl"] --> B["ingest"]
+  B --> C["query existing wiki"]
+  C --> D["save crystallized pages"]
+  D --> E["lint structure and semantics"]
+  E --> F["index and graph"]
+  F --> G["WebUI wiki graph"]
 ```
 
-**当前状态**：已禁用，通过 `depends_on` 触发改为 cron 独立调度
+The wiki schema supports categories such as `source`, `entity`, `concept`, `comparison`, `question`, `synthesis`, `decision`, `gap`, and `meta`, but the WebUI graph should surface user-facing entities, topics, and relationships rather than internal schema labels.
 
----
+## 8. Monitor Runtime
 
-## 5. memory_cron (cron-based)
+The admin monitor is served by:
 
-```
-sessions/{uuid}/
-  └── thread.jsonl (conversation)
-          │  (mtime = 最后修改时间)
-          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CronService — jobs.json                                       │
-│  schedule: "0 0 * * *" (midnight daily)                        │
-│  job.id: "memory_cron"                                         │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  cron_utils.py — find_modified_sessions()                       │
-│  读取 .cursor_memory_cron.json                                  │
-│  比较 session/thread.jsonl 的 mtime vs cursor timestamp         │
-│  返回: [{path, uuid, topic, updated_at}, ...]                  │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  .cursor_memory_cron.json                                       │
-│  {"last_processed_timestamp": "2026-05-21T00:00:00Z"}          │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  memory_cron_subagent (gpt-4o-mini)                            │
-│  读取 modified sessions 的 thread.jsonl                          │
-│  提取 NEW facts/preferences                                     │
-│  写入: memory/MEMORY.md                                        │
-└─────────────────────────────────────────────────────────────────┘
+```text
+GET /api/admin/monitor
 ```
 
----
+It aggregates:
 
-## 6. daily_consolidator (cron-based)
+| Data | Source |
+| --- | --- |
+| Trigger definitions and editable counts | `mode/*/trigger/triggers.json` |
+| Prompt previews | `subagent/*/*/context/*.md` and mode context files |
+| Trigger decisions | `monitor/trigger_decisions.jsonl` |
+| Subagent runs | `monitor/subagent_runs.jsonl` plus legacy fallback |
+| Wiki sync runs | `persona/wiki/state/sync_log.jsonl` |
+| Cost estimates | token usage from subagent runs and last main turn |
+| Recent activity | session thread metadata/tool events |
 
-```
-sessions/{uuid}/notes/
-  ├── vocab.md
-  └── polisher.md
-          │  (各自的 mtime)
-          ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  CronService — jobs.json                                       │
-│  schedule: "0 */8 * * *" (每8小时)                             │
-│  job.id: "daily_consolidator"                                  │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  cron_utils.py — find_sessions_with_modified_notes()            │
-│  读取 .cursor_daily_consolidator.json                          │
-│  比较 vocab.md/polisher.md 的 mtime vs cursor                  │
-│  返回: [{path, uuid, vocab_path, polisher_path}, ...]          │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  .cursor_daily_consolidator.json                                │
-│  {"last_processed_timestamp": "2026-05-21T00:00:00Z"}          │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  daily_consolidator_subagent (gpt-4o-mini)                     │
-│  读取 modified sessions 的 vocab.md + polisher.md                │
-│  聚合写入: daily/daily_2026-05-21.md                            │
-└─────────────────────────────────────────────────────────────────┘
-       │
-       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  persona/daily/                                               │
-│  ├── daily_2026-05-21.md                                     │
-│  ├── daily_2026-05-20.md                                     │
-│  └── daily.md (latest)                                         │
-└─────────────────────────────────────────────────────────────────┘
-```
+The monitor should answer three debugging questions quickly:
 
-**daily.md 格式**：
-```json
-{
-  "date": "2026-05-21",
-  "generated_at": "2026-05-21T23:59:59Z",
-  "vocabulary": {
-    "new_words": [...],
-    "topic_distribution": {"Family": 5}
-  },
-  "grammar_patterns": {
-    "issues_observed": [...]
-  },
-  "polish_suggestions": [...],
-  "stats": {
-    "total_sessions": 3,
-    "new_vocabulary_items": 12
-  }
-}
-```
+1. Did the trigger condition run, and why did it pass or skip?
+2. If it passed, did a subagent or processor actually run?
+3. If it ran, what did it output or write?
 
----
+## 9. WebUI Runtime
 
-## 7. Mode 架构
+Main WebUI areas:
 
-### 文件组织总览
+| Area | Role |
+| --- | --- |
+| Chat | Primary user conversation and mode-specific practice. |
+| Notes | User-authored notes and AI note replies. |
+| Wiki | Structured memory graph and related pages. |
+| Monitor | Operational view for prompts, triggers, subagent runs, wiki sync, and cost. |
+| Settings | Provider/API settings. |
 
-```
-ielts-speaking-bot/
-│
-├── global/                          # 全局共享（不受 mode 影响，始终运行）
-│   ├── trigger/
-│   │   ├── count/count.yaml         # 全局 triggers 注册
-│   │   └── cron/cron.yaml           # 全局 cron jobs
-│   └── (其他全局资源)                # 仅注册，不存放 subagents
-│
-├── mode/                            # Mode 配置目录
-│   ├── freechat/                    # Freechat mode
-│   │   ├── context/                 # Bootstrap 文件
-│   │   │   ├── AGENTS.md          # Agent 指令
-│   │   │   ├── SOUL.md            # 性格定义
-│   │   │   ├── USER.md            # 用户模板
-│   │   │   ├── HEARTBEAT.md       # 定期任务
-│   │   │   ├── TOOLS.md           # 工具说明
-│   │   │   └── topic_bank.md      # 话题库
-│   │   └── trigger/
-│   │       └── count/count.yaml   # Mode-specific triggers
-│   │
-│   └── ielts/                      # IELTS mode
-│       ├── context/                 # Bootstrap 文件
-│       │   ├── AGENTS.md          # IELTS 指令
-│       │   ├── SOUL.md            # IELTS examiner personality
-│       │   ├── USER.md
-│       │   └── HEARTBEAT.md
-│       └── trigger/
-│           └── count/count.yaml     # Mode-specific triggers
-│
-│   └── benative/                   # Be Native mode
-│       ├── context/                 # Bootstrap 文件
-│       │   ├── AGENTS.md          # Benative 指令
-│       │   ├── SOUL.md            # Native speaker coach
-│       │   ├── USER.md
-│       │   ├── HEARTBEAT.md
-│       │   └── TOOLS.md
-│       └── trigger/
-│           └── count/count.yaml     # Mode-specific triggers (benative_review)
-│
-├── subagents/                      # 所有 subagent prompts（集中管理）
-│   ├── session/
-│   │   ├── vocab_subagent.md
-│   │   ├── polisher_subagent.md
-│   │   ├── ielts_feedback_subagent.md
-│   │   └── benative_review_subagent.md
-│   └── cross_session/
-│       ├── memory_cron_subagent.md
-│       ├── daily_consolidator_subagent.md
-│       ├── progress_tracker_subagent.md
-│       ├── benative_article_fetcher_subagent.md
-│       └── benative_translator_subagent.md
-│
-└── shared/                        # 共享数据
-    ├── memory/MEMORY.md
-    ├── daily/daily_*.md
-    ├── progress.json
-    ├── progress_bank.jsonl
-    ├── user_responses.jsonl
-    ├── benative/                   # Benative 模式数据
-    │   ├── articles/               # 原始文章
-    │   ├── pairs/                  # 翻译对 (英文+中文)
-    │   └── sessions/{uuid}/         # 用户回答
-    │       └── responses.jsonl
-    ├── freechat/                   # Freechat 模式数据
-    │   └── sessions/{uuid}/        # 用户回答
-    │       └── responses.jsonl
-    └── .cursor_*.json
-```
+The WebUI should render runtime data incrementally. It should not be the source of truth for learning data; source of truth remains `persona/` and `monitor/`.
 
-### 核心概念
+## 10. File Ownership Rules
 
-| 概念 | 说明 |
-|------|------|
-| **global/** | 全局共享内容，始终运行。包含 global triggers、cron jobs，不存放 bootstrap |
-| **mode/** | 各模式独有内容，只有该模式激活时才加载。包含 bootstrap files、mode-specific triggers |
-| **context/** | Mode 内的 bootstrap 文件夹（mode/{mode}/context/），包含 AGENTS.md、SOUL.md 等 |
-| **shared/** | 共享数据文件，所有 mode 共用（memory、daily、progress 等） |
+- `persona/` is user/business runtime data.
+- `monitor/` is system observability runtime data.
+- `mode/` is source-like mode configuration.
+- `subagent/` is source-like subagent and processor implementation.
+- `bot/nanobot/` is application code.
+- `bot/webui/` is frontend code.
+- Runtime test data should not be committed.
 
----
+When adding a new feature, decide its owner first:
 
-### 完整工作流程
-
-```
-用户消息
-    │
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│  AgentLoop._state_build()                                  │
-│                                                             │
-│  1. 获取 session.metadata["mode"]                          │
-│     - 有 mode → 使用 mode/{mode}/                          │
-│     - 无 mode → 使用 workspace 根目录                       │
-│                                                             │
-│  2. ContextBuilder.build_system_prompt()                    │
-│     - Bootstrap: mode/{mode}/ (或 workspace 根目录)        │
-│     - Memory: shared/memory/MEMORY.md                      │
-│     - Skills: nanobot skills                               │
-│                                                             │
-│  3. CounterEngine.check_triggers()                         │
-│     - 全局 triggers: global/trigger/count/count.yaml       │
-│     - Mode triggers: mode/{mode}/trigger/count/count.yaml  │
-└─────────────────────────────────────────────────────────────┘
-    │
-    ├─────────────────────┬─────────────────────┐
-    ▼                     ▼                     ▼
-┌─────────┐         ┌─────────┐         ┌─────────┐
-│ Global  │         │  Mode   │         │  No    │
-│ Triggers│         │ Triggers│         │  Mode  │
-│ (always │         │ (only   │         │(normal │
-│  run)   │         │  when   │         │  chat) │
-│         │         │  active)│         │        │
-└────┬────┘         └────┬────┘         └───┬────┘
-     │                     │                    │
-     ▼                     ▼                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  SubagentManager.spawn()                                │
-│                                                         │
-│  Session-level: vocab_subagent, polisher_subagent      │
-│    - 每个 session 独立运行                              │
-│    - 触发条件: turn_count                              │
-│                                                         │
-│  Cross-session-level: memory_cron, daily_consolidator  │
-│    - 全局运行，不受 mode 影响                           │
-│    - 触发条件: cron 或 file_line_count                │
-└─────────────────────────────────────────────────────────┘
-```
-
----
-
-### Mode 切换流程
-
-```
-用户输入 /freechat 或 /ielts
-         │
-         ▼
-┌──────────────────────────────────────────────┐
-│  cmd_freechat / cmd_ielts                    │
-│                                              │
-│  1. session.metadata["mode"] = "freechat"   │
-│  2. counter_engine.set_mode("freechat")      │
-│     → 加载 global/trigger/count.yaml        │
-│     → 加载 mode/freechat/trigger/count.yaml │
-│     → 合并 triggers                          │
-│  3. ContextBuilder 使用 mode/freechat/context/
-└──────────────────────────────────────────────┘
-         │
-         ▼
-┌──────────────────────────────────────────────┐
-│  CounterEngine._triggers = [               │
-│    global_triggers + mode_triggers          │
-│  ]                                         │
-│                                              │
-│  Global (始终): memory_cron,               │
-│              daily_consolidator,             │
-│              progress_tracker                │
-│                                              │
-│  Mode (仅该 mode 激活时):                  │
-│    freechat: vocab, polish                 │
-│    ielts:    vocab, polish, ielts_feedback │
-└──────────────────────────────────────────────┘
-```
-
----
-
-### Bootstrap 文件作用
-
-每个 mode 的 `context/` 下的文件组成该 mode 的 system prompt：
-
-| 文件 | 内容 | 用途 |
-|------|------|------|
-| **AGENTS.md** | agent 指令 | 告诉 agent 如何运作 |
-| **SOUL.md** | 核心性格 | 定义语气、风格 |
-| **USER.md** | 用户 profile | 个性化信息 |
-| **HEARTBEAT.md** | 定期任务 | 定时检查的任务 |
-| **TOOLS.md** | 工具说明 | 工具使用文档 |
-
-**System prompt 结构**：
-```
-[Identity]
-
-## AGENTS.md (from global/)
-## SOUL.md (from global/)
-[Mode AGENTS.md - mode/{mode}/context/]
-[Mode SOUL.md - mode/{mode}/context/]
-## USER.md
-## HEARTBEAT.md
-## TOOLS.md
-
----
-[Memory: shared/memory/MEMORY.md]
-[Skills: nanobot built-in skills]
-```
-
----
-
-### Subagent 类型
-
-| 类型 | 作用域 | 示例 | 触发方式 |
-|------|--------|------|----------|
-| **cross_session** | 全局共享 | memory_cron, daily_consolidator | cron / file_line_count |
-| **session** | mode-specific | vocab_subagent, polisher_subagent | turn_count |
-
-**Subagent 目录搜索顺序**：
-```
-load_prompt(trigger):
-    1. subagents/{prompt_file}        # 集中管理的 subagents
-    2. mode/{mode}/{prompt_file}      # mode-specific
-    3. workspace/{prompt_file}       # 回退到 workspace 根目录
-```
-
----
-
-### 不同 Mode 下的 Triggers
-
-| Mode | 激活的 Triggers |
-|------|-----------------|
-| **无 mode** (默认) | global: memory_cron, daily_consolidator, progress_tracker |
-| **freechat** | global + vocab, polish |
-| **ielts** | global + vocab, polish, ielts_feedback |
-| **benative** | global + benative_review |
-
-**Global Triggers (所有 mode 都运行)**:
-- `memory_cron`: cron (0 0 * * *) - 更新用户记忆
-- `daily_consolidator`: cron (0 */8 * * *) - 聚合每日笔记
-- `progress_tracker`: file_line_count (2) - 跟踪用户表达
-- `benative_article_fetcher`: cron (0 12 * * *) - 爬取新闻文章
-- `benative_translator`: cron (0 13 * * *) - 翻译文章为中文
-
-**Mode-specific Triggers**:
-- `vocab_analysis`: turn_count (2) - 词汇分析
-- `polish_feedback`: turn_count (3) - 语法润色
-- `ielts_feedback`: turn_count (5) - IELTS 反馈
-- `benative_review`: turn_count (10) - Benative 回答评测
-
----
-
-## 8. 触发条件类型
-
-| 类型 | 条件 | 作用域 | 示例 |
-|------|------|--------|------|
-| turn_count | 每N条消息 | session (各session独立) | vocab (2), polish (3), ielts_feedback (5) |
-| file_line_count | 文件≥N行 | global | progress_tracker (2行) |
-| cron | cron表达式 | global (jobs.json调度) | memory_cron (0 0 * * *), daily (0 */8 * * *) |
-
----
-
-## 9. Cursor 类型
-
-| Cursor文件 | 类型 | 比较方式 |
-|-----------|------|---------|
-| .cursor_progress_tracker.json | offset | 行号 |
-| .cursor_memory_cron.json | timestamp | 文件 mtime vs timestamp |
-| .cursor_daily_consolidator.json | timestamp | 文件 mtime vs timestamp |
-
-**Timestamp Cursor 原理**：
-- 首次运行：cursor 不存在，处理所有 session
-- 后续运行：读取 cursor timestamp，比较 session 文件的 mtime
-- mtime > cursor timestamp → 该 session 有新内容，需处理
-- 处理完成后：更新 cursor 为当前时间
+| Question | Usually Means |
+| --- | --- |
+| Is it user memory or learning material? | `persona/` |
+| Is it an operational trace? | `monitor/` |
+| Is it static behavior config? | `mode/` |
+| Is it an LLM worker instruction? | `subagent/.../context/` |
+| Is it deterministic processing code? | `subagent/.../processor/` or `bot/nanobot/...` |

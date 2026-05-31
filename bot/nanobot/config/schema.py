@@ -171,7 +171,7 @@ class AgentsConfig(Base):
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     subagent_defaults: dict[str, str] = Field(
         default_factory=dict,
-        description="Default model for each subagent. Maps subagent label (e.g. 'ielts_score') to model name (e.g. 'gpt-4o-mini'). Use 'default' for any unlabeled subagents.",
+        description="Default model for each subagent. Maps subagent label (e.g. 'ielts_score') to model name (e.g. 'deepseek-v4-flash'). Use 'default' for any unlabeled subagents.",
     )
 
 

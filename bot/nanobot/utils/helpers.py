@@ -598,8 +598,9 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     for item in tpl.iterdir():
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
-    _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
-    _write(None, workspace / "memory" / "history.jsonl")
+    data_root = workspace if workspace.name == "persona" else workspace / "persona"
+    _write(tpl / "memory" / "MEMORY.md", data_root / "memory" / "MEMORY.md")
+    _write(None, data_root / "memory" / "history.jsonl")
 
     # Sync nested template directories (prompts/, agent/) to bot/nanobot/templates/
     for subdir in ("prompts", "agent"):
@@ -627,7 +628,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
             tracked_files=[
                 "SOUL.md",
                 "USER.md",
-                "memory/MEMORY.md",
+                str((data_root / "memory" / "MEMORY.md").relative_to(workspace)),
             ],
         )
         gs.init()

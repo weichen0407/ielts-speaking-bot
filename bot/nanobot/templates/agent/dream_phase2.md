@@ -6,7 +6,7 @@ Update memory files based on the analysis below.
 ## File paths (relative to workspace root)
 - SOUL.md
 - USER.md
-- memory/MEMORY.md
+- persona/memory/MEMORY.md
 - skills/<name>/SKILL.md (for [SKILL] entries only)
 
 Do NOT guess paths.

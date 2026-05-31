@@ -51,7 +51,8 @@ class MemoryStore:
     def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
-        self.memory_dir = ensure_dir(workspace / "memory")
+        self.data_root = workspace if workspace.name == "persona" else workspace / "persona"
+        self.memory_dir = ensure_dir(self.data_root / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
@@ -61,8 +62,10 @@ class MemoryStore:
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
+        memory_rel = self.memory_file.relative_to(workspace)
+        dream_cursor_rel = self._dream_cursor_file.relative_to(workspace)
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
+            "SOUL.md", "USER.md", str(memory_rel), str(dream_cursor_rel),
         ])
         self._maybe_migrate_legacy_history()
 
@@ -972,7 +975,7 @@ class Dream:
         skip annotation than to tag the wrong line).
         SOUL.md and USER.md are never annotated.
         """
-        file_path = "memory/MEMORY.md"
+        file_path = str(self.memory_file.relative_to(self.store.workspace))
         try:
             ages = self.store.git.line_ages(file_path)
         except Exception:

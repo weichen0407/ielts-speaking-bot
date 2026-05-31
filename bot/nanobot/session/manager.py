@@ -768,7 +768,7 @@ class SessionManager:
         self._update_session_index(session)
 
     def _sync_shared_interaction_log(self, session: Session) -> None:
-        """Sync one session into data/thread.jsonl without duplicating old rows.
+        """Sync one session into persona/events/thread.jsonl without duplicating old rows.
 
         Session files are rewritten atomically on every save. The unified log used
         to append the whole session on every save, so the same messages appeared
@@ -776,8 +776,7 @@ class SessionManager:
         session's slice, and use stable ids derived from session_uuid + index.
         """
         try:
-            project_root = self.workspace.parent if self.workspace.name == "persona" else self.workspace
-            data_dir = project_root / "data"
+            data_dir = self.data_root / "events"
             shared_path = data_dir / "thread.jsonl"
             tmp_path = shared_path.with_suffix(".jsonl.tmp")
 
