@@ -173,7 +173,6 @@ class WikiStore:
         self.wiki_root = wiki_root or (self.workspace / "persona" / "wiki")
         self.layout: WikiLayout = ensure_wiki_layout(self.wiki_root)
         self.pages_root = self.layout.pages_root
-        self._legacy_pages_root = self.wiki_root / "pages"
         self._log_path = self.wiki_root / "log.jsonl"
         self._ensure_dirs()
 
@@ -191,17 +190,6 @@ class WikiStore:
         path = self.pages_root / f"{slug}.md"
         resolved = path.resolve()
         if not str(resolved).startswith(str(self.pages_root.resolve())):
-            raise ValueError(f"Path traversal attempt: {slug}")
-        return path
-
-    def legacy_page_path(self, slug: str) -> Path:
-        """Return the page path used by the initial wiki prototype."""
-        from .schema import _validate_slug
-
-        _validate_slug(slug)
-        path = self._legacy_pages_root / f"{slug}.md"
-        resolved = path.resolve()
-        if not str(resolved).startswith(str(self._legacy_pages_root.resolve())):
             raise ValueError(f"Path traversal attempt: {slug}")
         return path
 
@@ -225,11 +213,7 @@ class WikiStore:
         """
         path = self.page_path(slug)
         if not path.exists():
-            legacy_path = self.legacy_page_path(slug)
-            if legacy_path.exists():
-                path = legacy_path
-            else:
-                return None
+            return None
         raw = path.read_text(encoding="utf-8")
         try:
             fm_dict, body = _parse_frontmatter(raw)
@@ -262,11 +246,7 @@ class WikiStore:
         """Read the companion sources.json for a slug, or None if not found."""
         path = self.sources_path(slug)
         if not path.exists():
-            legacy_path = self._legacy_pages_root / f"{slug}.sources.json"
-            if legacy_path.exists():
-                path = legacy_path
-            else:
-                return None
+            return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             return WikiSourcesData.model_validate(data)
@@ -644,15 +624,6 @@ class WikiStore:
             result = self.read_page(slug)
             if result:
                 pages.append(result[0])
-        if self._legacy_pages_root.exists():
-            seen = {page.slug for page in pages}
-            for md_file in self._legacy_pages_root.rglob("*.md"):
-                slug = str(md_file.relative_to(self._legacy_pages_root))[:-3].replace("\\", "/")
-                if slug in seen:
-                    continue
-                result = self.read_page(slug)
-                if result:
-                    pages.append(result[0])
         return pages
 
 

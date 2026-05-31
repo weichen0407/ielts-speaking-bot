@@ -97,7 +97,7 @@ persona/wiki/
   schema.md
   index.md
   log.jsonl
-  pages/
+  wiki/
     user/
       profile.md
       profile.sources.json
@@ -157,11 +157,11 @@ persona/wiki/
 
 Rules:
 
-1. Markdown pages in `persona/wiki/pages/` are the source of truth.
+1. Markdown pages in `persona/wiki/wiki/` are the source of truth.
 2. `persona/wiki/index/wiki.sqlite` is derived. It must be rebuildable from Markdown.
 3. `persona/wiki/log.jsonl` records all applied patches.
 4. `persona/memory/MEMORY.md` remains as a compact always-injected summary. It can later be generated from the wiki.
-5. Each page has a companion `pages/{slug}.sources.json` sidecar file that tracks fact sources. Markdown stays clean; sources are preserved for provenance and conflict detection.
+5. Each page has a companion `wiki/{slug}.sources.json` sidecar file that tracks fact sources. Markdown stays clean; sources are preserved for provenance and conflict detection.
 
 ---
 
@@ -425,8 +425,8 @@ class WikiStore:
 
 Implementation details:
 
-1. Page path is `wiki_root / "pages" / f"{slug}.md"`.
-2. Do not allow page paths outside `wiki_root/pages`.
+1. Page path is `wiki_root / "wiki" / f"{slug}.md"`.
+2. Do not allow page paths outside `wiki_root/wiki`.
 3. Atomic write:
    - Write to `.tmp`.
    - Replace final file.
@@ -437,7 +437,7 @@ Implementation details:
 5. Deduplication and sources:
    - Normalize bullet text by lowercasing and stripping punctuation.
    - If normalized content already exists in the section, do not add a duplicate bullet to Markdown.
-   - Instead, merge the new sources into `pages/{slug}.sources.json` under the matching fact key, increment `confirmations`, and update `last_seen`.
+   - Instead, merge the new sources into `wiki/{slug}.sources.json` under the matching fact key, increment `confirmations`, and update `last_seen`.
    - If the fact does not exist, add the bullet to Markdown and create a new entry in `sources.json`.
    - The `sources.json` file is never shown to users; it exists only for provenance and conflict detection.
 6. Sources sidecar format:
@@ -467,7 +467,7 @@ Acceptance:
 
 1. Applying `merge_section` to a missing page creates it.
 2. Applying the same patch twice does not duplicate bullets.
-3. Bad slugs cannot escape `persona/wiki/pages`.
+3. Bad slugs cannot escape `persona/wiki/wiki`.
 4. `log.jsonl` receives one event per patch.
 
 ---
@@ -708,7 +708,8 @@ class WikiProcessor(BaseDataProcessor[WikiInput, WikiPatch]):
     name = "wiki"
 ```
 
-Input sources v1:
+Input sources v1, superseded by the current `persona/events/thread.jsonl`
+ingest path:
 
 ```text
 subagent/single_session/vocab/data/vocab.jsonl
@@ -749,7 +750,7 @@ Cursor file:
 persona/wiki/.cursor.json
 ```
 
-Sources v1:
+Sources v1, superseded by the current event-stream ingest path:
 
 ```python
 SOURCES = [
@@ -1397,8 +1398,8 @@ Tests:
 Create these files manually or through a test fixture:
 
 ```text
-persona/wiki/pages/ielts/topics/sports.md
-persona/wiki/pages/user/preferences.md
+persona/wiki/wiki/ielts/topics/sports.md
+persona/wiki/wiki/user/preferences.md
 ```
 
 Run:
@@ -1453,7 +1454,7 @@ After each step, run the smallest relevant test before moving on.
 
 The feature is done when:
 
-1. `persona/wiki/pages/` contains readable Markdown memories.
+1. `persona/wiki/wiki/` contains readable Markdown memories.
 2. `persona/wiki/index/wiki.sqlite` can be rebuilt.
 3. User can search wiki from WebUI.
 4. User can view a page from WebUI.

@@ -93,13 +93,13 @@ Required behavior:
 5. Store pages under:
 
 ```text
-persona/wiki/pages/{slug}.md
+persona/wiki/wiki/{slug}.md
 ```
 
 6. Store source metadata under:
 
 ```text
-persona/wiki/pages/{slug}.sources.json
+persona/wiki/wiki/{slug}.sources.json
 ```
 
 Important source rule:
@@ -316,7 +316,8 @@ bot/tests/wiki/test_wiki_updater.py
 2. Read new rows from existing JSONL sources.
 3. Update cursor only after successful patch application.
 
-Initial sources:
+Initial sources from the old patch-JSONL plan, superseded by the current
+`persona/events/thread.jsonl` ingest flow:
 
 ```text
 subagent/single_session/vocab/data/vocab.jsonl

@@ -377,8 +377,8 @@ Run these tests after automated tests pass.
 Verify files exist:
 
 ```text
-persona/wiki/pages/ielts/topics/sports.md
-persona/wiki/pages/ielts/topics/sports.sources.json
+persona/wiki/wiki/ielts/topics/sports.md
+persona/wiki/wiki/ielts/topics/sports.sources.json
 persona/wiki/log.jsonl
 ```
 

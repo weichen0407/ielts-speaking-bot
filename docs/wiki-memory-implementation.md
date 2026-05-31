@@ -81,7 +81,7 @@ Wiki Memory 是一个面向 LLM 的持久化知识库系统，用于：
 **目录结构**：
 ```
 persona/wiki/
-├── pages/
+├── wiki/
 │   ├── {slug}.md              # 页面正文 + YAML Frontmatter
 │   ├── {slug}.sources.json    # 来源追踪侧边文件
 │   └── sub/
@@ -206,7 +206,9 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ### 3.8 wiki_updater.py — 游标式增量更新
 
-`WikiUpdater` 持续扫描外部 JSONL 数据源（如 vocab、polisher、notes 等子代理的输出），增量应用到 Wiki。
+`WikiUpdater` 是旧的 patch JSONL 导入器，保留用于测试或一次性迁移。
+当前主流程通过 `bot.nanobot.agent.wiki_sync` 从
+`persona/events/thread.jsonl` 增量 ingest，再 query/save/lint。
 
 **游标机制**：
 - 每个源文件维护一个行号游标，记录在 `updater_cursors.json`
@@ -216,12 +218,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 **默认扫描源**：
 ```python
-DEFAULT_SOURCES = [
-    "subagent/single_session/vocab/data/vocab.jsonl",
-    "subagent/single_session/polisher/data/polisher.jsonl",
-    "subagent/single_session/notes/data/notes.jsonl",
-    "subagent/cross_session/progress_tracker/data/progress_bank.jsonl",
-]
+DEFAULT_SOURCES = []
 ```
 
 ---
@@ -294,10 +291,10 @@ rebuildWikiIndex(token)
 
 ## 6. 数据流示例
 
-### 6.1 LLM 写入知识（通过子代理输出）
+### 6.1 Legacy patch JSONL 导入（显式迁移）
 
 ```
-subagent/single_session/notes/data/notes.jsonl
+explicit_patch_source.jsonl
     │ 每行一个 WikiPatch JSON
     ▼
 WikiUpdater.scan_source() ──游标──► WikiProcessor.process_jsonl()
@@ -397,7 +394,7 @@ Agent Loop ──► WikiTool(action="search")
 
 Wiki 是惰性创建的——第一次调用 `WikiStore` 或 `WikiIndex` 时会自动创建目录：
 ```
-persona/wiki/pages/
+persona/wiki/wiki/
 persona/wiki/index/
 persona/wiki/log.jsonl
 ```
@@ -407,11 +404,12 @@ persona/wiki/log.jsonl
 当 FTS 索引损坏或需要全量重建时：
 - 前端点击面板顶部的 "Rebuild Index" 按钮
 - 后端调用 `WikiIndex.rebuild()`
-- 遍历所有 `pages/**/*.md`，重新分块并写入 `chunks_fts`
+- 遍历所有 `wiki/**/*.md`，重新分块并写入 `chunks_fts`
 
 ### 8.3 从外部源导入
 
-运行 `WikiUpdater.scan_all()` 可一次性扫描所有默认 JSONL 源，将子代理输出同步到 Wiki。
+运行 `WikiUpdater.scan_all(sources=[...])` 可扫描显式传入的 patch JSONL
+源。常规 wiki sync 不再依赖默认 `subagent/*/data` 目录。
 
 ---
 

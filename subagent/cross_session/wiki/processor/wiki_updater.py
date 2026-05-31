@@ -18,13 +18,10 @@ from .wiki_processor import WikiProcessor
 
 logger = logging.getLogger(__name__)
 
-# Default JSONL sources to scan
-DEFAULT_SOURCES: list[Path] = [
-    Path("subagent/single_session/vocab/data/vocab.jsonl"),
-    Path("subagent/single_session/polisher/data/polisher.jsonl"),
-    Path("subagent/single_session/notes/data/notes.jsonl"),
-    Path("subagent/cross_session/progress_tracker/data/progress_bank.jsonl"),
-]
+# Legacy patch-source scanner. The current wiki sync path ingests
+# persona/events/thread.jsonl through bot.nanobot.agent.wiki_sync, so there are
+# no default subagent/data sources to scan.
+DEFAULT_SOURCES: list[Path] = []
 
 
 class WikiUpdater:

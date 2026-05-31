@@ -46,8 +46,8 @@ def _make_patch(**kw) -> WikiPatch:
 
 @pytest.fixture
 def wiki_root(tmp_path: Path) -> Path:
-    """A temporary wiki root with persona/wiki/pages structure."""
-    root = tmp_path / "persona" / "wiki" / "pages"
+    """A temporary wiki root with the canonical persona/wiki/wiki structure."""
+    root = tmp_path / "persona" / "wiki" / "wiki"
     root.mkdir(parents=True)
     return root
 

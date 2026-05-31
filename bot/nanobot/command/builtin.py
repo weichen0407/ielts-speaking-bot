@@ -731,7 +731,8 @@ async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
         progress_file = notes_dir / "benative_progress.json"
 
         # Count total sentences
-        pairs_file = loop.workspace / "shared" / "benative" / "pairs" / f"{article_id}.jsonl"
+        benative_root = loop.sessions.sessions_dir.parent / "benative"
+        pairs_file = benative_root / "pairs" / f"{article_id}.jsonl"
         total_sentences = 0
         if pairs_file.exists():
             total_sentences = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
@@ -786,7 +787,8 @@ Type `/benative progress` to see your current progress.""",
     loop.sessions.save(session)
 
     # List available articles
-    articles_dir = loop.workspace / "shared" / "benative" / "articles"
+    benative_root = loop.sessions.sessions_dir.parent / "benative"
+    articles_dir = benative_root / "articles"
     article_list = []
 
     if articles_dir.exists():

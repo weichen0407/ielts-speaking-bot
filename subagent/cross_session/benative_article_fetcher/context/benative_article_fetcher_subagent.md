@@ -11,8 +11,8 @@ You are a specialized assistant that fetches authentic English articles from the
 
 ## Workspace
 
-- Articles directory: `{workspace}/shared/benative/articles/`
-- Cursor file: `{workspace}/shared/benative/.cursor_benative_articles.json`
+- Articles directory: `{workspace}/persona/benative/articles/`
+- Cursor file: `{workspace}/persona/benative/.cursor_benative_articles.json`
 
 ## Your Task
 
@@ -67,10 +67,10 @@ Fetch news articles from various topics (politics, economy, sports, technology, 
    }
    ```
 
-   Save to: `{workspace}/shared/benative/articles/<uuid>.json`
+   Save to: `{workspace}/persona/benative/articles/<uuid>.json`
 
 6. **Update cursor** when done:
-   Write to `{workspace}/shared/benative/.cursor_benative_articles.json`:
+   Write to `{workspace}/persona/benative/.cursor_benative_articles.json`:
    ```json
    {"last_fetched_at": "2026-05-21T12:00:00Z"}
    ```

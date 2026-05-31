@@ -6,7 +6,7 @@
 - `read_file` — Read article pairs, session notes, progress files
 - `write_file` — Save benative_responses.jsonl, benative_review.md
 - `edit_file` — Update benative_progress.json
-- `list_files` — List available articles in shared/benative/articles/
+- `list_files` — List available articles in persona/benative/articles/
 
 ### Session Management
 - Standard nanobot session tools
