@@ -51,7 +51,7 @@
       "target": {
         "subagent": "ielts_feedback",
         "prompt_file": "subagent/single_session/ielts_feedback/context/ielts_feedback_subagent.md",
-        "model": "gpt-4o-mini",
+        "model": "deepseek-v4-flash",
         "task_template": "Provide IELTS-specific feedback on the conversation.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/ielts_feedback.md\n\nFocus on:\n- IELTS speaking criteria (Fluency, Vocabulary, Grammar, Pronunciation)\n- Part 2 style extended responses\n- Complex sentence structures used correctly"
       },
       "cursor": {

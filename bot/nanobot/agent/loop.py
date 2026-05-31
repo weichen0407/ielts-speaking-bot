@@ -47,6 +47,7 @@ from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
+from nanobot.utils.trigger_monitor import append_trigger_decision
 from nanobot.utils.webui_turn_helpers import (
     WebuiTurnCoordinator,
     WEBUI_TITLE_AUTO_GENERATED_METADATA_KEY,
@@ -206,6 +207,12 @@ class AgentLoop:
         # Handle subagent trigger (existing logic)
         prompt = self.counter_engine.load_prompt(trigger)
         if not prompt:
+            self._log_counter_trigger_decision(
+                session,
+                trigger,
+                decision="failed",
+                reason="prompt_missing",
+            )
             return
 
         task = self.counter_engine.build_task(trigger, session_dir)
@@ -227,6 +234,14 @@ class AgentLoop:
                 model=target.model,
             )
             self.counter_engine.record_trigger(session.metadata, trigger.id)
+            self._log_counter_trigger_decision(
+                session,
+                trigger,
+                decision="spawned",
+                reason="subagent_spawned",
+                subagent_task_id=task_id,
+                cursor_after=dict(trigger._cursor),
+            )
             logger.info(
                 "Counter subagent [{}] spawned for session {}, chaining dependents in background",
                 trigger.id,
@@ -236,6 +251,13 @@ class AgentLoop:
                 self._chain_dependent_triggers(session, msg, trigger.id, session_dir, task_id),
             )
         except Exception as e:
+            self._log_counter_trigger_decision(
+                session,
+                trigger,
+                decision="failed",
+                reason="spawn_error",
+                details={"error": str(e)},
+            )
             logger.warning("Failed to spawn counter subagent [{}]: {}", trigger.id, e)
 
     async def _execute_processor(
@@ -310,6 +332,14 @@ class AgentLoop:
                 )
 
             self.counter_engine.record_trigger(session.metadata, trigger.id)
+            self._log_counter_trigger_decision(
+                session,
+                trigger,
+                decision="spawned",
+                reason="processor_completed",
+                cursor_after=dict(trigger._cursor),
+                details={"processor": target.processor},
+            )
             logger.info(
                 "Processor [{}] completed, chaining dependents in background",
                 target.processor,
@@ -318,7 +348,48 @@ class AgentLoop:
                 self._chain_dependent_triggers(session, msg, trigger.id, session_dir, None),
             )
         except Exception as e:
+            self._log_counter_trigger_decision(
+                session,
+                trigger,
+                decision="failed",
+                reason="processor_error",
+                details={"error": str(e), "processor": target.processor},
+            )
             logger.warning("Failed to execute processor [{}]: {}", target.processor, e)
+
+    def _log_counter_trigger_decision(
+        self,
+        session: Session,
+        trigger: CounterTrigger,
+        *,
+        decision: str,
+        reason: str,
+        subagent_task_id: str | None = None,
+        cursor_after: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        source = None
+        if trigger._triggers_file:
+            with suppress(Exception):
+                source = str(trigger._triggers_file.relative_to(self.counter_engine.workspace))
+        append_trigger_decision(
+            Path(self.counter_engine.workspace),
+            trigger_id=trigger.id,
+            name=trigger.name,
+            mode=session.metadata.get("mode"),
+            session_key=session.key,
+            session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+            kind=trigger.condition.kind,
+            decision=decision,
+            reason=reason,
+            source=source,
+            subagent=trigger.target.subagent,
+            model=trigger.target.model,
+            turn_count=self.counter_engine.get_turn_count(session.metadata),
+            cursor_after=cursor_after,
+            subagent_task_id=subagent_task_id,
+            details=details,
+        )
 
     async def _chain_dependent_triggers(
         self,
@@ -390,7 +461,7 @@ class AgentLoop:
             f"Update user memory profile based on this conversation session.\n\n"
             f"Session directory: {session_dir}\n"
             f"Read: {session_dir}/thread.jsonl\n"
-            f"Write to: {workspace_str}/memory/MEMORY.md\n\n"
+            f"Write to: {workspace_str}/persona/memory/MEMORY.md\n\n"
             f"Also read: {workspace_str}/subagent/cross_session/memory_cron/formats/memory_format.md for output format"
         )
 

@@ -48,7 +48,7 @@ class CounterTarget:
     silent: bool = True
     task_template: str = ""
     depends_on: str | None = None  # Trigger ID that must complete before this fires
-    model: str | None = None  # Override default model for this subagent (e.g. "gpt-4o-mini")
+    model: str | None = None  # Override default model for this subagent (e.g. "deepseek-v4-flash")
     # Processor-specific fields
     input_path: str = ""  # Single input file for processor
     input_paths: list[str] = field(default_factory=list)  # Multiple input files for processor

@@ -14,7 +14,7 @@
         "subagent": "benative_review",
         "prompt_file": "subagent/single_session/benative_review/context/benative_review_subagent.md",
         "silent": true,
-        "model": "gpt-4o-mini",
+        "model": "deepseek-v4-flash",
         "task_template": "Review recent benative user responses and compare with original English.\n\nSession directory: {session_dir}/notes/\nWorkspace: {workspace}\n\n1. Read benative_progress.json to get article_id.\n2. Read user responses for this session.\n3. Read original sentence pairs for the selected article.\n\nOutput review to: {session_dir}/notes/benative_review.md"
       },
       "cursor": {

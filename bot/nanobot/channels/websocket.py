@@ -2553,6 +2553,158 @@ class WebSocketChannel(BaseChannel):
         runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return runs[:limit]
 
+    def _monitor_trigger_decisions(self, root: Path, *, limit: int = 200) -> list[dict[str, Any]]:
+        path = root / "monitor" / "trigger_decisions.jsonl"
+        if not path.exists():
+            return []
+        records: list[dict[str, Any]] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()[-limit * 2:]
+        except OSError:
+            return []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                records.append(item)
+        records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        return records[:limit]
+
+    def _estimate_llm_cost_usd(self, *, model: str | None, usage: dict[str, Any] | None) -> dict[str, Any]:
+        """Estimate DeepSeek API cost from normalized usage fields.
+
+        Prices are per 1M tokens from DeepSeek's public pricing page. This is
+        intentionally an estimate because provider invoices may apply discounts,
+        balance rules, and model aliases outside this local process.
+        """
+        if not usage:
+            return {
+                "model": model or "",
+                "estimated_usd": 0.0,
+                "known_price": False,
+            }
+
+        normalized_model = self._normalize_cost_model(model)
+        rates = {
+            "deepseek-v4-flash": {
+                "input_cache_hit": 0.0028,
+                "input_cache_miss": 0.14,
+                "output": 0.28,
+            },
+            "deepseek-v4-pro": {
+                "input_cache_hit": 0.003625,
+                "input_cache_miss": 0.435,
+                "output": 0.87,
+            },
+        }.get(normalized_model)
+
+        prompt = int(usage.get("prompt_tokens") or 0)
+        cached = int(usage.get("cached_tokens") or 0)
+        completion = int(usage.get("completion_tokens") or 0)
+        uncached = max(prompt - cached, 0)
+
+        if rates is None:
+            return {
+                "model": model or "",
+                "normalized_model": normalized_model,
+                "prompt_tokens": prompt,
+                "cached_tokens": cached,
+                "completion_tokens": completion,
+                "estimated_usd": 0.0,
+                "known_price": False,
+            }
+
+        estimated = (
+            (cached / 1_000_000) * rates["input_cache_hit"]
+            + (uncached / 1_000_000) * rates["input_cache_miss"]
+            + (completion / 1_000_000) * rates["output"]
+        )
+        return {
+            "model": model or "",
+            "normalized_model": normalized_model,
+            "prompt_tokens": prompt,
+            "cached_tokens": cached,
+            "uncached_prompt_tokens": uncached,
+            "completion_tokens": completion,
+            "estimated_usd": round(estimated, 8),
+            "known_price": True,
+        }
+
+    def _normalize_cost_model(self, model: str | None) -> str:
+        value = (model or "").strip().lower()
+        if value in {"deepseek-chat", "deepseek/deepseek-chat"}:
+            return "deepseek-v4-flash"
+        if value in {"deepseek-reasoner", "deepseek/deepseek-reasoner"}:
+            return "deepseek-v4-flash"
+        if value.endswith("deepseek-v4-flash"):
+            return "deepseek-v4-flash"
+        if value.endswith("deepseek-v4-pro"):
+            return "deepseek-v4-pro"
+        return value
+
+    def _monitor_cost_summary(self, runs: list[dict[str, Any]]) -> dict[str, Any]:
+        by_model: dict[str, dict[str, Any]] = {}
+        total = 0.0
+        prompt = 0
+        cached = 0
+        completion = 0
+
+        for run in runs:
+            usage = run.get("usage") if isinstance(run.get("usage"), dict) else {}
+            estimate = self._estimate_llm_cost_usd(
+                model=str(run.get("model") or ""),
+                usage=usage,
+            )
+            run["cost_estimate"] = estimate
+            normalized = estimate.get("normalized_model") or estimate.get("model") or "unknown"
+            row = by_model.setdefault(
+                str(normalized),
+                {
+                    "model": normalized,
+                    "prompt_tokens": 0,
+                    "cached_tokens": 0,
+                    "completion_tokens": 0,
+                    "estimated_usd": 0.0,
+                    "runs": 0,
+                    "known_price": bool(estimate.get("known_price")),
+                },
+            )
+            row["runs"] += 1
+            row["prompt_tokens"] += int(estimate.get("prompt_tokens") or 0)
+            row["cached_tokens"] += int(estimate.get("cached_tokens") or 0)
+            row["completion_tokens"] += int(estimate.get("completion_tokens") or 0)
+            row["estimated_usd"] += float(estimate.get("estimated_usd") or 0.0)
+            row["known_price"] = row["known_price"] or bool(estimate.get("known_price"))
+            total += float(estimate.get("estimated_usd") or 0.0)
+            prompt += int(estimate.get("prompt_tokens") or 0)
+            cached += int(estimate.get("cached_tokens") or 0)
+            completion += int(estimate.get("completion_tokens") or 0)
+
+        models = []
+        for row in by_model.values():
+            row["estimated_usd"] = round(float(row["estimated_usd"]), 8)
+            models.append(row)
+        models.sort(key=lambda row: float(row.get("estimated_usd") or 0), reverse=True)
+        last_turn = self._estimate_llm_cost_usd(
+            model=getattr(self, "model", ""),
+            usage=getattr(self, "_last_usage", None),
+        )
+        return {
+            "currency": "USD",
+            "estimated_usd": round(total, 8),
+            "prompt_tokens": prompt,
+            "cached_tokens": cached,
+            "completion_tokens": completion,
+            "models": models,
+            "last_turn": last_turn,
+            "price_source": "https://api-docs.deepseek.com/quick_start/pricing",
+            "note": "Local estimate from logged usage; official invoice is authoritative.",
+        }
+
     def _wiki_sync_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
         path = root / "persona" / "wiki" / "state" / "sync_log.jsonl"
         if not path.exists():
@@ -2581,6 +2733,8 @@ class WebSocketChannel(BaseChannel):
         try:
             root = self._project_root()
             triggers, trigger_prompts = self._monitor_triggers(root)
+            subagent_runs = self._monitor_subagent_runs(root)
+            trigger_decisions = self._monitor_trigger_decisions(root)
             known_prompt_ids = {p["id"] for p in trigger_prompts}
             extra_prompts: list[dict[str, Any]] = []
             for path in self._monitor_context_prompt_files(root):
@@ -2612,7 +2766,9 @@ class WebSocketChannel(BaseChannel):
                 "triggers": triggers,
                 "prompts": trigger_prompts + extra_prompts,
                 "subagent_statuses": list(reversed(self._subagent_status_history[-100:])),
-                "subagent_runs": self._monitor_subagent_runs(root),
+                "subagent_runs": subagent_runs,
+                "trigger_decisions": trigger_decisions,
+                "cost_summary": self._monitor_cost_summary(subagent_runs),
                 "wiki_sync_runs": self._wiki_sync_runs(root),
                 "recent_activity": self._monitor_recent_activity(root),
             })

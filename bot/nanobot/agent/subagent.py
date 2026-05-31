@@ -304,9 +304,8 @@ class SubagentManager:
     ) -> None:
         """Persist a compact subagent run record for the WebUI monitor."""
         try:
-            monitor_dir = self.workspace / "persona" / "monitor"
-            if self.workspace.name == "persona":
-                monitor_dir = self.workspace / "monitor"
+            root = self.workspace.parent if self.workspace.name == "persona" else self.workspace
+            monitor_dir = root / "monitor"
             monitor_dir.mkdir(parents=True, exist_ok=True)
             record = {
                 "timestamp": datetime.now().isoformat(),

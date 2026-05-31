@@ -198,6 +198,26 @@ export interface WikiSyncRun {
   error?: string;
 }
 
+export interface AdminTriggerDecision {
+  timestamp: string;
+  trigger_id: string;
+  name?: string | null;
+  mode?: string | null;
+  session_key?: string | null;
+  session_uuid?: string | null;
+  kind?: string | null;
+  decision: string;
+  reason: string;
+  source?: string | null;
+  subagent?: string | null;
+  model?: string | null;
+  turn_count?: number | null;
+  cursor_before?: Record<string, unknown>;
+  cursor_after?: Record<string, unknown>;
+  subagent_task_id?: string | null;
+  details?: Record<string, unknown>;
+}
+
 export interface AdminActivity {
   kind: "subagent_result" | "tool" | string;
   session_id: string;
@@ -207,6 +227,34 @@ export interface AdminActivity {
   status?: string;
 }
 
+export interface AdminCostSummary {
+  currency: "USD" | string;
+  estimated_usd: number;
+  prompt_tokens: number;
+  cached_tokens: number;
+  completion_tokens: number;
+  models: Array<{
+    model: string;
+    prompt_tokens: number;
+    cached_tokens: number;
+    completion_tokens: number;
+    estimated_usd: number;
+    runs: number;
+    known_price: boolean;
+  }>;
+  last_turn?: {
+    model: string;
+    normalized_model?: string;
+    prompt_tokens?: number;
+    cached_tokens?: number;
+    completion_tokens?: number;
+    estimated_usd: number;
+    known_price: boolean;
+  };
+  price_source?: string;
+  note?: string;
+}
+
 export interface AdminMonitorPayload {
   generated_at: string;
   workspace: string;
@@ -214,6 +262,8 @@ export interface AdminMonitorPayload {
   prompts: AdminPrompt[];
   subagent_statuses: AdminSubagentStatus[];
   subagent_runs: AdminSubagentRun[];
+  trigger_decisions?: AdminTriggerDecision[];
+  cost_summary?: AdminCostSummary;
   wiki_sync_runs?: WikiSyncRun[];
   recent_activity: AdminActivity[];
 }

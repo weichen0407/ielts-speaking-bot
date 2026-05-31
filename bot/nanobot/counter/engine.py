@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.counter.types import CounterTrigger, CounterCondition, CounterTarget
+from nanobot.utils.trigger_monitor import append_trigger_decision
 
 
 _TURN_COUNT_KEY = "_counter_turn_count"
@@ -50,6 +51,12 @@ class CounterEngine:
     def __init__(self, workspace: Path) -> None:
         self.data_workspace = Path(workspace)
         self.workspace = _resolve_trigger_workspace(self.data_workspace)
+        self.data_root = (
+            self.data_workspace
+            if self.data_workspace.name == "persona"
+            else self.data_workspace / "persona"
+        )
+        self._count_cursor_dir = self.data_root / "trigger" / "count"
         self._triggers: list[CounterTrigger] = []
         self._current_mode: str | None = None
         self._default_triggers_file = self.workspace / "mode" / "default" / "trigger" / "triggers.json"
@@ -90,6 +97,8 @@ class CounterEngine:
                 condition = CounterCondition(**t.get("condition", {}))
                 target = CounterTarget(**t.get("target", {}))
                 cursor = t.get("cursor", {})
+                if condition.kind == "file_line_count":
+                    cursor = {**cursor, **self._read_count_cursor(t["id"])}
 
                 trigger = CounterTrigger(
                     id=t["id"],
@@ -160,10 +169,27 @@ class CounterEngine:
         """Evaluate all enabled triggers and return those that should fire now."""
         self.reload_if_changed()
         turn_count = self.get_turn_count(session_metadata)
+        mode = session_metadata.get("mode")
+        session_uuid = session_metadata.get("session_uuid")
         firing: list[CounterTrigger] = []
 
         for trigger in self._triggers:
+            source = None
+            if trigger._triggers_file:
+                try:
+                    source = str(trigger._triggers_file.relative_to(self.workspace))
+                except ValueError:
+                    source = str(trigger._triggers_file)
             if not trigger.enabled:
+                self._log_decision(
+                    trigger,
+                    decision="skipped",
+                    reason="disabled",
+                    mode=mode,
+                    session_uuid=session_uuid,
+                    turn_count=turn_count,
+                    source=source,
+                )
                 continue
 
             cond = trigger.condition
@@ -171,10 +197,30 @@ class CounterEngine:
             if cond.kind == "file_line_count":
                 file_path = self.workspace / cond.path
                 if not file_path.exists():
+                    self._log_decision(
+                        trigger,
+                        decision="skipped",
+                        reason="source_file_missing",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        details={"path": str(file_path)},
+                    )
                     continue
 
                 resolved_count = cond.resolved_count()
                 if resolved_count <= 0:
+                    self._log_decision(
+                        trigger,
+                        decision="skipped",
+                        reason="invalid_count",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        details={"count": resolved_count},
+                    )
                     continue
 
                 # Read cursor offset from trigger's stored cursor
@@ -190,14 +236,83 @@ class CounterEngine:
 
                 if unprocessed >= resolved_count:
                     firing.append(trigger)
+                    self._log_decision(
+                        trigger,
+                        decision="eligible",
+                        reason="file_line_count_threshold_met",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        cursor_before=dict(trigger._cursor),
+                        details={
+                            "path": str(file_path),
+                            "total_lines": total_lines,
+                            "unprocessed": unprocessed,
+                            "count": resolved_count,
+                        },
+                    )
+                else:
+                    self._log_decision(
+                        trigger,
+                        decision="no_delta",
+                        reason="not_enough_new_lines",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        cursor_before=dict(trigger._cursor),
+                        details={
+                            "path": str(file_path),
+                            "total_lines": total_lines,
+                            "unprocessed": unprocessed,
+                            "count": resolved_count,
+                        },
+                    )
                 continue
 
             if cond.kind == "turn_count":
                 last_triggered = session_metadata.get(f"{_LAST_TRIGGER_KEY_PREFIX}{trigger.id}", 0)
                 count = cond.resolved_count()
+                if count <= 0:
+                    self._log_decision(
+                        trigger,
+                        decision="skipped",
+                        reason="invalid_count",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        cursor_before={"last_triggered_turn": last_triggered},
+                        details={"count": count},
+                    )
+                    continue
 
                 if turn_count > 0 and turn_count % count == 0 and turn_count > last_triggered:
                     firing.append(trigger)
+                    self._log_decision(
+                        trigger,
+                        decision="eligible",
+                        reason="turn_count_threshold_met",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        cursor_before={"last_triggered_turn": last_triggered},
+                        details={"count": count},
+                    )
+                else:
+                    self._log_decision(
+                        trigger,
+                        decision="skipped",
+                        reason="turn_count_not_due",
+                        mode=mode,
+                        session_uuid=session_uuid,
+                        turn_count=turn_count,
+                        source=source,
+                        cursor_before={"last_triggered_turn": last_triggered},
+                        details={"count": count},
+                    )
                 continue
 
             if cond.kind == "cron":
@@ -218,9 +333,24 @@ class CounterEngine:
 
     def _update_trigger_cursor(self, trigger: CounterTrigger) -> None:
         """Update the cursor in the triggers.json file."""
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         try:
+            if trigger.condition.kind == "file_line_count":
+                file_path = self.workspace / trigger.condition.path
+                if not file_path.exists():
+                    return
+                with open(file_path, encoding="utf-8") as f:
+                    total_lines = sum(1 for _ in f)
+                cursor = {
+                    "offset": total_lines,
+                    "last_checked": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
+                self._write_count_cursor(trigger.id, cursor)
+                trigger._cursor.update(cursor)
+                logger.debug("Updated runtime count cursor for trigger {}", trigger.id)
+                return
+
             # Read current file
             triggers_file = trigger._triggers_file
             if not triggers_file or not triggers_file.exists():
@@ -238,9 +368,9 @@ class CounterEngine:
                             with open(file_path, encoding="utf-8") as f:
                                 total_lines = sum(1 for _ in f)
                             t["cursor"]["offset"] = total_lines
-                            t["cursor"]["last_checked"] = datetime.utcnow().isoformat() + "Z"
+                            t["cursor"]["last_checked"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     elif trigger.condition.kind == "cron":
-                        t["cursor"]["last_fired"] = datetime.utcnow().isoformat() + "Z"
+                        t["cursor"]["last_fired"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                     break
 
             # Write back
@@ -248,6 +378,56 @@ class CounterEngine:
             logger.debug("Updated cursor for trigger {}", trigger.id)
         except Exception:
             logger.exception("Failed to update cursor for trigger {}", trigger.id)
+
+    def _count_cursor_path(self, trigger_id: str) -> Path:
+        return self._count_cursor_dir / f".cursor_{trigger_id}.json"
+
+    def _read_count_cursor(self, trigger_id: str) -> dict[str, Any]:
+        path = self._count_cursor_path(trigger_id)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_count_cursor(self, trigger_id: str, cursor: dict[str, Any]) -> None:
+        path = self._count_cursor_path(trigger_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cursor, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _log_decision(
+        self,
+        trigger: CounterTrigger,
+        *,
+        decision: str,
+        reason: str,
+        mode: str | None,
+        session_uuid: str | None,
+        turn_count: int,
+        source: str | None,
+        cursor_before: dict[str, Any] | None = None,
+        cursor_after: dict[str, Any] | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        append_trigger_decision(
+            self.workspace,
+            trigger_id=trigger.id,
+            name=trigger.name,
+            mode=mode,
+            session_uuid=session_uuid,
+            kind=trigger.condition.kind,
+            decision=decision,
+            reason=reason,
+            source=source,
+            subagent=trigger.target.subagent,
+            model=trigger.target.model,
+            turn_count=turn_count,
+            cursor_before=cursor_before,
+            cursor_after=cursor_after,
+            details=details,
+        )
 
     def load_prompt(self, trigger: CounterTrigger) -> str | None:
         """Load the system prompt file for a trigger.

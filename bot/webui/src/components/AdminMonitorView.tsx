@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   Clock3,
   Database,
+  DollarSign,
   FileText,
   Loader2,
   RefreshCw,
@@ -21,6 +22,7 @@ import {
   type AdminMonitorPayload,
   type AdminPrompt,
   type AdminSubagentRun,
+  type AdminTriggerDecision,
   type AdminTrigger,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -62,12 +64,23 @@ function runKey(run: AdminSubagentRun): string {
   return `${run.timestamp}:${run.task_id}`;
 }
 
+function decisionKey(decision: AdminTriggerDecision, index: number): string {
+  return `${decision.timestamp}:${decision.source ?? ""}:${decision.trigger_id}:${decision.reason}:${index}`;
+}
+
+function formatUsd(value?: number): string {
+  if (!value) return "$0.0000";
+  if (value < 0.0001) return `<$0.0001`;
+  return `$${value.toFixed(4)}`;
+}
+
 export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const { token } = useClient();
   const [payload, setPayload] = useState<AdminMonitorPayload | null>(null);
   const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [selectedDecisionKey, setSelectedDecisionKey] = useState<string | null>(null);
   const [modeFilter, setModeFilter] = useState("all");
   const [countDraft, setCountDraft] = useState("");
   const [savingTrigger, setSavingTrigger] = useState(false);
@@ -155,7 +168,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const promptCount = payload?.prompts.length ?? 0;
   const activityCount = payload?.recent_activity.length ?? 0;
   const subagentRuns = payload?.subagent_runs ?? [];
+  const triggerDecisions = payload?.trigger_decisions ?? [];
   const wikiSyncRuns = payload?.wiki_sync_runs ?? [];
+  const costSummary = payload?.cost_summary;
   const selectedRun = useMemo(
     () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
     [selectedRunKey, subagentRuns],
@@ -164,6 +179,15 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   useEffect(() => {
     setSelectedRunKey((current) => current ?? (subagentRuns[0] ? runKey(subagentRuns[0]) : null));
   }, [subagentRuns]);
+
+  const selectedDecision = useMemo(
+    () => triggerDecisions.find((decision, index) => decisionKey(decision, index) === selectedDecisionKey) ?? triggerDecisions[0] ?? null,
+    [selectedDecisionKey, triggerDecisions],
+  );
+
+  useEffect(() => {
+    setSelectedDecisionKey((current) => current ?? (triggerDecisions[0] ? decisionKey(triggerDecisions[0], 0) : null));
+  }, [triggerDecisions]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -191,12 +215,13 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
         </div>
       ) : null}
 
-      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-5">
+      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-6">
         <Metric icon={Settings2} label="启用触发器" value={enabledCount} />
         <Metric icon={FileText} label="Prompt 文件" value={promptCount} />
         <Metric icon={Bot} label="运行中 subagent" value={activeCount} />
         <Metric icon={Database} label="Wiki Sync" value={wikiSyncRuns.length} />
-        <Metric icon={Activity} label="最近活动" value={activityCount} />
+        <Metric icon={Activity} label="触发决策" value={triggerDecisions.length} />
+        <Metric icon={DollarSign} label="估算花费" value={formatUsd(costSummary?.estimated_usd)} />
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto px-5 pb-5 xl:grid-cols-[420px_minmax(0,1fr)] xl:overflow-hidden">
@@ -326,7 +351,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
             </Panel>
           </div>
 
-          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-4">
+          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3 2xl:grid-cols-6">
             <Panel title="Subagent 调用列表" icon={Bot}>
               <div className="h-full overflow-y-auto pr-1">
                 {subagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
@@ -359,6 +384,65 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
               </div>
             </Panel>
 
+            <Panel title="触发决策" icon={Clock3}>
+              <div className="flex h-full min-h-0 flex-col gap-2">
+                <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                  {triggerDecisions.length === 0 ? <EmptyText text="还没有触发决策记录；用户回复后会写入这里" /> : null}
+                  {triggerDecisions.map((decision, index) => {
+                    const key = decisionKey(decision, index);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setSelectedDecisionKey(key)}
+                        className={cn(
+                          "mb-2 w-full rounded-md border p-2 text-left text-xs transition-colors",
+                          selectedDecision && decisionKey(selectedDecision, triggerDecisions.indexOf(selectedDecision)) === key
+                            ? "border-primary/50 bg-primary/5"
+                            : "border-border/70 hover:bg-muted/50",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">{decision.name || decision.trigger_id}</span>
+                          <span className={cn(
+                            "shrink-0 rounded px-1.5 py-0.5",
+                            decision.decision === "spawned" || decision.decision === "eligible"
+                              ? "bg-emerald-500/10 text-emerald-600"
+                              : decision.decision === "failed"
+                                ? "bg-red-500/10 text-red-600"
+                                : "bg-muted text-muted-foreground",
+                          )}>{decision.decision}</span>
+                        </div>
+                        <p className="mt-1 truncate text-muted-foreground">
+                          {shortTime(decision.timestamp)} · {decision.mode || "-"} · {decision.reason}
+                        </p>
+                        <p className="mt-1 truncate text-muted-foreground">
+                          {decision.subagent || "no subagent"}{typeof decision.turn_count === "number" ? ` · turn ${decision.turn_count}` : ""}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedDecision ? (
+                  <div className="shrink-0 rounded-md border bg-muted/30 p-2 text-[11px]">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{selectedDecision.reason}</span>
+                      <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-muted-foreground">
+                        {selectedDecision.kind || "-"}
+                      </span>
+                    </div>
+                    <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded bg-background p-2">
+                      {formatJson({
+                        details: selectedDecision.details,
+                        cursor_before: selectedDecision.cursor_before,
+                        cursor_after: selectedDecision.cursor_after,
+                        task_id: selectedDecision.subagent_task_id,
+                      })}
+                    </pre>
+                  </div>
+                ) : null}
+              </div>
+            </Panel>
+
             <Panel title="Wiki Sync" icon={Database}>
               <div className="h-full overflow-y-auto">
                 {wikiSyncRuns.length === 0 ? <EmptyText text="还没有 wiki sync 记录；用户回复后会写入这里" /> : null}
@@ -388,6 +472,56 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                     {run.error ? <p className="mt-1 text-red-600">{run.error}</p> : null}
                   </div>
                 ))}
+              </div>
+            </Panel>
+
+            <Panel title="Token / 花费" icon={DollarSign}>
+              <div className="h-full overflow-y-auto text-xs">
+                {!costSummary ? <EmptyText text="暂无 token usage 数据" /> : null}
+                {costSummary ? (
+                  <div className="space-y-3">
+                    <div className="rounded-md border p-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">Subagent 估算</span>
+                        <span className="font-semibold">{formatUsd(costSummary.estimated_usd)}</span>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                        <span>prompt {costSummary.prompt_tokens}</span>
+                        <span>cached {costSummary.cached_tokens}</span>
+                        <span>completion {costSummary.completion_tokens}</span>
+                        <span>{costSummary.currency}</span>
+                      </div>
+                    </div>
+                    {costSummary.models.map((row) => (
+                      <div key={row.model} className="rounded-md border p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">{row.model}</span>
+                          <span>{formatUsd(row.estimated_usd)}</span>
+                        </div>
+                        <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                          <span>runs {row.runs}</span>
+                          <span>known {row.known_price ? "yes" : "no"}</span>
+                          <span>in {row.prompt_tokens}</span>
+                          <span>out {row.completion_tokens}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {costSummary.last_turn?.prompt_tokens ? (
+                      <div className="rounded-md border p-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-medium">最近主回复</span>
+                          <span>{formatUsd(costSummary.last_turn.estimated_usd)}</span>
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {costSummary.last_turn.normalized_model || costSummary.last_turn.model}
+                        </p>
+                      </div>
+                    ) : null}
+                    <p className="text-[10px] leading-4 text-muted-foreground">
+                      {costSummary.note || "本地估算，官方账单为准。"}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </Panel>
 
@@ -436,7 +570,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
 
             <Panel title="最近工具 / subagent 活动" icon={Wrench}>
               <div className="h-full overflow-y-auto">
-                {(payload?.recent_activity ?? []).length === 0 ? <EmptyText text="最近 session 里没有可展示活动" /> : null}
+                {(payload?.recent_activity ?? []).length === 0 ? <EmptyText text={`最近 session 里没有可展示活动；已有 ${activityCount} 条`} /> : null}
                 {(payload?.recent_activity ?? []).map((item, index) => (
                   <div key={`${item.session_id}:${item.timestamp}:${index}`} className="mb-2 rounded-md border p-2 text-xs">
                     <div className="flex items-center justify-between gap-2">
@@ -456,7 +590,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   );
 }
 
-function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
+function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number | string }) {
   return (
     <div className="rounded-lg border bg-card p-3">
       <div className="flex items-center gap-2 text-xs text-muted-foreground">

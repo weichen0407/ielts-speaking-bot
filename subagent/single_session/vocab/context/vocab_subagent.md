@@ -12,15 +12,15 @@ You are a specialized vocabulary assistant for IELTS speaking practice. Your tas
 ## Session Info
 - Session Directory: {{ session_dir }}
 - Workspace: {{ workspace }}
-- User Memory File: {{ workspace }}/memory/MEMORY.md (user-level vocabulary section)
+- User Memory File: {{ workspace }}/persona/memory/MEMORY.md (user-level vocabulary section)
 
 ## Instructions
 
 1. Read conversation history: `{{ session_dir }}/thread.jsonl`
-2. Read existing user memory: `{{ workspace }}/memory/MEMORY.md`
+2. Read existing user memory: `{{ workspace }}/persona/memory/MEMORY.md`
 3. Analyze only records where `role` is `"user"` for vocabulary improvement opportunities
 4. Treat assistant messages as context only; do not correct, score, or extract issues from assistant messages
-5. Update the vocabulary section in `{{ workspace }}/memory/MEMORY.md`
+5. Update the vocabulary section in `{{ workspace }}/persona/memory/MEMORY.md`
 
 ## What to Analyze
 
@@ -69,7 +69,7 @@ Based on the conversation topic, suggest IELTS-appropriate academic vocabulary:
 
 ## Output Format
 
-Update the `### IELTS-Specific Patterns` section in `{{ workspace }}/memory/MEMORY.md`.
+Update the `### IELTS-Specific Patterns` section in `{{ workspace }}/persona/memory/MEMORY.md`.
 
 ### Section to Update:
 
@@ -118,4 +118,4 @@ Use `write_file` to write the updated memory file.
 
 ## Completion
 
-When done updating `{{ workspace }}/memory/MEMORY.md`, simply stop. Do not send any message to the chat.
+When done updating `{{ workspace }}/persona/memory/MEMORY.md`, simply stop. Do not send any message to the chat.

@@ -588,7 +588,8 @@ def _migrate_cron_store(config: "Config") -> None:
     from nanobot.config.paths import get_cron_dir
 
     legacy_path = get_cron_dir() / "jobs.json"
-    new_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
+    data_root = config.workspace_path if config.workspace_path.name == "persona" else config.workspace_path / "persona"
+    new_path = data_root / "trigger" / "cron" / "jobs.json"
     if legacy_path.is_file() and not new_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
@@ -742,7 +743,8 @@ def _run_gateway(
         _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
+    data_root = config.workspace_path if config.workspace_path.name == "persona" else config.workspace_path / "persona"
+    cron_store_path = data_root / "trigger" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
@@ -871,27 +873,43 @@ def _run_gateway(
 
         # Memory cron: update MEMORY.md from sessions modified since last run
         if job.name == "memory_cron":
+            trigger = None
             try:
                 from nanobot.cli.cron_utils import (
+                    build_session_thread_deltas,
                     read_time_cursor,
-                    write_time_cursor,
-                    find_modified_sessions,
+                    resolve_sessions_dir,
+                    write_cursor_state,
                 )
+                from nanobot.utils.trigger_monitor import append_trigger_decision
 
                 cursor_ts = read_time_cursor(agent.workspace, "memory_cron")
-                sessions = find_modified_sessions(
-                    agent.workspace / "sessions", cursor_ts
+                sessions, cursor_state = build_session_thread_deltas(
+                    agent.workspace,
+                    "memory_cron",
+                    resolve_sessions_dir(agent.workspace),
                 )
 
                 if not sessions:
                     logger.info(
-                        "memory_cron: no sessions modified since {}",
+                        "memory_cron: no new session messages since {}",
                         cursor_ts,
                     )
-                    write_time_cursor(
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="memory_cron",
+                        name="Memory Cron",
+                        kind="cron",
+                        decision="no_delta",
+                        reason="no_new_session_messages",
+                        source="mode/default/trigger/triggers.json",
+                        cursor_before={"last_processed_timestamp": cursor_ts},
+                        cursor_after=cursor_state,
+                    )
+                    write_cursor_state(
                         agent.workspace,
                         "memory_cron",
-                        None,  # Uses current time
+                        cursor_state,
                     )
                     return None
 
@@ -905,22 +923,43 @@ def _run_gateway(
                     None,
                 )
                 if not trigger:
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="memory_cron",
+                        name="Memory Cron",
+                        kind="cron",
+                        decision="failed",
+                        reason="trigger_not_found",
+                        source="mode/default/trigger/triggers.json",
+                    )
                     logger.warning("memory_cron: trigger not found")
                     return None
 
                 prompt = agent.counter_engine.load_prompt(trigger)
                 if not prompt:
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="memory_cron",
+                        name=trigger.name,
+                        kind="cron",
+                        decision="failed",
+                        reason="prompt_missing",
+                        source="mode/default/trigger/triggers.json",
+                        subagent=trigger.target.subagent,
+                        model=trigger.target.model,
+                    )
                     logger.warning("memory_cron: failed to load prompt")
                     return None
 
                 import json as json_mod
 
-                task = agent.counter_engine.build_task(trigger, session_dir="")
+                task = trigger.target.task_template or ""
                 task = task.replace(
-                    "{{ modified_sessions }}",
+                    "{modified_sessions}",
                     json_mod.dumps(sessions, ensure_ascii=False),
                 )
                 task = task.replace("{{ workspace }}", str(agent.workspace))
+                task = task.replace("{workspace}", str(agent.workspace))
 
                 task_id = await agent.subagents.spawn(
                     task=task,
@@ -938,35 +977,80 @@ def _run_gateway(
                     task_id,
                 )
                 await agent.subagents.wait_for_subagent(task_id)
-                write_time_cursor(agent.workspace, "memory_cron", None)
+                write_cursor_state(agent.workspace, "memory_cron", cursor_state)
+                append_trigger_decision(
+                    agent.workspace,
+                    trigger_id="memory_cron",
+                    name=trigger.name,
+                    kind="cron",
+                    decision="spawned",
+                    reason="subagent_completed",
+                    source="mode/default/trigger/triggers.json",
+                    subagent=trigger.target.subagent,
+                    model=trigger.target.model,
+                    cursor_before={"last_processed_timestamp": cursor_ts},
+                    cursor_after=cursor_state,
+                    subagent_task_id=task_id,
+                    details={"session_delta_count": len(sessions)},
+                )
                 logger.info("memory_cron completed")
-            except Exception:
+            except Exception as e:
+                from nanobot.utils.trigger_monitor import append_trigger_decision
+
+                append_trigger_decision(
+                    agent.workspace,
+                    trigger_id="memory_cron",
+                    name=getattr(trigger, "name", "Memory Cron"),
+                    kind="cron",
+                    decision="failed",
+                    reason="cron_error",
+                    source="mode/default/trigger/triggers.json",
+                    subagent=getattr(getattr(trigger, "target", None), "subagent", None),
+                    model=getattr(getattr(trigger, "target", None), "model", None),
+                    details={"error": str(e)},
+                )
                 logger.exception("memory_cron failed")
             return None
 
         # Daily consolidator: aggregate vocab and polish notes into daily.md
         if job.name == "daily_consolidator":
+            trigger = None
             try:
                 from nanobot.cli.cron_utils import (
+                    build_session_note_deltas,
                     read_time_cursor,
-                    write_time_cursor,
-                    find_sessions_with_modified_notes,
+                    resolve_sessions_dir,
+                    write_cursor_state,
                 )
+                from nanobot.utils.trigger_monitor import append_trigger_decision
 
                 cursor_ts = read_time_cursor(agent.workspace, "daily_consolidator")
-                sessions = find_sessions_with_modified_notes(
-                    agent.workspace / "sessions", cursor_ts
+                sessions, cursor_state = build_session_note_deltas(
+                    agent.workspace,
+                    "daily_consolidator",
+                    resolve_sessions_dir(agent.workspace),
                 )
 
                 if not sessions:
                     logger.info(
-                        "daily_consolidator: no sessions with modified notes since {}",
+                        "daily_consolidator: no new note content since {}",
                         cursor_ts,
                     )
-                    write_time_cursor(
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="daily_consolidator",
+                        name="Daily Consolidator",
+                        kind="cron",
+                        decision="no_delta",
+                        reason="no_new_note_content",
+                        source="mode/default/trigger/triggers.json",
+                        cursor_before={"last_processed_timestamp": cursor_ts},
+                        cursor_after=cursor_state,
+                    )
+                    write_cursor_state(
                         agent.workspace,
                         "daily_consolidator",
-                        None,
+                        cursor_state,
                     )
                     return None
 
@@ -980,22 +1064,48 @@ def _run_gateway(
                     None,
                 )
                 if not trigger:
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="daily_consolidator",
+                        name="Daily Consolidator",
+                        kind="cron",
+                        decision="failed",
+                        reason="trigger_not_found",
+                        source="mode/default/trigger/triggers.json",
+                    )
                     logger.warning("daily_consolidator: trigger not found")
                     return None
 
                 prompt = agent.counter_engine.load_prompt(trigger)
                 if not prompt:
+                    append_trigger_decision(
+                        agent.workspace,
+                        trigger_id="daily_consolidator",
+                        name=trigger.name,
+                        kind="cron",
+                        decision="failed",
+                        reason="prompt_missing",
+                        source="mode/default/trigger/triggers.json",
+                        subagent=trigger.target.subagent,
+                        model=trigger.target.model,
+                    )
                     logger.warning("daily_consolidator: failed to load prompt")
                     return None
 
                 import json as json_mod
+                from datetime import datetime, timezone
 
-                task = agent.counter_engine.build_task(trigger, session_dir="")
+                task = trigger.target.task_template or ""
                 task = task.replace(
-                    "{{ modified_sessions }}",
+                    "{modified_sessions}",
                     json_mod.dumps(sessions, ensure_ascii=False),
                 )
                 task = task.replace("{{ workspace }}", str(agent.workspace))
+                task = task.replace("{workspace}", str(agent.workspace))
+                task = task.replace(
+                    "{date}",
+                    datetime.now(timezone.utc).date().isoformat(),
+                )
 
                 task_id = await agent.subagents.spawn(
                     task=task,
@@ -1013,9 +1123,38 @@ def _run_gateway(
                     task_id,
                 )
                 await agent.subagents.wait_for_subagent(task_id)
-                write_time_cursor(agent.workspace, "daily_consolidator", None)
+                write_cursor_state(agent.workspace, "daily_consolidator", cursor_state)
+                append_trigger_decision(
+                    agent.workspace,
+                    trigger_id="daily_consolidator",
+                    name=trigger.name,
+                    kind="cron",
+                    decision="spawned",
+                    reason="subagent_completed",
+                    source="mode/default/trigger/triggers.json",
+                    subagent=trigger.target.subagent,
+                    model=trigger.target.model,
+                    cursor_before={"last_processed_timestamp": cursor_ts},
+                    cursor_after=cursor_state,
+                    subagent_task_id=task_id,
+                    details={"session_delta_count": len(sessions)},
+                )
                 logger.info("daily_consolidator completed")
-            except Exception:
+            except Exception as e:
+                from nanobot.utils.trigger_monitor import append_trigger_decision
+
+                append_trigger_decision(
+                    agent.workspace,
+                    trigger_id="daily_consolidator",
+                    name=getattr(trigger, "name", "Daily Consolidator"),
+                    kind="cron",
+                    decision="failed",
+                    reason="cron_error",
+                    source="mode/default/trigger/triggers.json",
+                    subagent=getattr(getattr(trigger, "target", None), "subagent", None),
+                    model=getattr(getattr(trigger, "target", None), "model", None),
+                    details={"error": str(e)},
+                )
                 logger.exception("daily_consolidator failed")
             return None
 
@@ -1433,7 +1572,8 @@ def agent(
         _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "trigger" / "cron" / "jobs.json"
+    data_root = config.workspace_path if config.workspace_path.name == "persona" else config.workspace_path / "persona"
+    cron_store_path = data_root / "trigger" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
