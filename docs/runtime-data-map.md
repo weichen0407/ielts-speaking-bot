@@ -44,7 +44,8 @@ This project has three different kinds of files:
 | `mode/{mode}/context/` | Static mode context and prompt materials. |
 | `mode/{mode}/trigger/` | Static trigger definitions. |
 | `subagent/` | Subagent prompts and processor code. |
-| `persona/mode/` | Workspace-level overrides for mode assets. Keep these separate from root `mode/`. |
+| `config/capabilities.yaml` | Canonical registry for modes, subagents, processors, runtime outputs, and monitor streams. |
+| `persona/mode/` | Optional local workspace overrides for mode assets. It should normally be absent unless a workspace intentionally overrides root `mode/`. |
 
 ## Trigger Testing
 
@@ -63,8 +64,9 @@ back to `2`, `3`, or a larger interval.
 
 - Delete or ignore `.DS_Store`, `__pycache__/`, `.pytest_cache/`, `.venv/`, and `bot/.venv/`.
 - Treat `persona/events/thread.jsonl` as the global conversation event stream. If it contains duplicated rows, run `uv run python scripts/dedupe_thread_log.py`.
-- Do not delete `persona/mode/` unless you first confirm the workspace should stop overriding root mode assets.
-- `persona/bot/nanobot/templates/` currently looks like an accidental copy of template assets, not a referenced runtime path. It can be removed after confirming it is not being used as a manual backup.
+- Runtime logs under `monitor/*.jsonl` are ignored and should not be committed.
+- Keep deprecated planning material under `docs/deprecated/` so old paths do not appear as active implementation guidance.
+- Remove stale local runtime/test data freely when it is not needed for a current manual test. The app should recreate ignored runtime files and directories as needed.
 
 ## Why Old `data/thread.jsonl` Duplicated Rows
 

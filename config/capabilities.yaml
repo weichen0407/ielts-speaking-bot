@@ -1,0 +1,111 @@
+version: 1
+description: >
+  Canonical capability registry for modes, triggers, subagents, processors,
+  tools, and runtime outputs. Treat this as the first place to check before
+  adding or renaming a capability.
+
+runtime_roots:
+  user_data: persona
+  observability: monitor
+  global_notes: user-notes
+
+modes:
+  default:
+    trigger_file: mode/default/trigger/triggers.json
+  freechat:
+    context_dir: mode/freechat/context
+    trigger_file: mode/freechat/trigger/triggers.json
+  ielts:
+    context_dir: mode/ielts/context
+    trigger_file: mode/ielts/trigger/triggers.json
+  benative:
+    context_dir: mode/benative/context
+    trigger_file: mode/benative/trigger/triggers.json
+
+subagents:
+  vocab:
+    scope: single_session
+    prompt: subagent/single_session/vocab/context/vocab_subagent.md
+    trigger_ids: [vocab_analysis]
+    writes:
+      - persona/memory/MEMORY.md
+      - persona/sessions/{session_uuid}/notes/vocab.md
+  polisher:
+    scope: single_session
+    prompt: subagent/single_session/polisher/context/polisher_subagent.md
+    trigger_ids: [polish_feedback]
+    writes:
+      - persona/memory/MEMORY.md
+      - persona/sessions/{session_uuid}/notes/polisher.md
+  ielts_feedback:
+    scope: single_session
+    prompt: subagent/single_session/ielts_feedback/context/ielts_feedback_subagent.md
+    trigger_ids: [ielts_feedback]
+    writes:
+      - persona/sessions/{session_uuid}/notes/ielts_feedback.md
+  benative_review:
+    scope: single_session
+    prompt: subagent/single_session/benative_review/context/benative_review_subagent.md
+    trigger_ids: [benative_review]
+    writes:
+      - persona/sessions/{session_uuid}/notes/benative_review.md
+  memory_cron:
+    scope: cross_session
+    prompt: subagent/cross_session/memory_cron/context/memory_cron_subagent.md
+    trigger_ids: [memory_cron]
+    writes:
+      - persona/memory/MEMORY.md
+  daily_consolidator:
+    scope: cross_session
+    prompt: subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md
+    trigger_ids: [daily_consolidator]
+    writes:
+      - subagent/cross_session/daily_consolidator/data/daily/daily_{date}.md
+  benative_article_fetcher:
+    scope: cross_session
+    prompt: subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md
+    trigger_ids: [benative_article_fetcher]
+    writes:
+      - persona/benative/articles/{article_id}.json
+      - persona/benative/.cursor_benative_articles.json
+  benative_translator:
+    scope: cross_session
+    prompt: subagent/cross_session/benative_translator/context/benative_translator_subagent.md
+    trigger_ids: [benative_translator]
+    writes:
+      - persona/benative/pairs/{article_id}.jsonl
+      - persona/benative/.cursor_benative_translator.json
+
+processors:
+  wiki:
+    path: subagent/cross_session/wiki/processor
+    status: active
+    runtime_root: persona/wiki
+  progress_tracker:
+    path: subagent/cross_session/progress_tracker/processor
+    status: active
+    output: persona/progress_bank.jsonl
+  progress_organizer:
+    path: subagent/cross_session/progress_organizer/processor
+    status: inactive
+    note: Retained but not part of the current primary learning flow.
+  review:
+    path: subagent/cross_session/review/processor
+    status: inactive
+    note: Retained for future review mode work.
+  notes:
+    path: subagent/single_session/notes/processor
+    status: inactive
+  quiz:
+    path: subagent/single_session/quiz/processor
+    status: inactive
+
+observability:
+  trigger_decisions:
+    path: monitor/trigger_decisions.jsonl
+    rotation: size_10_mib_keep_10
+  subagent_runs:
+    path: monitor/subagent_runs.jsonl
+    rotation: size_10_mib_keep_10
+  wiki_sync:
+    path: persona/wiki/state/sync_log.jsonl

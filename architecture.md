@@ -225,3 +225,16 @@ When adding a new feature, decide its owner first:
 | Is it static behavior config? | `mode/` |
 | Is it an LLM worker instruction? | `subagent/.../context/` |
 | Is it deterministic processing code? | `subagent/.../processor/` or `bot/nanobot/...` |
+
+## 11. Capability Registry
+
+The canonical capability registry is:
+
+```text
+config/capabilities.yaml
+```
+
+Before adding a new mode, trigger, subagent, processor, or monitor output,
+update this registry first. The registry is intentionally source-like config:
+it records owner, trigger IDs, prompt files, runtime outputs, and active vs
+inactive status in one place.
