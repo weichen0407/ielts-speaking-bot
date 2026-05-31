@@ -30,9 +30,9 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.counter.engine import CounterEngine
 from nanobot.counter.types import CounterTrigger
-from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
@@ -49,8 +49,8 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
 from nanobot.utils.trigger_monitor import append_trigger_decision
 from nanobot.utils.webui_turn_helpers import (
-    WebuiTurnCoordinator,
     WEBUI_TITLE_AUTO_GENERATED_METADATA_KEY,
+    WebuiTurnCoordinator,
     build_bus_progress_callback,
     mark_webui_session,
 )
@@ -269,6 +269,7 @@ class AgentLoop:
     ) -> None:
         """Execute a processor trigger."""
         from pathlib import Path
+
         from subagent._shared.registry import discover_processors
 
         target = trigger.target
@@ -1661,7 +1662,7 @@ class AgentLoop:
 
     async def _maybe_spawn_periodic_subagents(self, session: Session, msg: InboundMessage) -> None:
         """Spawn subagents based on counter trigger configuration.
-        
+
         Called after a turn completes so only successful full conversations count.
         """
         # Skip on /freechat command - subagents should only run on real conversation turns
@@ -1694,6 +1695,8 @@ class AgentLoop:
         except ValueError:
             interval = 1
         if interval <= 0:
+            return False
+        if not isinstance(turn_count, int):
             return False
         return turn_count > 0 and turn_count % interval == 0
 
@@ -1761,7 +1764,7 @@ class AgentLoop:
                     # Read the subagent definition
                     subagent_file = project_root / "subagent" / "cross_session" / "notes_ai_assistant" / "context" / "notes_ai_assistant_subagent.md"
                     if not subagent_file.exists():
-                        logger.warning(f"[NotesAI] Subagent definition not found")
+                        logger.warning("[NotesAI] Subagent definition not found")
                         task_item["status"] = "error"
                         task_item["error"] = "Subagent definition not found"
                         updated_tasks.append(task_item)
@@ -1800,7 +1803,7 @@ Note Content:
                     # since announce_result=False means no message will actually be sent
                     task_id_result = await self.subagents.spawn(
                         task=task_prompt,
-                        label=f"AI Reply for note",
+                        label="AI Reply for note",
                         origin_channel="websocket",
                         origin_chat_id=f"notes-ai:{note_id}",
                         session_key="notes-ai:direct",

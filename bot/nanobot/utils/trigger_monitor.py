@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from nanobot.utils.monitor_rotator import append_monitor_record
 
 
 def _now_iso() -> str:
@@ -36,33 +37,27 @@ def append_trigger_decision(
 
     This is best-effort observability. It must never break runtime behavior.
     """
-    try:
-        root = Path(workspace)
-        if root.name == "persona":
-            root = root.parent
-        monitor_dir = root / "monitor"
-        monitor_dir.mkdir(parents=True, exist_ok=True)
-        record = {
-            "timestamp": _now_iso(),
-            "trigger_id": trigger_id,
-            "name": name,
-            "mode": mode,
-            "session_key": session_key,
-            "session_uuid": session_uuid,
-            "kind": kind,
-            "decision": decision,
-            "reason": reason,
-            "source": source,
-            "subagent": subagent,
-            "model": model,
-            "turn_count": turn_count,
-            "cursor_before": cursor_before or {},
-            "cursor_after": cursor_after or {},
-            "subagent_task_id": subagent_task_id,
-            "details": details or {},
-        }
-        path = monitor_dir / "trigger_decisions.jsonl"
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        return
+    root = Path(workspace)
+    if root.name == "persona":
+        root = root.parent
+    monitor_dir = root / "monitor"
+    record = {
+        "timestamp": _now_iso(),
+        "trigger_id": trigger_id,
+        "name": name,
+        "mode": mode,
+        "session_key": session_key,
+        "session_uuid": session_uuid,
+        "kind": kind,
+        "decision": decision,
+        "reason": reason,
+        "source": source,
+        "subagent": subagent,
+        "model": model,
+        "turn_count": turn_count,
+        "cursor_before": cursor_before or {},
+        "cursor_after": cursor_after or {},
+        "subagent_task_id": subagent_task_id,
+        "details": details or {},
+    }
+    append_monitor_record(monitor_dir, "trigger_decisions.jsonl", record)

@@ -15,18 +15,18 @@ import re
 import secrets
 import shutil
 import ssl
+import sys
 import time
 import uuid
-from datetime import datetime
 from collections.abc import Callable
-import sys
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
 
+import yaml
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
-import yaml
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
@@ -1529,7 +1529,7 @@ class WebSocketChannel(BaseChannel):
 
             data_param = query_params.get("data", [""])[0]
             if not data_param:
-                logger.warning(f"[GlobalNotes] missing data_param")
+                logger.warning("[GlobalNotes] missing data_param")
                 return _http_error(400, "missing data parameter")
 
             # Parse full entries but only store key fields
@@ -1562,7 +1562,7 @@ class WebSocketChannel(BaseChannel):
                 "date": date_str,
                 "entries": entries
             }, ensure_ascii=False, indent=2), encoding="utf-8")
-            logger.info(f"[GlobalNotes] wrote notes.json")
+            logger.info("[GlobalNotes] wrote notes.json")
 
             # 2. Generate by-date markdown
             date_md = self._generate_notes_markdown(entries, date_str, "date")
@@ -1595,9 +1595,9 @@ class WebSocketChannel(BaseChannel):
 
         GET /api/notes/ai-reply?note_id=xxx&date=YYYY-MM-DD&reply_type=encouragement&note_content=xxx&quoted_content=xxx
         """
-        from datetime import datetime
         import json
         import uuid
+        from datetime import datetime
 
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
@@ -1854,7 +1854,6 @@ class WebSocketChannel(BaseChannel):
         if self._session_manager is None:
             return _http_error(503, "session manager unavailable")
 
-        import json
         from nanobot.ielts_exam import IeltsExamManager
 
         # Get query parameters
@@ -1944,6 +1943,7 @@ class WebSocketChannel(BaseChannel):
             return _http_error(503, "session manager unavailable")
 
         import json
+
         from nanobot.ielts_exam import IeltsExamManager
 
         try:
@@ -1981,6 +1981,7 @@ class WebSocketChannel(BaseChannel):
             return _http_error(503, "session manager unavailable")
 
         import json
+
         from nanobot.ielts_exam import IeltsExamManager
 
         try:
@@ -2037,10 +2038,11 @@ class WebSocketChannel(BaseChannel):
             return _http_error(503, "session manager unavailable")
 
         import json
+
         from nanobot.ielts_exam import IeltsExamManager
 
         try:
-            body = json.loads(request.body or "{}")
+            json.loads(request.body or "{}")
         except json.JSONDecodeError:
             return _http_json_response({"error": "Invalid JSON"}, status=400)
 
@@ -2529,50 +2531,20 @@ class WebSocketChannel(BaseChannel):
         return sorted(activity, key=lambda x: x.get("timestamp") or "", reverse=True)[:limit]
 
     def _monitor_subagent_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
-        runs: list[dict[str, Any]] = []
-        paths = [
-            root / "persona" / "monitor" / "subagent_runs.jsonl",
-            root / "monitor" / "subagent_runs.jsonl",
-        ]
-        for path in paths:
-            if not path.exists():
-                continue
-            try:
-                lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
-            except OSError:
-                continue
-            for line in lines:
-                if not line.strip():
-                    continue
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(item, dict):
-                    runs.append(item)
-        runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
-        return runs[:limit]
+        from nanobot.utils.monitor_rotator import read_monitor_records
+
+        monitor_dir = root / "monitor"
+        records = read_monitor_records(monitor_dir, "subagent_runs.jsonl", limit=limit)
+        records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        return records
 
     def _monitor_trigger_decisions(self, root: Path, *, limit: int = 200) -> list[dict[str, Any]]:
-        path = root / "monitor" / "trigger_decisions.jsonl"
-        if not path.exists():
-            return []
-        records: list[dict[str, Any]] = []
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()[-limit * 2:]
-        except OSError:
-            return []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                item = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(item, dict):
-                records.append(item)
+        from nanobot.utils.monitor_rotator import read_monitor_records
+
+        monitor_dir = root / "monitor"
+        records = read_monitor_records(monitor_dir, "trigger_decisions.jsonl", limit=limit)
         records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
-        return records[:limit]
+        return records
 
     def _estimate_llm_cost_usd(self, *, model: str | None, usage: dict[str, Any] | None) -> dict[str, Any]:
         """Estimate DeepSeek API cost from normalized usage fields.

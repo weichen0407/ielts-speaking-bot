@@ -693,6 +693,7 @@ class TestToolEventProgress:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        monkeypatch.setenv("NANOBOT_WIKI_SYNC_INTERVAL", "0")
 
         async def fake_title_after_turn(**_kwargs: object) -> bool:
             raise AssertionError("command-only turns should not generate titles")

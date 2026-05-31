@@ -30,8 +30,8 @@ The canonical user-owned runtime root is `persona/`. The canonical observability
 | Long-term memory | `persona/memory/MEMORY.md` | User memory read by the main agent. |
 | Trigger runtime state | `persona/trigger/` | Cron jobs and count/file cursor state. |
 | Wiki memory | `persona/wiki/` | Raw sources, pages, indexes, graph, and sync state. |
-| Subagent monitor | `monitor/subagent_runs.jsonl` | System observability log. |
-| Trigger monitor | `monitor/trigger_decisions.jsonl` | System observability log. |
+| Subagent monitor | `monitor/subagent_runs.jsonl` | System observability log (rotated at 10 MiB, 10 backups). |
+| Trigger monitor | `monitor/trigger_decisions.jsonl` | System observability log (rotated at 10 MiB, 10 backups). |
 
 Legacy root-level `data/`, `sessions/`, `memory/`, and `trigger/` test data have been removed from the active architecture.
 

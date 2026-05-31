@@ -303,10 +303,11 @@ class SubagentManager:
         status: SubagentStatus,
     ) -> None:
         """Persist a compact subagent run record for the WebUI monitor."""
+        from nanobot.utils.monitor_rotator import append_monitor_record
+
         try:
             root = self.workspace.parent if self.workspace.name == "persona" else self.workspace
             monitor_dir = root / "monitor"
-            monitor_dir.mkdir(parents=True, exist_ok=True)
             record = {
                 "timestamp": datetime.now().isoformat(),
                 "task_id": task_id,
@@ -323,9 +324,7 @@ class SubagentManager:
                 "artifacts": status.artifacts,
                 "announce_result": status.announce_result,
             }
-            path = monitor_dir / "subagent_runs.jsonl"
-            with path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            append_monitor_record(monitor_dir, "subagent_runs.jsonl", record)
         except Exception as e:
             logger.debug("Failed to append subagent monitor run: {}", e)
 

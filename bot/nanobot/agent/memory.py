@@ -975,7 +975,7 @@ class Dream:
         skip annotation than to tag the wrong line).
         SOUL.md and USER.md are never annotated.
         """
-        file_path = str(self.memory_file.relative_to(self.store.workspace))
+        file_path = str(self.store.memory_file.relative_to(self.store.workspace))
         try:
             ages = self.store.git.line_ages(file_path)
         except Exception:

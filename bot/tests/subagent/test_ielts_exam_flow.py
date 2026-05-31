@@ -40,7 +40,7 @@ def test_ielts_exam_command_random():
     from nanobot.command.builtin import cmd_ielts_exam
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(cmd_ielts_exam(mock_ctx))
+    result = asyncio.run(cmd_ielts_exam(mock_ctx))
 
     # After the command, ctx.msg.content should be the injected prompt
     # and ctx.msg.metadata should contain ielts_exam info
@@ -94,7 +94,7 @@ def test_ielts_exam_command_topic_not_found():
     from nanobot.command.builtin import cmd_ielts_exam
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(cmd_ielts_exam(mock_ctx))
+    result = asyncio.run(cmd_ielts_exam(mock_ctx))
 
     print(f"Command returned: {result}")
     if result and "not found" in result.content:
@@ -137,7 +137,7 @@ def test_ielts_score_command_no_history():
     from nanobot.command.builtin import cmd_ielts_score
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(cmd_ielts_score(mock_ctx))
+    result = asyncio.run(cmd_ielts_score(mock_ctx))
 
     print(f"Command returned: {result}")
     if result and "No conversation history" in result.content:

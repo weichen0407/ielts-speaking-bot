@@ -51,7 +51,7 @@ def test_freechat_command():
     from nanobot.command.builtin import cmd_freechat
 
     import asyncio
-    result = asyncio.get_event_loop().run_until_complete(cmd_freechat(mock_ctx))
+    result = asyncio.run(cmd_freechat(mock_ctx))
 
     # After the command, ctx.msg.content should be the injected prompt
     print(f"Command returned: {result}")
