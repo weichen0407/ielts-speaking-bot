@@ -37,6 +37,13 @@ from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
+from nanobot.config.capabilities import (
+    context_prompt_files,
+    load_capabilities,
+    monitor_log,
+    project_root_for,
+    trigger_files,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.session.goal_state import goal_state_ws_blob
@@ -2373,7 +2380,7 @@ class WebSocketChannel(BaseChannel):
     # -- Admin / monitor API ----------------------------------------------------
 
     def _project_root(self) -> Path:
-        return Path(__file__).resolve().parent.parent.parent.parent
+        return project_root_for(Path(__file__))
 
     def _safe_read_text(self, path: Path, *, max_chars: int = 20_000) -> tuple[str, bool]:
         text = path.read_text(encoding="utf-8")
@@ -2388,21 +2395,10 @@ class WebSocketChannel(BaseChannel):
         return {}
 
     def _monitor_trigger_files(self, root: Path) -> list[Path]:
-        files: list[Path] = []
-        for mode_dir in sorted((root / "mode").glob("*")):
-            trigger_dir = mode_dir / "trigger"
-            if not trigger_dir.exists():
-                continue
-            for rel in ("triggers.json", "cron/cron.yaml"):
-                candidate = trigger_dir / rel
-                if candidate.exists():
-                    files.append(candidate)
-        return files
+        return trigger_files(root)
 
     def _monitor_context_prompt_files(self, root: Path) -> list[Path]:
-        files = sorted(root.glob("subagent/*/*/context/*.md"))
-        files.extend(sorted(root.glob("mode/*/context/*.md")))
-        return files
+        return context_prompt_files(root)
 
     def _normalize_prompt_path(self, root: Path, raw: str | None) -> Path | None:
         if not raw:
@@ -2533,16 +2529,16 @@ class WebSocketChannel(BaseChannel):
     def _monitor_subagent_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
         from nanobot.utils.monitor_rotator import read_monitor_records
 
-        monitor_dir = root / "monitor"
-        records = read_monitor_records(monitor_dir, "subagent_runs.jsonl", limit=limit)
+        monitor_dir, log_name = monitor_log(root, "subagent_runs", "subagent_runs.jsonl")
+        records = read_monitor_records(monitor_dir, log_name, limit=limit)
         records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return records
 
     def _monitor_trigger_decisions(self, root: Path, *, limit: int = 200) -> list[dict[str, Any]]:
         from nanobot.utils.monitor_rotator import read_monitor_records
 
-        monitor_dir = root / "monitor"
-        records = read_monitor_records(monitor_dir, "trigger_decisions.jsonl", limit=limit)
+        monitor_dir, log_name = monitor_log(root, "trigger_decisions", "trigger_decisions.jsonl")
+        records = read_monitor_records(monitor_dir, log_name, limit=limit)
         records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return records
 
@@ -2735,6 +2731,7 @@ class WebSocketChannel(BaseChannel):
             return _http_json_response({
                 "generated_at": datetime.now().isoformat(),
                 "workspace": str(root),
+                "capabilities": load_capabilities(root),
                 "triggers": triggers,
                 "prompts": trigger_prompts + extra_prompts,
                 "subagent_statuses": list(reversed(self._subagent_status_history[-100:])),

@@ -255,9 +255,37 @@ export interface AdminCostSummary {
   note?: string;
 }
 
+export interface AdminCapabilities {
+  version?: number;
+  runtime_roots?: Record<string, string>;
+  modes?: Record<string, {
+    context_dir?: string;
+    trigger_file?: string;
+    cron_file?: string;
+  }>;
+  subagents?: Record<string, {
+    scope?: string;
+    prompt?: string;
+    trigger_ids?: string[];
+    writes?: string[];
+  }>;
+  processors?: Record<string, {
+    path?: string;
+    status?: string;
+    runtime_root?: string;
+    output?: string;
+    note?: string;
+  }>;
+  observability?: Record<string, {
+    path?: string;
+    rotation?: string;
+  }>;
+}
+
 export interface AdminMonitorPayload {
   generated_at: string;
   workspace: string;
+  capabilities?: AdminCapabilities;
   triggers: AdminTrigger[];
   prompts: AdminPrompt[];
   subagent_statuses: AdminSubagentStatus[];

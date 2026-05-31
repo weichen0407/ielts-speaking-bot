@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from nanobot.config.capabilities import monitor_log, project_root_for
 from nanobot.utils.monitor_rotator import append_monitor_record
 
 
@@ -37,10 +38,8 @@ def append_trigger_decision(
 
     This is best-effort observability. It must never break runtime behavior.
     """
-    root = Path(workspace)
-    if root.name == "persona":
-        root = root.parent
-    monitor_dir = root / "monitor"
+    root = project_root_for(Path(workspace))
+    monitor_dir, log_name = monitor_log(root, "trigger_decisions", "trigger_decisions.jsonl")
     record = {
         "timestamp": _now_iso(),
         "trigger_id": trigger_id,
@@ -60,4 +59,4 @@ def append_trigger_decision(
         "subagent_task_id": subagent_task_id,
         "details": details or {},
     }
-    append_monitor_record(monitor_dir, "trigger_decisions.jsonl", record)
+    append_monitor_record(monitor_dir, log_name, record)

@@ -15,12 +15,15 @@ modes:
   freechat:
     context_dir: mode/freechat/context
     trigger_file: mode/freechat/trigger/triggers.json
+    cron_file: mode/freechat/trigger/cron/cron.yaml
   ielts:
     context_dir: mode/ielts/context
     trigger_file: mode/ielts/trigger/triggers.json
+    cron_file: mode/ielts/trigger/cron/cron.yaml
   benative:
     context_dir: mode/benative/context
     trigger_file: mode/benative/trigger/triggers.json
+    cron_file: mode/benative/trigger/cron/cron.yaml
 
 subagents:
   vocab:
@@ -55,6 +58,12 @@ subagents:
     trigger_ids: [memory_cron]
     writes:
       - persona/memory/MEMORY.md
+  progress_tracker:
+    scope: cross_session
+    prompt: subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md
+    trigger_ids: [progress_tracker]
+    writes:
+      - persona/progress_bank.jsonl
   daily_consolidator:
     scope: cross_session
     prompt: subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md

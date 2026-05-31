@@ -171,6 +171,11 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const triggerDecisions = payload?.trigger_decisions ?? [];
   const wikiSyncRuns = payload?.wiki_sync_runs ?? [];
   const costSummary = payload?.cost_summary;
+  const capabilitySubagents = Object.keys(payload?.capabilities?.subagents ?? {});
+  const capabilityModes = Object.keys(payload?.capabilities?.modes ?? {});
+  const selectedRegistrySubagent = selectedTrigger?.subagent
+    ? payload?.capabilities?.subagents?.[selectedTrigger.subagent]
+    : undefined;
   const selectedRun = useMemo(
     () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
     [selectedRunKey, subagentRuns],
@@ -219,7 +224,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
         <Metric icon={Settings2} label="启用触发器" value={enabledCount} />
         <Metric icon={FileText} label="Prompt 文件" value={promptCount} />
         <Metric icon={Bot} label="运行中 subagent" value={activeCount} />
-        <Metric icon={Database} label="Wiki Sync" value={wikiSyncRuns.length} />
+        <Metric icon={Database} label="Registry" value={`${capabilityModes.length}/${capabilitySubagents.length}`} />
         <Metric icon={Activity} label="触发决策" value={triggerDecisions.length} />
         <Metric icon={DollarSign} label="估算花费" value={formatUsd(costSummary?.estimated_usd)} />
       </div>
@@ -292,6 +297,16 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                   <KeyValue label="Model" value={selectedTrigger.model || "default"} />
                   <KeyValue label="Prompt" value={selectedTrigger.prompt_file || "-"} />
                   <KeyValue label="Source" value={selectedTrigger.source} />
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">Registry</p>
+                    <pre className="max-h-28 overflow-auto rounded-md bg-muted p-2 text-[11px]">
+                      {formatJson(selectedRegistrySubagent ?? {
+                        warning: selectedTrigger.subagent
+                          ? "这个 subagent 还没有登记在 config/capabilities.yaml"
+                          : "这个 trigger 没有关联 subagent",
+                      })}
+                    </pre>
+                  </div>
                   {selectedTrigger.condition?.kind === "turn_count" ? (
                     <div>
                       <p className="mb-1 text-xs font-medium text-muted-foreground">触发轮数</p>
