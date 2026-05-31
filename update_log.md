@@ -1,5 +1,36 @@
 # Update Log
 
+## 2026-05-31 - Runtime 数据目录收束
+
+- 将用户运行数据的 canonical root 收束到 `persona/`：
+  - session 原始记录：`persona/sessions/`
+  - 长期记忆：`persona/memory/`
+  - 全局派生事件流：`persona/events/thread.jsonl`
+  - cron/count 运行状态：`persona/trigger/`
+- 保留根目录 `monitor/` 作为系统观测日志，不放入 `persona/`。
+- 删除无实际意义的测试数据和旧重复目录：
+  - `data/`
+  - `sessions/`
+  - `memory/`
+  - `trigger/`
+  - `persona/cron/`
+  - 旧 session / progress / IELTS exam 样例数据
+- 更新 memory、cron、count cursor、derived thread log 的代码路径。
+- 更新 `docs/08-project-structure-review.md` 和 `.gitignore` 的目录策略。
+
+---
+
+## 2026-05-31 - Wiki 页面目录收束
+
+- 确认 `persona/wiki/pages/` 与 `persona/wiki/wiki/` 内容完全一致。
+- 将 `persona/wiki/wiki/` 定为唯一 canonical wiki page root。
+- 删除旧原型目录 `persona/wiki/pages/`。
+- 删除只服务旧目录的 `scripts/migrate_wiki_pages.py`。
+- 移除 `WikiStore` 对 legacy `pages/` 的 fallback 读取逻辑，避免后续读写路径分叉。
+- 更新 wiki 相关文档，把页面路径统一为 `persona/wiki/wiki/`。
+
+---
+
 ## 2026-05-26 - Subagent 模型统一配置
 
 本次更新添加了 subagent 模型配置机制，允许在 `config.json` 中统一配置每个 subagent 使用的模型。
@@ -2317,6 +2348,45 @@ This update introduces a configurable counter-based trigger system for subagents
 
 ---
 
+## 2026-05-31 - Trigger Decision Monitor
+
+- Added append-only trigger decision logging to `monitor/trigger_decisions.jsonl`.
+- Counter triggers now record `skipped`, `no_delta`, `eligible`, `spawned`, and `failed` decisions with reason, cursor, mode, session, subagent, and model context.
+- Cron jobs `memory_cron` and `daily_consolidator` now log no-delta and subagent completion decisions.
+- Admin monitor API now returns `trigger_decisions` alongside subagent runs, cost summary, wiki sync, and activity.
+- WebUI monitor now includes a “触发决策” panel so each trigger check can be inspected separately from subagent replies.
+- Hardened monitor cost summary so missing `_last_usage` does not crash the admin monitor.
+- Subagent run logs now write to root `monitor/subagent_runs.jsonl`, matching the system-observability boundary.
+- Rewrote `architecture.md` to match the current persona/monitor/wiki/trigger architecture.
+- Updated `docs/runtime-data-map.md` and `docs/08-project-structure-review.md` with the resolved monitor and architecture decisions.
+
+Validation:
+- `uv run python -m py_compile bot/nanobot/utils/trigger_monitor.py bot/nanobot/counter/engine.py bot/nanobot/agent/loop.py bot/nanobot/cli/commands.py bot/nanobot/channels/websocket.py`
+- `uv run python -m pytest bot/tests/utils/test_trigger_monitor.py bot/tests/counter/test_counter_engine_mode.py bot/tests/channels/test_admin_trigger_update.py`
+- `uv run python -m py_compile bot/nanobot/agent/subagent.py bot/nanobot/channels/websocket.py bot/nanobot/utils/trigger_monitor.py`
+- `uv run python -m pytest bot/tests/agent/test_subagent.py bot/tests/utils/test_trigger_monitor.py bot/tests/channels/test_admin_trigger_update.py`
+- `pnpm run check` in `bot/webui`
+
+---
+
+## 2026-05-31 - Benative Runtime Path Cleanup
+
+- Unified Benative business data paths under `persona/benative/`.
+- Updated `/benative` command to list articles and count sentence pairs from `persona/benative`.
+- Updated Benative article fetcher, translator, review prompts, and mode context files away from legacy `shared/benative`.
+- Updated default cron trigger task templates to write articles, pairs, and cursors under `persona/benative`.
+- Documented Benative article/pair/response ownership in `architecture.md` and `docs/runtime-data-map.md`.
+- Removed unused empty `subagent/_cursors` and subagent placeholder `data/processor` directories.
+- Marked `WikiUpdater` as a legacy explicit patch-source scanner with no default `subagent/*/data` sources.
+
+Validation:
+- `uv run python -m py_compile bot/nanobot/command/builtin.py bot/nanobot/channels/websocket.py bot/nanobot/session/manager.py`
+- `uv run python -m pytest bot/tests/command/test_benative_command.py`
+- `uv run python -m py_compile bot/nanobot/command/builtin.py subagent/cross_session/wiki/processor/wiki_updater.py`
+- `uv run python -m pytest bot/tests/command/test_benative_command.py bot/tests/wiki/test_wiki_updater.py`
+
+---
+
 ## 2026-05-30 - 当前 Git 工作树状态总结
 
 本次记录用于同步当前 `git status`，工作树中包含一批功能开发、测试补充、运行态数据和待清理文件。整体状态是：已有较多未提交改动，建议下一步先按模块拆分 review，再分批提交。
@@ -2644,6 +2714,139 @@ uv run python -m pytest tests/wiki
 ```
 
 前端：
+
+```text
+pnpm run check
+结果：163 passed
+```
+
+---
+
+*Update created: 2026-05-31*
+
+---
+
+## 2026-05-31 - DeepSeek Flash 切换与 Monitor 成本估算
+
+本次更新将运行模型统一切换到 `deepseek-v4-flash`，并在监控后台加入 token 与费用估算面板，用于观察 subagent 触发带来的额外消耗。
+
+---
+
+## 1. 模型配置调整
+
+### 全局 Nanobot 配置
+
+`/Users/jerry/.nanobot/config.json`：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash"
+    }
+  }
+}
+```
+
+### Trigger 配置
+
+以下 trigger 的显式模型从 `gpt-4o-mini` 改为 `deepseek-v4-flash`：
+
+- `mode/ielts/trigger/triggers.json`
+  - `ielts_feedback`
+- `mode/benative/trigger/triggers.json`
+  - `benative_review`
+
+项目内运行配置已确认不再保留 `gpt-4o-mini` 或 `deepseek-chat`。
+
+---
+
+## 2. Monitor 成本估算
+
+### Backend
+
+`bot/nanobot/channels/websocket.py`
+
+新增：
+
+- `_estimate_llm_cost_usd()`
+- `_normalize_cost_model()`
+- `_monitor_cost_summary()`
+
+Monitor API 返回新增字段：
+
+```json
+{
+  "cost_summary": {
+    "currency": "USD",
+    "estimated_usd": 0,
+    "prompt_tokens": 0,
+    "cached_tokens": 0,
+    "completion_tokens": 0,
+    "models": [],
+    "last_turn": {},
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing",
+    "note": "Local estimate from logged usage; official invoice is authoritative."
+  }
+}
+```
+
+估算逻辑：
+
+- 从 `monitor/subagent_runs.jsonl` 中读取每次 subagent 的 `usage`。
+- 聚合 prompt / cached / completion tokens。
+- 按 DeepSeek 官方公开价格进行本地估算。
+- `deepseek-chat` 会归一化为 `deepseek-v4-flash`，用于兼容旧日志。
+
+注意：这是本地估算，官方 API 平台账单仍是最终依据。
+
+### WebUI
+
+`bot/webui/src/components/AdminMonitorView.tsx`
+
+新增：
+
+- 顶部指标：`估算花费`
+- 面板：`Token / 花费`
+
+可查看：
+
+- subagent 总估算费用
+- 各模型 token 与费用
+- prompt / cached / completion token
+- 最近主回复的估算费用
+
+---
+
+## 3. 类型更新
+
+`bot/webui/src/lib/api.ts`
+
+新增：
+
+- `AdminCostSummary`
+- `cost_summary` 字段
+
+---
+
+## 4. 验证
+
+配置校验：
+
+```text
+uv run python scripts/validate_subagent_config.py
+结果：ok true，errors []
+```
+
+后端测试：
+
+```text
+uv run python -m pytest tests/channels/test_admin_trigger_update.py tests/wiki/test_wiki_graph.py
+结果：9 passed
+```
+
+前端测试：
 
 ```text
 pnpm run check
