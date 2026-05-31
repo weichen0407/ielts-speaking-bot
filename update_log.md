@@ -2538,6 +2538,315 @@ uv run python scripts/validate_subagent_config.py
 
 *Update created: 2026-05-30*
 
+---
+
+## 2026-05-31 - Wiki Graph 关系视角优化
+
+本次更新调整 Wiki Memory 的知识图谱展示逻辑：从“wiki schema 可视化”改为“用户知识关系可视化”。目标是让图谱更符合 IELTS/freechat/个人知识积累的浏览方式，而不是显示 tag、type、mode 等内部治理字段。
+
+---
+
+## 1. 后端 Graph 结构调整
+
+### `subagent/cross_session/wiki/processor/wiki_graph.py`
+
+主要变化：
+
+- 不再生成以下 schema/internal 节点：
+  - `type:*`
+  - `tag:*`
+  - `mode:*`
+- 保留并强化用户可理解的知识节点：
+  - `topic`
+  - `page`
+  - `entity`
+  - `concept`
+- 图谱边调整为：
+  - `link`
+  - `has_topic`
+  - `mentions_entity`
+  - `mentions_concept`
+
+新的展示逻辑：
+
+- IELTS 模式下，每个 topic 会成为一个大的聚类中心。
+- freechat 模式下，内容按长期积累的话题聚合。
+- global/personal 信息会归入个人相关 topic。
+- 没有 topic 的页面会自动落入 fallback topic：
+  - `ielts/general`
+  - `freechat/topics`
+  - `personal`
+  - `{mode}/general`
+
+---
+
+## 2. 前端 D3 图谱稳定性优化
+
+### `bot/webui/src/components/WikiGraphView.tsx`
+
+主要变化：
+
+- topic 节点变成更大的视觉中心。
+- 页面节点围绕自己的 topic 分布。
+- entity/concept 作为关系节点展示，不再显示 tag/type/mode。
+- 不同 topic 会自然分区，减少所有节点混在一起的问题。
+- 降低 D3 force 扰动：
+  - 降低 alpha
+  - 提高 velocity decay
+  - 减弱 link/charge 对整体布局的影响
+- 拖动节点后会固定在用户放置的位置。
+- Reset 按钮会解除固定并重新布局。
+- 图例更新为：
+  - topic cluster
+  - entity
+  - concept
+  - decision page
+  - gap page
+
+---
+
+## 3. API Type 更新
+
+### `bot/webui/src/lib/api.ts`
+
+Wiki graph 类型调整：
+
+- `WikiGraphNode.kind`
+  - 旧：`page | type | tag | topic | mode`
+  - 新：`page | topic | entity | concept`
+- `WikiGraphEdge.kind`
+  - 旧：`link | has_type | has_tag | has_topic | has_mode`
+  - 新：`link | has_topic | mentions_entity | mentions_concept`
+
+---
+
+## 4. 测试更新
+
+### `bot/tests/wiki/test_wiki_graph.py`
+
+新增/更新测试：
+
+- 验证 topic cluster 节点存在。
+- 验证 schema 节点不会出现在 graph 中。
+- 验证 fallback topic。
+- 验证 entity/concept 节点来自 frontmatter。
+- 验证 `mentions_entity`、`mentions_concept` 边。
+
+---
+
+## 5. 验证
+
+后端：
+
+```text
+uv run python -m pytest tests/wiki
+结果：125 passed
+```
+
+前端：
+
+```text
+pnpm run check
+结果：163 passed
+```
+
+---
+
+*Update created: 2026-05-31*
+
+---
+
+## 2026-05-30 - LLM Wiki Core、Sync 与 WebUI 图谱升级
+
+本次更新完成 LLM Wiki 的核心工程化改造，并把 wiki sync 从 subagent trigger 中解耦。现在 wiki 具备更清晰的 raw sources / wiki / schema 分层、独立 ingest/query/save/lint 流程，以及可在 monitor 中观察的 sync 运行记录。
+
+---
+
+## 1. LLM Wiki Core
+
+新增核心模块：
+
+- `subagent/cross_session/wiki/processor/wiki_layout.py`
+- `subagent/cross_session/wiki/processor/wiki_ingest.py`
+- `subagent/cross_session/wiki/processor/wiki_query.py`
+- `subagent/cross_session/wiki/processor/wiki_crystallizer.py`
+- `subagent/cross_session/wiki/processor/wiki_lint.py`
+
+主要变化：
+
+- `persona/wiki` 目录统一为 `raw/`、`wiki/`、`index/`、`state/`、`schema/`。
+- 新页面写入 `persona/wiki/wiki/`，旧 `persona/wiki/pages/` 仍可兼容读取。
+- 页面类型统一为：
+  - `source`
+  - `entity`
+  - `concept`
+  - `comparison`
+  - `question`
+  - `synthesis`
+  - `decision`
+  - `gap`
+  - `meta`
+- 旧类型会自动映射，例如 `ielts_topic -> concept`、`freechat_project -> entity`。
+- frontmatter 增加治理字段：`status`、`sources`、`aliases`、`entities`、`concepts`、`created_at`、`last_reviewed_at`、`stability`、`version`。
+- `WikiIngestor` 将 `data/thread.jsonl` 增量保存到 `raw/thread/*.jsonl`，再生成候选信号。
+- `WikiQueryEngine` 提供本地混合检索：SQLite FTS + markdown scan + title/tag 权重 + link 扩展。
+- `WikiCrystallizer` 将候选信号独立结晶为 `WikiPatch`，先查已有页面，能合并则合并。
+- `WikiLinter` 提供结构层和语义层检查。
+
+---
+
+## 2. Wiki Sync 解耦
+
+### `bot/nanobot/agent/loop.py`
+
+- wiki sync 不再依赖 subagent trigger 是否命中。
+- 每个真实用户 turn 后都会按 interval 判断是否运行 wiki sync。
+- 默认 interval 为 `1`，即每轮用户回复后同步一次。
+- 可通过环境变量调整：
+
+```bash
+NANOBOT_WIKI_SYNC_INTERVAL=1
+NANOBOT_WIKI_SYNC_INTERVAL=2
+NANOBOT_WIKI_SYNC_INTERVAL=3
+NANOBOT_WIKI_SYNC_INTERVAL=0  # 关闭
+```
+
+### `bot/nanobot/agent/wiki_sync.py`
+
+- 旧的 LLM 直接生成 patch 流程替换为本地 core pipeline：
+  - ingest
+  - analyze
+  - crystallize/save
+  - lint
+- 每次运行写入 `persona/wiki/state/sync_log.jsonl`。
+- sync log 记录：
+  - session id
+  - source id
+  - message count
+  - candidate count
+  - patch count
+  - applied count
+  - lint finding count
+  - error 信息
+
+---
+
+## 3. API 与 Monitor
+
+### Wiki API
+
+新增/更新：
+
+- `/api/wiki/search`：改为使用 `WikiQueryEngine` 混合检索。
+- `/api/wiki/lint`：返回结构和语义 lint findings。
+- `/api/wiki/sync-log`：返回最近 wiki sync 记录。
+
+### Admin Monitor
+
+- `AdminMonitorPayload` 增加 `wiki_sync_runs`。
+- `AdminMonitorView` 新增 Wiki Sync 面板。
+- 可以看到每次 sync 的：
+  - messages
+  - candidates
+  - applied
+  - lint findings
+  - applied slugs
+  - error
+
+---
+
+## 4. WebUI 知识图谱升级
+
+### `bot/webui/src/components/WikiGraphView.tsx`
+
+- 从 `react-force-graph-2d` 组件切换为可控的 D3 force + canvas 实现。
+- 支持：
+  - D3 force layout
+  - canvas 渲染
+  - zoom
+  - pan
+  - drag node
+  - selected node detail
+  - highlighted nodes
+  - page click / filter click
+- 图谱节点增加 `type:*` 分类节点。
+- 页面节点按 wiki page type 着色，例如 entity、concept、decision、gap。
+
+### `bot/webui/src/components/WikiMemoryPanel.tsx`
+
+- graph tab 现在使用新 D3 图谱组件。
+- 点击 type/tag/topic/mode 节点可以回填筛选条件。
+- page 详情展示 frontmatter 中的 status、stability、sources 等字段。
+
+---
+
+## 5. 收尾与运行态清理
+
+### `.gitignore`
+
+新增忽略：
+
+- root runtime:
+  - `session_index.jsonl`
+  - `user_responses.jsonl`
+  - `sessions/`
+  - `monitor/*.jsonl`
+  - `memory/*.jsonl`
+  - `trigger/cron/jobs.json`
+- wiki runtime:
+  - `persona/wiki/raw/thread/*.jsonl`
+  - `persona/wiki/state/*.jsonl`
+  - `persona/wiki/state/ingest_cursor.json`
+  - `persona/wiki/index/*.sqlite`
+
+### Legacy Wiki Migration
+
+新增：
+
+- `scripts/migrate_wiki_pages.py`
+
+已执行一次：
+
+```text
+Copied 10 legacy wiki file(s); skipped 0 existing file(s).
+```
+
+脚本只复制旧 `persona/wiki/pages` 到新 `persona/wiki/wiki`，不删除旧文件。
+
+---
+
+## 6. 验证
+
+后端测试：
+
+```text
+uv run python -m pytest tests/wiki tests/counter/test_counter_engine_mode.py tests/counter/test_counter_engine_reload.py tests/session/test_session_fsync.py tests/agent/test_session_manager_history.py tests/channels/test_admin_trigger_update.py
+结果：161 passed
+```
+
+前端测试：
+
+```text
+pnpm run check
+结果：163 passed
+```
+
+Subagent 配置校验：
+
+```text
+uv run python scripts/validate_subagent_config.py
+结果：ok true，errors []
+```
+
+浏览器可视检查说明：
+
+- 尝试用 Codex in-app browser 打开 `http://127.0.0.1:5175/` 时被浏览器安全策略拦截。
+- 因此本次没有完成真实浏览器截图验证。
+
+---
+
+*Update created: 2026-05-30*
+
 This update adds Free Chat button to web UI, implements cross-session memory tracking, refactors subagent system for silent file-only output, and redesigns the topic bank.
 
 ---

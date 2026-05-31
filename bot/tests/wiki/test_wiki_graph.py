@@ -45,11 +45,11 @@ class TestWikiGraph:
         assert page_node is not None
         assert page_node["label"] == "Sports"
         assert page_node["kind"] == "page"
-        assert page_node["type"] == "ielts_topic"
+        assert page_node["type"] == "concept"
         assert page_node["mode"] == "ielts"
         assert "sports" in page_node["tags"]
 
-    def test_tag_nodes(self, wiki_root: Path):
+    def test_topic_cluster_nodes(self, wiki_root: Path):
         from subagent.cross_session.wiki.processor.wiki_store import WikiStore
 
         store = WikiStore(workspace=wiki_root.parent, wiki_root=wiki_root)
@@ -69,16 +69,17 @@ class TestWikiGraph:
         )
 
         graph = build_wiki_graph(wiki_root)
-        tag_node = next((n for n in graph["nodes"] if n["id"] == "tag:sports"), None)
-        assert tag_node is not None
-        assert tag_node["kind"] == "tag"
-        assert tag_node["label"] == "sports"
+        topic_node = next((n for n in graph["nodes"] if n["id"] == "topic:sports"), None)
+        assert topic_node is not None
+        assert topic_node["kind"] == "topic"
+        assert topic_node["label"] == "sports"
+        assert topic_node["size"] >= 8
 
         edges = graph["edges"]
-        tag_edge = next((e for e in edges if e["kind"] == "has_tag" and e["source"] == "test/sports"), None)
-        assert tag_edge is not None
+        topic_edge = next((e for e in edges if e["kind"] == "has_topic" and e["source"] == "test/sports"), None)
+        assert topic_edge is not None
 
-    def test_mode_node(self, wiki_root: Path):
+    def test_schema_nodes_are_hidden(self, wiki_root: Path):
         from subagent.cross_session.wiki.processor.wiki_store import WikiStore
 
         store = WikiStore(workspace=wiki_root.parent, wiki_root=wiki_root)
@@ -98,9 +99,12 @@ class TestWikiGraph:
         )
 
         graph = build_wiki_graph(wiki_root)
-        mode_node = next((n for n in graph["nodes"] if n["id"] == "mode:ielts"), None)
-        assert mode_node is not None
-        assert mode_node["kind"] == "mode"
+        node_ids = {n["id"] for n in graph["nodes"]}
+        assert "mode:ielts" not in node_ids
+        assert "type:concept" not in node_ids
+        assert not any(node_id.startswith("tag:") for node_id in node_ids)
+        fallback_topic = next((n for n in graph["nodes"] if n["id"] == "topic:ielts/general"), None)
+        assert fallback_topic is not None
 
     def test_filter_by_mode(self, wiki_root: Path):
         from subagent.cross_session.wiki.processor.wiki_store import WikiStore
@@ -195,3 +199,31 @@ class TestWikiGraph:
         assert link_edge is not None
         assert link_edge["source"] == "test/sports"
         assert link_edge["target"] == "user/preferences"
+
+    def test_entity_and_concept_nodes_from_frontmatter(self, wiki_root: Path):
+        from subagent.cross_session.wiki.processor.schema import WikiPageMeta
+        from subagent.cross_session.wiki.processor.wiki_store import WikiStore
+
+        store = WikiStore(workspace=wiki_root.parent, wiki_root=wiki_root)
+        store.write_page(
+            WikiPageMeta(
+                slug="user/profile",
+                title="User Profile",
+                type="entity",
+                mode="global",
+                topics=["personal"],
+                entities=["user"],
+                concepts=["learning-style"],
+                sources=["manual:test"],
+                created_at="2026-05-30T00:00:00+08:00",
+                updated_at="2026-05-30T00:00:00+08:00",
+            ),
+            "## Summary\n\n- User likes structured practice.\n",
+        )
+
+        graph = build_wiki_graph(wiki_root)
+        node_ids = {n["id"] for n in graph["nodes"]}
+        assert "entity:user" in node_ids
+        assert "concept:learning-style" in node_ids
+        assert any(e["kind"] == "mentions_entity" for e in graph["edges"])
+        assert any(e["kind"] == "mentions_concept" for e in graph["edges"])

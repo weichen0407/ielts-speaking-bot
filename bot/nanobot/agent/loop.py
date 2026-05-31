@@ -1600,22 +1600,31 @@ class AgentLoop:
 
         self.counter_engine.ensure_mode(session.metadata.get("mode"))
         self.counter_engine.increment_turn(session.metadata)
+        session_dir = str(self.sessions._get_session_dir(session.key))
+        turn_count = self.counter_engine.get_turn_count(session.metadata)
+
+        if self._should_sync_wiki(turn_count):
+            self._schedule_background(
+                self._sync_wiki_for_session(session, session_dir)
+            )
+
         triggers = self.counter_engine.check_triggers(session.metadata)
 
         if not triggers:
             return
 
-        session_dir = str(self.sessions._get_session_dir(session.key))
-
         for trigger in triggers:
             await self._spawn_counter_subagent(session, msg, trigger, session_dir)
 
-        # Wiki sync: every 3 turns, sync conversation to wiki in background
-        turn_count = self.counter_engine.get_turn_count(session.metadata)
-        if turn_count > 0 and turn_count % 3 == 0:
-            self._schedule_background(
-                self._sync_wiki_for_session(session, session_dir)
-            )
+    def _should_sync_wiki(self, turn_count: int) -> bool:
+        """Return whether wiki sync should run after this completed user turn."""
+        try:
+            interval = int(os.environ.get("NANOBOT_WIKI_SYNC_INTERVAL", "1"))
+        except ValueError:
+            interval = 1
+        if interval <= 0:
+            return False
+        return turn_count > 0 and turn_count % interval == 0
 
     async def _sync_wiki_for_session(
         self,

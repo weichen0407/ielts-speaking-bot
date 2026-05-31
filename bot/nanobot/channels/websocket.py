@@ -769,6 +769,12 @@ class WebSocketChannel(BaseChannel):
         m = re.match(r"^/api/wiki/rebuild-index$", got)
         if m:
             return self._handle_wiki_rebuild_index(request)
+        m = re.match(r"^/api/wiki/lint$", got)
+        if m:
+            return self._handle_wiki_lint(request)
+        m = re.match(r"^/api/wiki/sync-log$", got)
+        if m:
+            return self._handle_wiki_sync_log(request)
 
         # Admin / monitor API
         if got == "/api/admin/monitor":
@@ -2197,12 +2203,12 @@ class WebSocketChannel(BaseChannel):
 
         try:
             self._ensure_subagent_importable()
-            from subagent.cross_session.wiki.processor.wiki_search import WikiSearch
+            from subagent.cross_session.wiki.processor.wiki_query import WikiQueryEngine
 
-            searcher = WikiSearch(wiki_root=self._wiki_root())
+            searcher = WikiQueryEngine(wiki_root=self._wiki_root())
             tags_str = params.get("tags", [None])[0]
             tags = tags_str.split(",") if tags_str else None
-            results = searcher.search(
+            results = searcher.query(
                 query=params.get("q", [""])[0],
                 mode=params.get("mode", [None])[0] or None,
                 topic=params.get("topic", [None])[0] or None,
@@ -2322,6 +2328,44 @@ class WebSocketChannel(BaseChannel):
             return _http_json_response({"ok": True, "chunks_indexed": count})
         except Exception as e:
             logger.exception("[Wiki] rebuild error: %s", e)
+            return _http_error(500, str(e))
+
+    def _handle_wiki_lint(self, request: WsRequest) -> Response:
+        """GET /api/wiki/lint"""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        try:
+            self._ensure_subagent_importable()
+            from subagent.cross_session.wiki.processor.wiki_lint import WikiLinter
+
+            findings = WikiLinter(wiki_root=self._wiki_root()).lint()
+            return _http_json_response({
+                "findings": [finding.__dict__ for finding in findings],
+                "count": len(findings),
+                "errors": len([f for f in findings if f.severity == "error"]),
+                "warnings": len([f for f in findings if f.severity == "warning"]),
+            })
+        except Exception as e:
+            logger.exception("[Wiki] lint error: %s", e)
+            return _http_error(500, str(e))
+
+    def _handle_wiki_sync_log(self, request: WsRequest) -> Response:
+        """GET /api/wiki/sync-log?limit=..."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+
+        query = _parse_query(request.path)
+        try:
+            limit = int(_query_first(query, "limit") or 100)
+        except ValueError:
+            limit = 100
+        limit = max(1, min(limit, 500))
+        try:
+            records = self._wiki_sync_runs(self._project_root(), limit=limit)
+            return _http_json_response({"runs": records})
+        except Exception as e:
+            logger.exception("[Wiki] sync log error: %s", e)
             return _http_error(500, str(e))
 
     # -- Admin / monitor API ----------------------------------------------------
@@ -2509,6 +2553,27 @@ class WebSocketChannel(BaseChannel):
         runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return runs[:limit]
 
+    def _wiki_sync_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+        path = root / "persona" / "wiki" / "state" / "sync_log.jsonl"
+        if not path.exists():
+            return []
+        runs: list[dict[str, Any]] = []
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+        except OSError:
+            return []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                runs.append(item)
+        runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        return runs[:limit]
+
     def _handle_admin_monitor(self, request: WsRequest) -> Response:
         """GET /api/admin/monitor - trigger, prompt, and recent execution overview."""
         if not self._check_api_token(request):
@@ -2548,6 +2613,7 @@ class WebSocketChannel(BaseChannel):
                 "prompts": trigger_prompts + extra_prompts,
                 "subagent_statuses": list(reversed(self._subagent_status_history[-100:])),
                 "subagent_runs": self._monitor_subagent_runs(root),
+                "wiki_sync_runs": self._wiki_sync_runs(root),
                 "recent_activity": self._monitor_recent_activity(root),
             })
         except Exception as e:

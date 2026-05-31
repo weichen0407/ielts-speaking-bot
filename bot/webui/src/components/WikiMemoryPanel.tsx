@@ -74,6 +74,7 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
       if (kind === "mode") setModeFilter(value);
       if (kind === "topic") setTopicFilter(value);
       if (kind === "tag") setTagsFilter(value);
+      if (kind === "type") setTypeFilter(value);
     },
     [],
   );
@@ -379,6 +380,16 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
                       {pageData.meta.confidence}
                     </span>
                   )}
+                  {pageData.meta.status && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {pageData.meta.status}
+                    </span>
+                  )}
+                  {pageData.meta.stability && (
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {pageData.meta.stability}
+                    </span>
+                  )}
                 </div>
 
                 {/* Tags and topics */}
@@ -410,6 +421,17 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
                   </div>
                 )}
 
+                {pageData.meta.sources?.length ? (
+                  <div className="rounded-md border border-border/30 bg-muted/20 p-2 text-[10px] text-muted-foreground">
+                    <p className="mb-1 font-medium text-foreground">Sources</p>
+                    <div className="max-h-24 overflow-y-auto">
+                      {pageData.meta.sources.map((source) => (
+                        <div key={source} className="break-all">{source}</div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
                 {/* Content */}
                 <div className="prose prose-sm dark:prose-invert max-w-none rounded-md border border-border/30 bg-muted/20 p-3">
                   <pre className="whitespace-pre-wrap text-xs">{pageData.content}</pre>
@@ -436,6 +458,7 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
             onPageClick={(slug) => doLoadPage(slug)}
             onFilterClick={handleGraphFilterClick}
             interactive={true}
+            className="h-full"
           />
         </div>
       )}

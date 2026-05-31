@@ -13,20 +13,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ---------------------------------------------------------------------------
 
 ALLOWED_PAGE_TYPES: set[str] = {
-    "user_profile",
-    "user_preference",
-    "user_goal",
-    "communication_style",
-    "ielts_topic",
-    "ielts_question_bank",
-    "ielts_speaking_example",
-    "language_weakness",
-    "expression_bank",
-    "freechat_project",
-    "freechat_interest",
-    "benative_article_learning",
-    "benative_answer_pattern",
-    "timeline_month",
+    "source",
+    "entity",
+    "concept",
+    "comparison",
+    "question",
+    "synthesis",
+    "decision",
+    "gap",
+    "meta",
 }
 
 ALLOWED_MODES: set[str] = {"global", "ielts", "freechat", "benative", "language"}
@@ -40,6 +35,35 @@ ALLOWED_OPERATIONS: set[str] = {
     "deprecate_fact",
     "update_summary",
 }
+
+LEGACY_PAGE_TYPE_MAP: dict[str, str] = {
+    "user_profile": "entity",
+    "user_preference": "concept",
+    "user_goal": "concept",
+    "communication_style": "concept",
+    "ielts_topic": "concept",
+    "ielts_question_bank": "question",
+    "ielts_speaking_example": "source",
+    "language_weakness": "concept",
+    "expression_bank": "concept",
+    "freechat_project": "entity",
+    "freechat_interest": "concept",
+    "benative_article_learning": "source",
+    "benative_answer_pattern": "concept",
+    "timeline_month": "source",
+    # Common typo from planning notes; keep as an alias, write the canonical form.
+    "comparsion": "comparison",
+}
+
+
+def normalize_page_type(page_type: str) -> str:
+    """Return the canonical wiki page type for new writes."""
+    canonical = LEGACY_PAGE_TYPE_MAP.get(page_type, page_type)
+    if canonical not in ALLOWED_PAGE_TYPES:
+        raise ValueError(
+            f"Unknown page type '{page_type}'. Allowed: {sorted(ALLOWED_PAGE_TYPES)}"
+        )
+    return canonical
 
 # ---------------------------------------------------------------------------
 # Slug validation
@@ -129,9 +153,7 @@ class WikiPatch(BaseModel):
     @field_validator("type")
     @classmethod
     def check_type(cls, v: str) -> str:
-        if v not in ALLOWED_PAGE_TYPES:
-            raise ValueError(f"Unknown page type '{v}'. Allowed: {sorted(ALLOWED_PAGE_TYPES)}")
-        return v
+        return normalize_page_type(v)
 
     @field_validator("mode")
     @classmethod
@@ -168,11 +190,22 @@ class WikiPageMeta(BaseModel):
     title: str = Field(...)
     type: str = Field(...)
     mode: Literal["global", "ielts", "freechat", "benative", "language"]
+    status: Literal["draft", "active", "review", "deprecated", "archived"] = Field(
+        default="active"
+    )
     tags: list[str] = Field(default_factory=list)
     topics: list[str] = Field(default_factory=list)
+    aliases: list[str] = Field(default_factory=list)
+    entities: list[str] = Field(default_factory=list)
+    concepts: list[str] = Field(default_factory=list)
     links: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    created_at: str = Field(default="")
     updated_at: str = Field(...)
+    last_reviewed_at: str | None = Field(default=None)
     confidence: Literal["low", "medium", "high"] = Field(default="medium")
+    stability: Literal["volatile", "stable", "canonical"] = Field(default="volatile")
+    version: int = Field(default=1, ge=1)
 
     @field_validator("slug")
     @classmethod
@@ -182,9 +215,7 @@ class WikiPageMeta(BaseModel):
     @field_validator("type")
     @classmethod
     def check_type(cls, v: str) -> str:
-        if v not in ALLOWED_PAGE_TYPES:
-            raise ValueError(f"Unknown page type '{v}'")
-        return v
+        return normalize_page_type(v)
 
     @field_validator("mode")
     @classmethod

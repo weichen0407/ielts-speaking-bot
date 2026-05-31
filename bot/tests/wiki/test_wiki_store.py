@@ -91,8 +91,8 @@ class TestCreatePage:
         meta, body = page
         assert meta.slug == "test/page"
         assert meta.title == "Test Page"
-        assert meta.type == "ielts_topic"
-        assert ("User Material") in body
+        assert meta.type == "concept"
+        assert ("Evidence") in body
 
     def test_create_page_default_sections(self, store: WikiStore):
         patch = _make_patch(operation="create_page", type="ielts_topic", slug="test/topic")
@@ -101,9 +101,9 @@ class TestCreatePage:
         assert page is not None
         _, body = page
         assert "## Summary" in body
-        assert "## User Material" in body
-        assert "## Useful Expressions" in body
-        assert "## Weaknesses" in body
+        assert "## Definition" in body
+        assert "## Evidence" in body
+        assert "## Related" in body
 
     def test_create_page_language_weakness_sections(self, store: WikiStore):
         patch = _make_patch(operation="create_page", type="language_weakness", slug="test/weak")
@@ -111,8 +111,8 @@ class TestCreatePage:
         page = store.read_page("test/weak")
         assert page is not None
         _, body = page
-        assert "## Examples" in body
-        assert "## Corrections" in body
+        assert "## Definition" in body
+        assert "## Evidence" in body
 
 
 # ---------------------------------------------------------------------------

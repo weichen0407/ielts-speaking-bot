@@ -23,6 +23,7 @@ from .schema import (
     WikiSourcesData,
     WikiSourcesEntry,
 )
+from .wiki_layout import WikiLayout, ensure_wiki_layout
 
 
 # ---------------------------------------------------------------------------
@@ -59,11 +60,20 @@ def _render_frontmatter(meta: WikiPageMeta) -> str:
         "title": meta.title,
         "type": meta.type,
         "mode": meta.mode,
+        "status": meta.status,
         "tags": meta.tags,
         "topics": meta.topics,
+        "aliases": meta.aliases,
+        "entities": meta.entities,
+        "concepts": meta.concepts,
         "links": meta.links,
+        "sources": meta.sources,
+        "created_at": meta.created_at,
         "updated_at": meta.updated_at,
+        "last_reviewed_at": meta.last_reviewed_at,
         "confidence": meta.confidence,
+        "stability": meta.stability,
+        "version": meta.version,
     }
     yaml_str = yaml.safe_dump(obj, default_flow_style=False, sort_keys=False, allow_unicode=True)
     # yaml.safe_dump produces clean YAML; strip any leading '---'
@@ -149,23 +159,28 @@ class WikiStore:
     Wiki root layout::
 
         {wiki_root}/
-            pages/
-                {slug}.md          # page source
-                {slug}.sources.json # source tracking
-            log.jsonl             # all patch events
+            raw/                  # source evidence
+            wiki/
+                {type}/{slug}.md  # crystallized pages
+            index/                # derived search index
+            state/                # cursors and queues
+            schema/               # validation contracts
+            log.jsonl             # machine patch events
     """
 
     def __init__(self, workspace: Path, wiki_root: Path | None = None):
         self.workspace = Path(workspace)
         self.wiki_root = wiki_root or (self.workspace / "persona" / "wiki")
-        self.pages_root = self.wiki_root / "pages"
+        self.layout: WikiLayout = ensure_wiki_layout(self.wiki_root)
+        self.pages_root = self.layout.pages_root
+        self._legacy_pages_root = self.wiki_root / "pages"
         self._log_path = self.wiki_root / "log.jsonl"
         self._ensure_dirs()
 
     # -- Path helpers --------------------------------------------------------
 
     def _ensure_dirs(self) -> None:
-        self.pages_root.mkdir(parents=True, exist_ok=True)
+        ensure_wiki_layout(self.wiki_root)
 
     def page_path(self, slug: str) -> Path:
         """Return the path for a page, validated against traversal."""
@@ -176,6 +191,17 @@ class WikiStore:
         path = self.pages_root / f"{slug}.md"
         resolved = path.resolve()
         if not str(resolved).startswith(str(self.pages_root.resolve())):
+            raise ValueError(f"Path traversal attempt: {slug}")
+        return path
+
+    def legacy_page_path(self, slug: str) -> Path:
+        """Return the page path used by the initial wiki prototype."""
+        from .schema import _validate_slug
+
+        _validate_slug(slug)
+        path = self._legacy_pages_root / f"{slug}.md"
+        resolved = path.resolve()
+        if not str(resolved).startswith(str(self._legacy_pages_root.resolve())):
             raise ValueError(f"Path traversal attempt: {slug}")
         return path
 
@@ -199,7 +225,11 @@ class WikiStore:
         """
         path = self.page_path(slug)
         if not path.exists():
-            return None
+            legacy_path = self.legacy_page_path(slug)
+            if legacy_path.exists():
+                path = legacy_path
+            else:
+                return None
         raw = path.read_text(encoding="utf-8")
         try:
             fm_dict, body = _parse_frontmatter(raw)
@@ -214,9 +244,17 @@ class WikiStore:
             mode=fm_dict.get("mode") or "ielts",
             tags=list(fm_dict.get("tags", [])),
             topics=list(fm_dict.get("topics", [])),
+            aliases=list(fm_dict.get("aliases", [])),
+            entities=list(fm_dict.get("entities", [])),
+            concepts=list(fm_dict.get("concepts", [])),
             links=list(fm_dict.get("links", [])),
+            sources=list(fm_dict.get("sources", [])),
+            created_at=fm_dict.get("created_at") or fm_dict.get("updated_at", ""),
             updated_at=fm_dict.get("updated_at", ""),
+            last_reviewed_at=fm_dict.get("last_reviewed_at"),
             confidence=fm_dict.get("confidence", "medium"),
+            stability=fm_dict.get("stability", "volatile"),
+            version=int(fm_dict.get("version", 1) or 1),
         )
         return meta, body.lstrip("\n")
 
@@ -224,7 +262,11 @@ class WikiStore:
         """Read the companion sources.json for a slug, or None if not found."""
         path = self.sources_path(slug)
         if not path.exists():
-            return None
+            legacy_path = self._legacy_pages_root / f"{slug}.sources.json"
+            if legacy_path.exists():
+                path = legacy_path
+            else:
+                return None
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             return WikiSourcesData.model_validate(data)
@@ -299,6 +341,8 @@ class WikiStore:
                 tags=list(patch.tags),
                 topics=list(patch.topics),
                 links=list(patch.links),
+                sources=_source_refs(patch.sources),
+                created_at=now,
                 updated_at=now,
                 confidence=patch.confidence,
             )
@@ -418,6 +462,9 @@ class WikiStore:
         for l in patch.links:
             if l not in meta.links:
                 meta.links.append(l)
+        for source_ref in _source_refs(patch.sources):
+            if source_ref not in meta.sources:
+                meta.sources.append(source_ref)
 
         self.write_page(meta, body)
         self.write_sources(patch.slug, sources_data)
@@ -447,6 +494,9 @@ class WikiStore:
         )
 
         meta.updated_at = now
+        for source_ref in _source_refs(patch.sources):
+            if source_ref not in meta.sources:
+                meta.sources.append(source_ref)
         self.write_page(meta, body)
         self.write_sources(patch.slug, sources_data)
 
@@ -461,6 +511,9 @@ class WikiStore:
         sections[section] = patch.content
         body = self._build_body(sections)
         meta.updated_at = now
+        for source_ref in _source_refs(patch.sources):
+            if source_ref not in meta.sources:
+                meta.sources.append(source_ref)
         self.write_page(meta, body)
         # Note: replace_section does not touch sources.json since it replaces whole section
 
@@ -472,6 +525,9 @@ class WikiStore:
             if link not in meta.links:
                 meta.links.append(link)
         meta.updated_at = now
+        for source_ref in _source_refs(patch.sources):
+            if source_ref not in meta.sources:
+                meta.sources.append(source_ref)
         self.write_page(meta, body)
 
     def _op_deprecate_fact(
@@ -515,6 +571,9 @@ class WikiStore:
         sections["Summary"] = patch.content
         body = self._build_body(sections)
         meta.updated_at = now
+        for source_ref in _source_refs(patch.sources):
+            if source_ref not in meta.sources:
+                meta.sources.append(source_ref)
         self.write_page(meta, body)
 
     # -- Helpers --------------------------------------------------------------
@@ -522,19 +581,42 @@ class WikiStore:
     def _default_sections(self, patch: WikiPatch) -> dict[str, str]:
         """Return default section structure for a newly created page."""
         sections: dict[str, str] = {"Summary": ""}
-        if patch.type == "ielts_topic":
-            sections["User Material"] = ""
-            sections["Useful Expressions"] = ""
-            sections["Weaknesses"] = ""
-            sections["Review Hooks"] = ""
-        elif patch.type == "language_weakness":
-            sections["Examples"] = ""
-            sections["Corrections"] = ""
-        elif patch.type == "expression_bank":
-            sections["Expressions"] = ""
-        elif patch.type == "freechat_project":
-            sections["Description"] = ""
-            sections["Status"] = ""
+        if patch.type == "source":
+            sections["Raw Reference"] = ""
+            sections["Extracted Signals"] = ""
+        elif patch.type == "entity":
+            sections["Identity"] = ""
+            sections["Known Facts"] = ""
+            sections["Open Questions"] = ""
+        elif patch.type == "concept":
+            sections["Definition"] = ""
+            sections["Evidence"] = ""
+            sections["Related"] = ""
+        elif patch.type == "comparison":
+            sections["Compared Items"] = ""
+            sections["Similarities"] = ""
+            sections["Differences"] = ""
+            sections["Decision Relevance"] = ""
+        elif patch.type == "question":
+            sections["Question"] = ""
+            sections["Context"] = ""
+            sections["Possible Answers"] = ""
+        elif patch.type == "synthesis":
+            sections["Insight"] = ""
+            sections["Supporting Evidence"] = ""
+            sections["Implications"] = ""
+        elif patch.type == "decision":
+            sections["Decision"] = ""
+            sections["Rationale"] = ""
+            sections["Consequences"] = ""
+        elif patch.type == "gap":
+            sections["Missing Knowledge"] = ""
+            sections["Why It Matters"] = ""
+            sections["Research Plan"] = ""
+        elif patch.type == "meta":
+            sections["Purpose"] = ""
+            sections["Rules"] = ""
+            sections["State"] = ""
         return sections
 
     def _build_body(self, sections: dict[str, str]) -> str:
@@ -562,6 +644,15 @@ class WikiStore:
             result = self.read_page(slug)
             if result:
                 pages.append(result[0])
+        if self._legacy_pages_root.exists():
+            seen = {page.slug for page in pages}
+            for md_file in self._legacy_pages_root.rglob("*.md"):
+                slug = str(md_file.relative_to(self._legacy_pages_root))[:-3].replace("\\", "/")
+                if slug in seen:
+                    continue
+                result = self.read_page(slug)
+                if result:
+                    pages.append(result[0])
         return pages
 
 
@@ -571,3 +662,20 @@ class WikiStore:
 
 def _now_iso() -> str:
     return datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")
+
+
+def _source_refs(sources: list[WikiSource]) -> list[str]:
+    """Return stable frontmatter source refs for detailed sidecar sources."""
+    refs: list[str] = []
+    for source in sources:
+        if source.message_id and source.session_id:
+            ref = f"{source.kind}:{source.session_id}:{source.message_id}"
+        elif source.session_id:
+            ref = f"{source.kind}:{source.session_id}"
+        elif source.file:
+            ref = f"{source.kind}:{source.file}"
+        else:
+            ref = source.kind
+        if ref not in refs:
+            refs.append(ref)
+    return refs

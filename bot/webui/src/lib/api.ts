@@ -182,6 +182,22 @@ export interface AdminSubagentRun {
   announce_result?: boolean;
 }
 
+export interface WikiSyncRun {
+  timestamp: string;
+  session_id: string;
+  status: "started" | "ok" | "error" | string;
+  source_id?: string;
+  source_file?: string;
+  messages?: number;
+  candidates?: number;
+  patches?: number;
+  applied?: number;
+  applied_slugs?: string[];
+  lint_findings?: number;
+  lint_errors?: number;
+  error?: string;
+}
+
 export interface AdminActivity {
   kind: "subagent_result" | "tool" | string;
   session_id: string;
@@ -198,6 +214,7 @@ export interface AdminMonitorPayload {
   prompts: AdminPrompt[];
   subagent_statuses: AdminSubagentStatus[];
   subagent_runs: AdminSubagentRun[];
+  wiki_sync_runs?: WikiSyncRun[];
   recent_activity: AdminActivity[];
 }
 
@@ -573,11 +590,20 @@ export interface WikiPageMeta {
   title: string;
   type: string;
   mode: string;
+  status?: "draft" | "active" | "review" | "deprecated" | "archived" | string;
   tags: string[];
   topics: string[];
+  aliases?: string[];
+  entities?: string[];
+  concepts?: string[];
   links: string[];
+  sources?: string[];
+  created_at?: string;
   updated_at: string;
+  last_reviewed_at?: string | null;
   confidence: "low" | "medium" | "high";
+  stability?: "volatile" | "stable" | "canonical" | string;
+  version?: number;
 }
 
 export interface WikiPageResponse {
@@ -588,7 +614,7 @@ export interface WikiPageResponse {
 export interface WikiGraphNode {
   id: string;
   label: string;
-  kind: "page" | "tag" | "topic" | "mode";
+  kind: "page" | "topic" | "entity" | "concept";
   type?: string;
   mode?: string;
   tags?: string[];
@@ -601,7 +627,7 @@ export interface WikiGraphNode {
 export interface WikiGraphEdge {
   source: string;
   target: string;
-  kind: "link" | "has_tag" | "has_topic" | "has_mode";
+  kind: "link" | "has_topic" | "mentions_entity" | "mentions_concept";
 }
 
 export interface WikiGraphResponse {
@@ -617,6 +643,21 @@ export interface WikiPatchResponse {
 export interface WikiRebuildResponse {
   ok: boolean;
   chunks_indexed: number;
+}
+
+export interface WikiLintFinding {
+  layer: "structure" | "semantic";
+  severity: "info" | "warning" | "error";
+  slug: string;
+  code: string;
+  message: string;
+}
+
+export interface WikiLintResponse {
+  findings: WikiLintFinding[];
+  count: number;
+  errors: number;
+  warnings: number;
 }
 
 export async function fetchWikiSearch(
@@ -695,6 +736,25 @@ export async function rebuildWikiIndex(
 ): Promise<WikiRebuildResponse> {
   return request<WikiRebuildResponse>(
     `${base}/api/wiki/rebuild-index`,
+    token,
+  );
+}
+
+export async function fetchWikiLint(
+  token: string,
+  base: string = "",
+): Promise<WikiLintResponse> {
+  return request<WikiLintResponse>(`${base}/api/wiki/lint`, token);
+}
+
+export async function fetchWikiSyncLog(
+  token: string,
+  limit: number = 100,
+  base: string = "",
+): Promise<{ runs: WikiSyncRun[] }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<{ runs: WikiSyncRun[] }>(
+    `${base}/api/wiki/sync-log?${params}`,
     token,
   );
 }

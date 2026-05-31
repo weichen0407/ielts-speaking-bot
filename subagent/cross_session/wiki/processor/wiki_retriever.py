@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .wiki_search import WikiSearch
+from .wiki_query import WikiQueryEngine
 
 
 DEFAULT_MAX_CHARS = 4000
@@ -31,8 +31,8 @@ def read_wiki_context(
     if wiki_root is None:
         return "(none)"
 
-    searcher = WikiSearch(wiki_root=wiki_root)
-    results = searcher.search(
+    searcher = WikiQueryEngine(wiki_root=wiki_root)
+    results = searcher.query(
         query,
         mode=mode,
         topic=topic,

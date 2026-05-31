@@ -18,11 +18,24 @@ persona/memory/*.jsonl
 # Shared runtime data
 shared/.cursor_*.json
 shared/thread.jsonl
+session_index.jsonl
+user_responses.jsonl
+sessions/
+monitor/*.jsonl
+memory/*.jsonl
+trigger/cron/jobs.json
 
 # Session data (dynamically created)
 data/thread.jsonl
 data/thread.jsonl.bak-*
 *.jsonl.tmp
+
+# Wiki runtime state and derived indexes
+persona/wiki/raw/thread/*.jsonl
+persona/wiki/state/*.jsonl
+persona/wiki/state/ingest_cursor.json
+persona/wiki/index/*.sqlite
+persona/wiki/index/*.sqlite-*
 
 # Local Python environments and test caches
 .venv/

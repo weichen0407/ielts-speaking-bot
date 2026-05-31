@@ -6,6 +6,7 @@ Actions:
 - propose_patch: Preview a patch without applying it
 - apply_patch: Apply a patch (requires explicit user intent)
 - graph: Get the knowledge graph data
+- lint: Run structural and semantic wiki checks
 
 Safety: apply_patch requires explicit user intent or UI confirmation.
 """
@@ -30,8 +31,8 @@ from nanobot.agent.tools.schema import (
         required=["action"],
         properties={
             "action": StringSchema(
-                "Action to perform: search, read, propose_patch, apply_patch, graph",
-                enum=("search", "read", "propose_patch", "apply_patch", "graph"),
+                "Action to perform: search, read, propose_patch, apply_patch, graph, lint",
+                enum=("search", "read", "propose_patch", "apply_patch", "graph", "lint"),
             ),
             "query": StringSchema(
                 "Search query string for search action",
@@ -146,6 +147,8 @@ class WikiTool(Tool, ContextAware):
             return await self._do_apply_patch(wiki_root, patch)
         elif action == "graph":
             return await self._do_graph(wiki_root, mode, topic, page_type, tags)
+        elif action == "lint":
+            return await self._do_lint(wiki_root)
         else:
             return {"status": "error", "message": f"Unknown action: {action}"}
 
@@ -160,9 +163,9 @@ class WikiTool(Tool, ContextAware):
         limit: int | None,
     ) -> dict:
         try:
-            from subagent.cross_session.wiki.processor.wiki_search import WikiSearch
-            searcher = WikiSearch(wiki_root=wiki_root)
-            results = searcher.search(
+            from subagent.cross_session.wiki.processor.wiki_query import WikiQueryEngine
+            searcher = WikiQueryEngine(wiki_root=wiki_root)
+            results = searcher.query(
                 query=query or "",
                 mode=mode,
                 topic=topic,
@@ -284,4 +287,18 @@ class WikiTool(Tool, ContextAware):
             }
         except Exception as e:
             logger.exception("[WikiTool] graph error: {}", e)
+            return {"status": "error", "message": str(e)}
+
+    async def _do_lint(self, wiki_root: Path) -> dict:
+        try:
+            from subagent.cross_session.wiki.processor.wiki_lint import WikiLinter
+            linter = WikiLinter(wiki_root=wiki_root)
+            findings = linter.lint()
+            return {
+                "status": "ok",
+                "findings": [finding.__dict__ for finding in findings],
+                "count": len(findings),
+            }
+        except Exception as e:
+            logger.exception("[WikiTool] lint error: {}", e)
             return {"status": "error", "message": str(e)}

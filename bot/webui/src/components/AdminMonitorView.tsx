@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronLeft,
   Clock3,
+  Database,
   FileText,
   Loader2,
   RefreshCw,
@@ -154,6 +155,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const promptCount = payload?.prompts.length ?? 0;
   const activityCount = payload?.recent_activity.length ?? 0;
   const subagentRuns = payload?.subagent_runs ?? [];
+  const wikiSyncRuns = payload?.wiki_sync_runs ?? [];
   const selectedRun = useMemo(
     () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
     [selectedRunKey, subagentRuns],
@@ -189,10 +191,11 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
         </div>
       ) : null}
 
-      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-5">
         <Metric icon={Settings2} label="启用触发器" value={enabledCount} />
         <Metric icon={FileText} label="Prompt 文件" value={promptCount} />
         <Metric icon={Bot} label="运行中 subagent" value={activeCount} />
+        <Metric icon={Database} label="Wiki Sync" value={wikiSyncRuns.length} />
         <Metric icon={Activity} label="最近活动" value={activityCount} />
       </div>
 
@@ -323,7 +326,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
             </Panel>
           </div>
 
-          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3">
+          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-4">
             <Panel title="Subagent 调用列表" icon={Bot}>
               <div className="h-full overflow-y-auto pr-1">
                 {subagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
@@ -352,6 +355,38 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                       {run.error || run.result || "-"}
                     </p>
                   </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Wiki Sync" icon={Database}>
+              <div className="h-full overflow-y-auto">
+                {wikiSyncRuns.length === 0 ? <EmptyText text="还没有 wiki sync 记录；用户回复后会写入这里" /> : null}
+                {wikiSyncRuns.map((run, index) => (
+                  <div key={`${run.timestamp}:${run.session_id}:${index}`} className="mb-2 rounded-md border p-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{run.session_id}</span>
+                      <span className={cn(
+                        "rounded px-1.5 py-0.5",
+                        run.status === "error"
+                          ? "bg-red-500/10 text-red-600"
+                          : "bg-emerald-500/10 text-emerald-600",
+                      )}>{run.status}</span>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">{shortTime(run.timestamp)}</p>
+                    <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                      <span>messages {run.messages ?? 0}</span>
+                      <span>candidates {run.candidates ?? 0}</span>
+                      <span>applied {run.applied ?? 0}</span>
+                      <span>lint {run.lint_findings ?? 0}</span>
+                    </div>
+                    {run.applied_slugs?.length ? (
+                      <p className="mt-1 line-clamp-2 break-all text-muted-foreground">
+                        {run.applied_slugs.join(", ")}
+                      </p>
+                    ) : null}
+                    {run.error ? <p className="mt-1 text-red-600">{run.error}</p> : null}
+                  </div>
                 ))}
               </div>
             </Panel>

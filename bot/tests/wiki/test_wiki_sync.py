@@ -1,7 +1,5 @@
 import json
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 from nanobot.agent.wiki_sync import sync_session_to_wiki
@@ -9,11 +7,11 @@ from nanobot.agent.wiki_sync import sync_session_to_wiki
 
 class FakeProvider:
     def __init__(self) -> None:
-        self.messages = None
+        self.called = False
 
     async def chat(self, *, messages, **_kwargs):
-        self.messages = messages
-        return SimpleNamespace(content="(none)")
+        self.called = True
+        raise AssertionError("wiki sync core should not call provider.chat")
 
 
 @pytest.mark.asyncio
@@ -39,7 +37,7 @@ async def test_wiki_sync_reads_global_thread_context(tmp_path: Path) -> None:
     )
 
     provider = FakeProvider()
-    patches = await sync_session_to_wiki(
+    result = await sync_session_to_wiki(
         session_key=session_uuid,
         session_dir=str(tmp_path / "persona" / "sessions" / session_uuid),
         workspace=tmp_path,
@@ -47,8 +45,9 @@ async def test_wiki_sync_reads_global_thread_context(tmp_path: Path) -> None:
         model="test-model",
     )
 
-    assert patches == 0
-    assert provider.messages is not None
-    prompt = provider.messages[1]["content"]
-    assert "User: I enjoy local food." in prompt
-    assert "Assistant: That sounds meaningful." in prompt
+    assert result["status"] == "ok"
+    assert result["messages"] == 2
+    assert result["candidates"] >= 1
+    assert result["applied"] >= 1
+    assert provider.called is False
+    assert (tmp_path / "persona" / "wiki" / "state" / "sync_log.jsonl").exists()
