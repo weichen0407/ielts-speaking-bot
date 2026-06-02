@@ -70,3 +70,6 @@ user-notes/
 # Local resume draft
 cv.tex
 cv_en.tex
+
+# Local private notes, interview prep, and scratch documents
+.local/
