@@ -66,3 +66,7 @@ __pycache__/
 
 # User notes (dynamically created, should not be committed)
 user-notes/
+
+# Local resume draft
+cv.tex
+cv_en.tex

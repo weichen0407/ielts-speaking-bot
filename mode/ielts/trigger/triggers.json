@@ -2,18 +2,116 @@
   "version": 1,
   "triggers": [
     {
-      "id": "vocab_analysis",
-      "name": "Vocabulary Analysis",
+      "id": "ielts_vocab_processor",
+      "name": "IELTS Vocab Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "vocab",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/ielts/vocab.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_polisher_processor",
+      "name": "IELTS Polisher Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "polisher",
+        "depends_on": "ielts_vocab_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/ielts/polisher.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_notes_processor",
+      "name": "IELTS Notes Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "notes",
+        "depends_on": "ielts_polisher_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/ielts/notes.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_progress_tracker_processor",
+      "name": "IELTS Progress Tracker Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "progress_tracker",
+        "depends_on": "ielts_notes_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/ielts/progress_tracker.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_review_processor",
+      "name": "IELTS Review Processor",
       "enabled": true,
       "condition": {
         "kind": "turn_count",
-        "count": 2,
+        "count": 1,
         "scope": "session"
       },
       "target": {
-        "subagent": "vocab",
-        "prompt_file": "subagent/single_session/vocab/context/vocab_subagent.md",
-        "task_template": "Analyze the conversation history and update vocabulary suggestions.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/vocab.md"
+        "processor": "review",
+        "depends_on": "ielts_progress_tracker_processor",
+        "input_paths": [
+          "persona/processor/ielts/vocab.jsonl",
+          "persona/processor/ielts/polisher.jsonl",
+          "persona/processor/ielts/notes.jsonl"
+        ],
+        "output_path": "persona/processor/ielts/review.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
       },
       "cursor": {
         "offset": 0,
@@ -21,18 +119,43 @@
       }
     },
     {
-      "id": "polish_feedback",
-      "name": "Polish Feedback",
+      "id": "ielts_quiz_processor",
+      "name": "IELTS Quiz Processor",
       "enabled": true,
       "condition": {
         "kind": "turn_count",
-        "count": 3,
+        "count": 1,
         "scope": "session"
       },
       "target": {
-        "subagent": "polisher",
-        "prompt_file": "subagent/single_session/polisher/context/polisher_subagent.md",
-        "task_template": "Analyze recent user messages and show optimized versions with diff.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/polisher.md"
+        "processor": "quiz",
+        "depends_on": "ielts_review_processor",
+        "input_path": "persona/processor/ielts/review.jsonl",
+        "output_path": "persona/processor/ielts/quiz.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "ielts_progress_organizer_processor",
+      "name": "IELTS Progress Organizer Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "turn_count",
+        "count": 1,
+        "scope": "session"
+      },
+      "target": {
+        "processor": "progress_organizer",
+        "depends_on": "ielts_quiz_processor",
+        "input_path": "persona/processor/ielts/progress_tracker.jsonl",
+        "output_path": "persona/processor/ielts/progress_organizer.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
       },
       "cursor": {
         "offset": 0,

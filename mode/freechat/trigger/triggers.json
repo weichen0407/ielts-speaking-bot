@@ -2,8 +2,99 @@
   "version": 1,
   "triggers": [
     {
-      "id": "vocab_analysis",
-      "name": "Vocabulary Analysis",
+      "id": "freechat_vocab_processor",
+      "name": "Freechat Vocab Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "vocab",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/freechat/vocab.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "freechat_polisher_processor",
+      "name": "Freechat Polisher Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "polisher",
+        "depends_on": "freechat_vocab_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/freechat/polisher.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "freechat_notes_processor",
+      "name": "Freechat Notes Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "notes",
+        "depends_on": "freechat_polisher_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/freechat/notes.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "freechat_progress_tracker_processor",
+      "name": "Freechat Progress Tracker Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 2,
+        "scope": "global",
+        "path": "persona/events/thread.jsonl"
+      },
+      "target": {
+        "processor": "progress_tracker",
+        "depends_on": "freechat_notes_processor",
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/freechat/progress_tracker.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 8,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "freechat_review_processor",
+      "name": "Freechat Review Processor",
       "enabled": true,
       "condition": {
         "kind": "turn_count",
@@ -11,9 +102,16 @@
         "scope": "session"
       },
       "target": {
-        "subagent": "vocab",
-        "prompt_file": "subagent/single_session/vocab/context/vocab_subagent.md",
-        "task_template": "Analyze the conversation history and update vocabulary suggestions.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/vocab.md"
+        "processor": "review",
+        "depends_on": "freechat_progress_tracker_processor",
+        "input_paths": [
+          "persona/processor/freechat/vocab.jsonl",
+          "persona/processor/freechat/polisher.jsonl",
+          "persona/processor/freechat/notes.jsonl"
+        ],
+        "output_path": "persona/processor/freechat/review.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
       },
       "cursor": {
         "offset": 0,
@@ -21,8 +119,8 @@
       }
     },
     {
-      "id": "polish_feedback",
-      "name": "Polish Feedback",
+      "id": "freechat_quiz_processor",
+      "name": "Freechat Quiz Processor",
       "enabled": true,
       "condition": {
         "kind": "turn_count",
@@ -30,9 +128,34 @@
         "scope": "session"
       },
       "target": {
-        "subagent": "polisher",
-        "prompt_file": "subagent/single_session/polisher/context/polisher_subagent.md",
-        "task_template": "Analyze recent user messages and show optimized versions with diff.\n\nOnly analyze records where role is \"user\". Assistant messages are context only and must not be corrected or scored.\n\nSession directory: {session_dir}/notes/\nRead: {session_dir}/thread.jsonl\nWrite to: {session_dir}/notes/polisher.md"
+        "processor": "quiz",
+        "depends_on": "freechat_review_processor",
+        "input_path": "persona/processor/freechat/review.jsonl",
+        "output_path": "persona/processor/freechat/quiz.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "freechat_progress_organizer_processor",
+      "name": "Freechat Progress Organizer Processor",
+      "enabled": true,
+      "condition": {
+        "kind": "turn_count",
+        "count": 1,
+        "scope": "session"
+      },
+      "target": {
+        "processor": "progress_organizer",
+        "depends_on": "freechat_quiz_processor",
+        "input_path": "persona/processor/freechat/progress_tracker.jsonl",
+        "output_path": "persona/processor/freechat/progress_organizer.jsonl",
+        "batch_size": 50,
+        "model": "deepseek-v4-flash"
       },
       "cursor": {
         "offset": 0,

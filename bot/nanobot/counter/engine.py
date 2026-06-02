@@ -200,6 +200,19 @@ class CounterEngine:
                 )
                 continue
 
+            if trigger.target.depends_on:
+                self._log_decision(
+                    trigger,
+                    decision="skipped",
+                    reason="waiting_for_dependency",
+                    mode=mode,
+                    session_uuid=session_uuid,
+                    turn_count=turn_count,
+                    source=source,
+                    details={"depends_on": trigger.target.depends_on},
+                )
+                continue
+
             cond = trigger.condition
 
             if cond.kind == "file_line_count":

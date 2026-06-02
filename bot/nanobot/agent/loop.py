@@ -11,6 +11,7 @@ from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -285,8 +286,36 @@ class AgentLoop:
                 return
 
             processor = processor_cls()
+            if hasattr(processor, "configure_llm"):
+                processor.configure_llm(
+                    provider=self.provider,
+                    model=target.model or self.model,
+                    retry_mode=self.provider_retry_mode,
+                )
             output_path = Path(self.counter_engine.workspace) / target.output_path
             batch_size = target.batch_size or 50
+
+            def materialize_delta_input(source_path: Path) -> tuple[Path, TemporaryDirectory[str] | None]:
+                """Return a delta-only jsonl file for cursor-based processor triggers."""
+                if trigger.condition.kind != "file_line_count" or not trigger.condition.path:
+                    return source_path, None
+
+                cursor_offset = int(trigger._cursor.get("offset", 0) or 0)
+                try:
+                    lines = source_path.read_text(encoding="utf-8").splitlines()
+                except FileNotFoundError:
+                    return source_path, None
+                if cursor_offset > len(lines):
+                    cursor_offset = 0
+                delta_lines = lines[cursor_offset:]
+
+                temp_dir = TemporaryDirectory(prefix="nanobot_processor_delta_")
+                delta_path = Path(temp_dir.name) / source_path.name
+                delta_path.write_text(
+                    "\n".join(delta_lines) + ("\n" if delta_lines else ""),
+                    encoding="utf-8",
+                )
+                return delta_path, temp_dir
 
             # Determine input paths (single or multiple)
             if target.input_paths:
@@ -300,7 +329,14 @@ class AgentLoop:
                     batch_size,
                 )
                 # Call with input_paths for multi-input processors
-                if hasattr(processor, 'process_all') and 'input_paths' in str(inspect.signature(processor.process_all)):
+                if hasattr(processor, "aprocess_all") and "input_paths" in str(inspect.signature(processor.aprocess_all)):
+                    await processor.aprocess_all(
+                        input_paths=input_paths,
+                        output_path=output_path,
+                        batch_size=batch_size,
+                        format="both",
+                    )
+                elif hasattr(processor, 'process_all') and 'input_paths' in str(inspect.signature(processor.process_all)):
                     processor.process_all(
                         input_paths=input_paths,
                         output_path=output_path,
@@ -309,28 +345,49 @@ class AgentLoop:
                     )
                 else:
                     # Fallback for processors expecting single input_path
-                    processor.process_all(
-                        input_path=input_paths[0] if input_paths else Path(""),
-                        output_path=output_path,
-                        batch_size=batch_size,
-                        format="both",
-                    )
+                    if hasattr(processor, "aprocess_all"):
+                        await processor.aprocess_all(
+                            input_path=input_paths[0] if input_paths else Path(""),
+                            output_path=output_path,
+                            batch_size=batch_size,
+                            format="both",
+                        )
+                    else:
+                        processor.process_all(
+                            input_path=input_paths[0] if input_paths else Path(""),
+                            output_path=output_path,
+                            batch_size=batch_size,
+                            format="both",
+                        )
             else:
                 # Single input file (Level 2 processors)
                 input_path = Path(self.counter_engine.workspace) / target.input_path
+                run_input_path, temp_dir = materialize_delta_input(input_path)
                 logger.info(
                     "Executing processor [{}] with input={}, output={}, batch_size={}",
                     target.processor,
-                    input_path,
+                    run_input_path,
                     output_path,
                     batch_size,
                 )
-                processor.process_all(
-                    input_path=input_path,
-                    output_path=output_path,
-                    batch_size=batch_size,
-                    format="both",
-                )
+                try:
+                    if hasattr(processor, "aprocess_all"):
+                        await processor.aprocess_all(
+                            input_path=run_input_path,
+                            output_path=output_path,
+                            batch_size=batch_size,
+                            format="both",
+                        )
+                    else:
+                        processor.process_all(
+                            input_path=run_input_path,
+                            output_path=output_path,
+                            batch_size=batch_size,
+                            format="both",
+                        )
+                finally:
+                    if temp_dir is not None:
+                        temp_dir.cleanup()
 
             self.counter_engine.record_trigger(session.metadata, trigger.id)
             self._log_counter_trigger_decision(
@@ -418,7 +475,7 @@ class AgentLoop:
 
             chained = [
                 t for t in self.counter_engine._triggers
-                if t.target.depends_on == completed_trigger_id
+                if t.enabled and t.target.depends_on == completed_trigger_id
             ]
             for trigger in chained:
                 await self._spawn_counter_subagent(session, msg, trigger, session_dir)

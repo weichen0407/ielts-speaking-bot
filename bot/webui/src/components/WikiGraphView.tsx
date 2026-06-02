@@ -54,6 +54,7 @@ export interface WikiGraphViewProps {
 
 const COLORS: Record<GraphKind, string> = {
   page: "#2563eb",
+  domain: "#0f172a",
   topic: "#0f766e",
   entity: "#2563eb",
   concept: "#7c3aed",
@@ -71,8 +72,18 @@ const TYPE_COLORS: Record<string, string> = {
   meta: "#475569",
 };
 
+function edgeColor(kind: string): string {
+  if (kind === "link") return "rgba(71,85,105,0.36)";
+  if (kind === "has_domain") return "rgba(15,23,42,0.28)";
+  if (kind === "has_topic" || kind === "contains_topic") return "rgba(15,118,110,0.30)";
+  if (kind === "topic_entity" || kind === "mentions_entity") return "rgba(37,99,235,0.24)";
+  if (kind === "has_subtype" || kind === "mentions_concept") return "rgba(124,58,237,0.22)";
+  if (kind.startsWith("relation:")) return "rgba(219,39,119,0.32)";
+  return "rgba(100,116,139,0.24)";
+}
+
 function topicAnchors(nodes: GraphNode[], width: number, height: number): Map<string, { x: number; y: number }> {
-  const topics = nodes.filter((node) => node.kind === "topic").sort((a, b) => a.id.localeCompare(b.id));
+  const topics = nodes.filter((node) => node.kind === "domain" || node.kind === "topic").sort((a, b) => a.id.localeCompare(b.id));
   const anchors = new Map<string, { x: number; y: number }>();
   if (topics.length === 0) return anchors;
   const cx = width / 2;
@@ -97,7 +108,7 @@ function topicAnchorForNode(
   links: GraphLink[],
   anchors: Map<string, { x: number; y: number }>,
 ): { x: number; y: number } | undefined {
-  if (node.kind === "topic") return anchors.get(node.id);
+  if (node.kind === "domain" || node.kind === "topic") return anchors.get(node.id);
   const link = links.find((edge) => {
     if (edge.kind !== "has_topic") return false;
     const source = typeof edge.source === "string" ? edge.source : edge.source.id;
@@ -120,7 +131,7 @@ function initialNodePosition(
   links: GraphLink[],
 ): { x: number; y: number } {
   const anchor = topicAnchorForNode(node, links, anchors);
-  if (node.kind === "topic" && anchor) return anchor;
+  if ((node.kind === "domain" || node.kind === "topic") && anchor) return anchor;
   const base = anchor ?? { x: width / 2, y: height / 2 };
   const angle = index * 2.399963229728653;
   const radius = node.kind === "page" ? 58 + (index % 4) * 18 : 34 + (index % 3) * 12;
@@ -213,6 +224,7 @@ export function WikiGraphView({
   }, [highlightedNodes]);
 
   const getNodeRadius = useCallback((node: GraphNode): number => {
+    if (node.kind === "domain") return Math.min(40, 22 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 3);
     if (node.kind === "topic") return Math.min(34, 18 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 3);
     if (node.kind === "entity") return Math.min(22, 9 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 2.2);
     if (node.kind === "concept") return Math.min(20, 8 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 2);
@@ -242,13 +254,13 @@ export function WikiGraphView({
     ctx.scale(t.k, t.k);
 
     for (const node of graphRef.current.nodes) {
-      if (node.kind !== "topic" || typeof node.x !== "number") continue;
+      if ((node.kind !== "domain" && node.kind !== "topic") || typeof node.x !== "number") continue;
       const radius = getNodeRadius(node) + Math.min(90, 36 + node.degree * 8);
       ctx.beginPath();
       ctx.arc(node.x, node.y ?? 0, radius, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(15,118,110,0.055)";
+      ctx.fillStyle = node.kind === "domain" ? "rgba(15,23,42,0.045)" : "rgba(15,118,110,0.055)";
       ctx.fill();
-      ctx.strokeStyle = "rgba(15,118,110,0.16)";
+      ctx.strokeStyle = node.kind === "domain" ? "rgba(15,23,42,0.14)" : "rgba(15,118,110,0.16)";
       ctx.setLineDash([6 / t.k, 6 / t.k]);
       ctx.lineWidth = 1.2 / t.k;
       ctx.stroke();
@@ -262,13 +274,7 @@ export function WikiGraphView({
       ctx.beginPath();
       ctx.moveTo(source.x, source.y ?? 0);
       ctx.lineTo(target.x, target.y ?? 0);
-      ctx.strokeStyle = link.kind === "link"
-        ? "rgba(71,85,105,0.36)"
-        : link.kind === "has_topic"
-          ? "rgba(15,118,110,0.30)"
-          : link.kind === "mentions_entity"
-            ? "rgba(37,99,235,0.24)"
-            : "rgba(124,58,237,0.22)";
+      ctx.strokeStyle = edgeColor(link.kind);
       ctx.lineWidth = link.kind === "link" ? 1.5 / t.k : 1 / t.k;
       ctx.stroke();
     }
@@ -300,7 +306,7 @@ export function WikiGraphView({
 
       if (node.kind !== "page" || t.k > 0.82 || highlighted || hovered || selected) {
         const label = node.label.length > 22 ? `${node.label.slice(0, 21)}...` : node.label;
-        ctx.font = `${node.kind === "topic" ? "600 " : ""}${Math.max(10, 11 / Math.sqrt(t.k))}px system-ui, sans-serif`;
+        ctx.font = `${node.kind === "domain" || node.kind === "topic" ? "600 " : ""}${Math.max(10, 11 / Math.sqrt(t.k))}px system-ui, sans-serif`;
         ctx.fillStyle = "#0f172a";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
@@ -333,21 +339,21 @@ export function WikiGraphView({
         "link",
         forceLink<GraphNode, GraphLink>(links)
           .id((node) => node.id)
-          .distance((link) => link.kind === "has_topic" ? 118 : link.kind === "link" ? 92 : 72)
-          .strength((link) => link.kind === "has_topic" ? 0.2 : link.kind === "link" ? 0.16 : 0.14),
+          .distance((link) => link.kind === "has_domain" ? 132 : link.kind === "has_topic" || link.kind === "contains_topic" ? 118 : link.kind === "link" ? 92 : 72)
+          .strength((link) => link.kind === "has_domain" ? 0.22 : link.kind === "has_topic" || link.kind === "contains_topic" ? 0.2 : link.kind === "link" ? 0.16 : 0.14),
       )
-      .force("charge", forceManyBody<GraphNode>().strength((node) => node.kind === "topic" ? -360 : node.kind === "page" ? -80 : -55))
+      .force("charge", forceManyBody<GraphNode>().strength((node) => node.kind === "domain" ? -430 : node.kind === "topic" ? -360 : node.kind === "page" ? -80 : -55))
       .force("x", forceX<GraphNode>((node) => {
-        if (node.kind === "topic") return topicPositions.get(node.id)?.x ?? dimensions.width / 2;
+        if (node.kind === "domain" || node.kind === "topic") return topicPositions.get(node.id)?.x ?? dimensions.width / 2;
         const anchor = topicAnchorForNode(node, graphData.links, topicPositions);
         return anchor?.x ?? dimensions.width / 2;
-      }).strength((node) => node.kind === "topic" ? 0.18 : 0.055))
+      }).strength((node) => node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055))
       .force("y", forceY<GraphNode>((node) => {
-        if (node.kind === "topic") return topicPositions.get(node.id)?.y ?? dimensions.height / 2;
+        if (node.kind === "domain" || node.kind === "topic") return topicPositions.get(node.id)?.y ?? dimensions.height / 2;
         const anchor = topicAnchorForNode(node, graphData.links, topicPositions);
         return anchor?.y ?? dimensions.height / 2;
-      }).strength((node) => node.kind === "topic" ? 0.18 : 0.055))
-      .force("collide", forceCollide<GraphNode>().radius((node) => getNodeRadius(node) + (node.kind === "topic" ? 30 : 12)))
+      }).strength((node) => node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055))
+      .force("collide", forceCollide<GraphNode>().radius((node) => getNodeRadius(node) + (node.kind === "domain" ? 34 : node.kind === "topic" ? 30 : 12)))
       .alpha(0.55)
       .alphaDecay(0.055)
       .velocityDecay(0.58)
@@ -504,6 +510,7 @@ export function WikiGraphView({
   }, [draw]);
 
   const legend = useMemo(() => [
+    ["domain", COLORS.domain],
     ["topic cluster", COLORS.topic],
     ["entity", COLORS.entity],
     ["concept", COLORS.concept],

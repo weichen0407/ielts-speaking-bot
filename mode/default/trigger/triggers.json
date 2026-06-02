@@ -13,6 +13,7 @@
       "target": {
         "subagent": "memory_cron",
         "prompt_file": "subagent/cross_session/memory_cron/context/memory_cron_subagent.md",
+        "model": "deepseek-v4-flash",
         "task_template": "Update user memory profile from incremental session deltas only.\n\nSession deltas (JSON):\n{modified_sessions}\n\nEach entry contains only new thread.jsonl records since the previous successful memory_cron run. Extract NEW facts/preferences from new_messages and merge into {workspace}/persona/memory/MEMORY.md.\n\nDo not re-read whole thread.jsonl files unless the delta explicitly indicates a reset."
       },
       "cursor": {
@@ -32,6 +33,7 @@
       "target": {
         "subagent": "daily_consolidator",
         "prompt_file": "subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md",
+        "model": "deepseek-v4-flash",
         "task_template": "Aggregate incremental vocab.md and polisher.md deltas from sessions modified since last run.\n\nNote deltas (JSON):\n{modified_sessions}\n\nEach entry contains vocab_delta and/or polisher_delta text appended since the previous successful daily_consolidator run. Process only those deltas.\n\nWrite to: {workspace}/subagent/cross_session/daily_consolidator/data/daily/daily_{date}.md"
       },
       "cursor": {
@@ -52,11 +54,12 @@
       "target": {
         "subagent": "progress_tracker",
         "prompt_file": "subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md",
+        "model": "deepseek-v4-flash",
         "task_template": "Track user expression progress.\n\nInput: {workspace}/persona/user_responses.jsonl\nOutput: {workspace}/persona/progress_bank.jsonl"
       },
       "cursor": {
-        "offset": 23,
-        "last_checked": "2026-05-29T15:30:50.045924Z"
+        "offset": 4,
+        "last_checked": "2026-06-02T16:39:17.000000Z"
       }
     },
     {
@@ -71,6 +74,7 @@
       "target": {
         "subagent": "benative_article_fetcher",
         "prompt_file": "subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md",
+        "model": "deepseek-v4-flash",
         "task_template": "Fetch news articles for benative mode practice.\n\nArticles directory: {workspace}/persona/benative/articles/\nCursor file: {workspace}/persona/benative/.cursor_benative_articles.json\nWrite article JSON files and update cursor."
       },
       "cursor": {
@@ -90,6 +94,7 @@
       "target": {
         "subagent": "benative_translator",
         "prompt_file": "subagent/cross_session/benative_translator/context/benative_translator_subagent.md",
+        "model": "deepseek-v4-flash",
         "task_template": "Translate untranslated benative articles.\n\nArticles directory: {workspace}/persona/benative/articles/\nPairs directory: {workspace}/persona/benative/pairs/\nCursor file: {workspace}/persona/benative/.cursor_benative_translator.json"
       },
       "cursor": {

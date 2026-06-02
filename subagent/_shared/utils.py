@@ -3,19 +3,21 @@
 from pathlib import Path
 
 
-def parse_tab_line(line: str, field_count: int) -> dict:
+def parse_tab_line(line: str, field_count: int, min_fields: int | None = None) -> list[str]:
     """解析 tab 分隔的字段行
 
     Args:
         line: LLM 输出的一行，如 "3 points\tthree-point shot\texpression\t更专业"
-        field_count: 期望的字段数量
+        field_count: 最多读取的字段数量
+        min_fields: 最少需要的字段数量，默认等于 field_count
 
     Returns:
-        dict，键名为 schema 的字段名
+        字段列表；字段不足时返回空列表
     """
     parts = line.strip().split("\t")
-    if len(parts) < field_count:
-        return {}
+    required = field_count if min_fields is None else min_fields
+    if len(parts) < required:
+        return []
     return parts[:field_count]
 
 

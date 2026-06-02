@@ -62,9 +62,9 @@ she very like	she really likes	adjective	very 不能修饰动词，应该用 rea
                 line = line.strip()
                 if not line or line == "(none)":
                     continue
-                parsed = parse_tab_line(line, len(field_names))
+                parsed = parse_tab_line(line, len(field_names), min_fields=3)
                 if parsed and len(parsed) >= 3:  # explanation is optional
-                    results.append(PolisherOutput(**parsed))
+                    results.append(PolisherOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[PolisherOutput]) -> str:

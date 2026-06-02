@@ -90,24 +90,34 @@ processors:
     path: subagent/cross_session/wiki/processor
     status: active
     runtime_root: persona/wiki
+  vocab:
+    path: subagent/single_session/vocab/processor
+    status: active
+    output: persona/processor/freechat/vocab.jsonl
+  polisher:
+    path: subagent/single_session/polisher/processor
+    status: active
+    output: persona/processor/freechat/polisher.jsonl
   progress_tracker:
     path: subagent/cross_session/progress_tracker/processor
     status: active
-    output: persona/progress_bank.jsonl
+    output: persona/processor/freechat/progress_tracker.jsonl
   progress_organizer:
     path: subagent/cross_session/progress_organizer/processor
-    status: inactive
-    note: Retained but not part of the current primary learning flow.
+    status: active
+    output: persona/processor/freechat/progress_organizer.jsonl
   review:
     path: subagent/cross_session/review/processor
-    status: inactive
-    note: Retained for future review mode work.
+    status: active
+    output: persona/processor/freechat/review.jsonl
   notes:
     path: subagent/single_session/notes/processor
-    status: inactive
+    status: active
+    output: persona/processor/freechat/notes.jsonl
   quiz:
     path: subagent/single_session/quiz/processor
-    status: inactive
+    status: active
+    output: persona/processor/freechat/quiz.jsonl
 
 observability:
   trigger_decisions:

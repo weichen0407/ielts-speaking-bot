@@ -227,3 +227,52 @@ class TestWikiGraph:
         assert "concept:learning-style" in node_ids
         assert any(e["kind"] == "mentions_entity" for e in graph["edges"])
         assert any(e["kind"] == "mentions_concept" for e in graph["edges"])
+
+    def test_taxonomy_projection_nodes_and_relation_edges(self, wiki_root: Path):
+        from subagent.cross_session.wiki.processor.wiki_store import WikiStore
+
+        store = WikiStore(workspace=wiki_root.parent, wiki_root=wiki_root)
+        store.apply_patch(
+            WikiPatch(
+                operation="merge_section",
+                slug="entity/arsenal-supporter-profile",
+                title="Arsenal Supporter Profile",
+                type="entity",
+                mode="freechat",
+                section="Known Facts",
+                content=(
+                    "User's favorite football club is Arsenal.\n\n"
+                    "Relations:\n"
+                    "- user supports Arsenal"
+                ),
+                tags=[
+                    "domain:sports",
+                    "topic:football",
+                    "subtype:favorite_team",
+                    "entity:Arsenal",
+                    "llm-extracted",
+                ],
+                topics=["sports/football"],
+                links=[],
+                sources=[WikiSource(kind="thread", session_id="s1", message_id="m4")],
+                confidence="high",
+            )
+        )
+
+        graph = build_wiki_graph(wiki_root)
+        node_ids = {n["id"] for n in graph["nodes"]}
+        assert "domain:sports" in node_ids
+        assert "topic:sports/football" in node_ids
+        assert "entity:Arsenal" in node_ids
+        assert "entity:user" in node_ids
+        assert "concept:sports/football/favorite_team" in node_ids
+
+        edge_kinds = {e["kind"] for e in graph["edges"]}
+        assert "has_domain" in edge_kinds
+        assert "contains_topic" in edge_kinds
+        assert "topic_entity" in edge_kinds
+        assert "has_subtype" in edge_kinds
+        assert "relation:supports" in edge_kinds
+
+        graph_by_domain = build_wiki_graph(wiki_root, topic="sports")
+        assert any(n["id"] == "entity/arsenal-supporter-profile" for n in graph_by_domain["nodes"])

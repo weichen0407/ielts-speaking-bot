@@ -67,10 +67,10 @@ Example:
                 line = line.strip()
                 if not line or line == "(none)":
                     continue
-                parsed = parse_tab_line(line, len(field_names))
-                if parsed and "title" in parsed and "content" in parsed:
+                parsed = parse_tab_line(line, len(field_names), min_fields=2)
+                if parsed and len(parsed) >= 2:
                     # reference and context are optional
-                    results.append(NotesOutput(**parsed))
+                    results.append(NotesOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[NotesOutput]) -> str:

@@ -69,7 +69,7 @@ If no meaningful content, output (none)."""
 
             parsed = parse_tab_line(line, len(field_names))
             if parsed and len(parsed) >= 3:
-                results.append(ProgressTrackerOutput(**parsed))
+                results.append(ProgressTrackerOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[ProgressTrackerOutput]) -> str:

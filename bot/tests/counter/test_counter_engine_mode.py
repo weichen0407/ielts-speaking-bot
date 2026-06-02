@@ -216,3 +216,63 @@ def test_file_line_count_cursor_resets_when_source_was_recreated(tmp_path: Path)
     ]
     assert decisions[-1]["details"]["unprocessed"] == 2
     assert decisions[-1]["details"]["reset_detected"] is True
+
+
+def test_dependent_trigger_waits_for_chain_instead_of_firing_directly(tmp_path: Path) -> None:
+    trigger_file = tmp_path / "mode" / "freechat" / "trigger" / "triggers.json"
+    trigger_file.parent.mkdir(parents=True)
+    trigger_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "root_processor",
+                        "enabled": True,
+                        "condition": {
+                            "kind": "file_line_count",
+                            "count": 2,
+                            "scope": "global",
+                            "path": "persona/events/thread.jsonl",
+                        },
+                        "target": {"processor": "vocab", "input_path": "persona/events/thread.jsonl"},
+                        "cursor": {"offset": 0},
+                    },
+                    {
+                        "id": "dependent_processor",
+                        "enabled": True,
+                        "condition": {
+                            "kind": "file_line_count",
+                            "count": 2,
+                            "scope": "global",
+                            "path": "persona/events/thread.jsonl",
+                        },
+                        "target": {
+                            "processor": "polisher",
+                            "depends_on": "root_processor",
+                            "input_path": "persona/events/thread.jsonl",
+                        },
+                        "cursor": {"offset": 0},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "persona" / "events" / "thread.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text("{}\n{}\n", encoding="utf-8")
+
+    engine = CounterEngine(tmp_path)
+    metadata = {"mode": "freechat"}
+    engine.ensure_mode("freechat")
+
+    firing = engine.check_triggers(metadata)
+
+    assert [trigger.id for trigger in firing] == ["root_processor"]
+    decisions = [
+        json.loads(line)
+        for line in (tmp_path / "monitor" / "trigger_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert decisions[-1]["trigger_id"] == "dependent_processor"
+    assert decisions[-1]["reason"] == "waiting_for_dependency"

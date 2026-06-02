@@ -60,7 +60,7 @@ ate rice	had dinner	collocation	更自然的表达"""
                     continue
                 parsed = parse_tab_line(line, len(field_names))
                 if parsed and len(parsed) == len(field_names):
-                    results.append(VocabOutput(**parsed))
+                    results.append(VocabOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[VocabOutput]) -> str:

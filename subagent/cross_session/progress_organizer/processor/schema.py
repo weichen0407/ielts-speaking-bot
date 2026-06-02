@@ -6,8 +6,8 @@ from pydantic import BaseModel
 class ProgressOrganizerInput(BaseModel):
     """ProgressOrganizerProcessor 输入 Schema"""
     id: str | None = None
-    role: str
-    content: str
+    role: str | None = None
+    content: str | None = None
     topic: str | None = None
     category: str | None = None
     intent: str | None = None

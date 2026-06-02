@@ -1,8 +1,10 @@
 """Base class for all Data Processors."""
 
+import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import json
 
@@ -37,6 +39,9 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     name: str = "base"
 
+    def __init__(self) -> None:
+        self._llm_caller: Callable[[str, str], Awaitable[str]] | None = None
+
     @abstractmethod
     def get_input_schema(self) -> type[T]:
         """子类返回输入 Schema"""
@@ -67,6 +72,39 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         with open(path, "r", encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
+    def configure_llm(
+        self,
+        *,
+        provider: Any,
+        model: str | None = None,
+        max_tokens: int = 2048,
+        temperature: float = 0.2,
+        retry_mode: str = "standard",
+    ) -> None:
+        """Bind the active nanobot provider/model to this processor.
+
+        Processors keep the learning-task flow local, while the runtime owns
+        provider configuration and API credentials.
+        """
+
+        async def _caller(system: str, user: str) -> str:
+            response = await provider.chat_with_retry(
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                tools=None,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                retry_mode=retry_mode,
+            )
+            if response.finish_reason == "error":
+                raise RuntimeError(response.content or "LLM processor call failed")
+            return response.content or ""
+
+        self._llm_caller = _caller
+
     def preprocess(self, raw_data: list[dict]) -> list[T]:
         """
         预处理（第一工程层）：
@@ -86,32 +124,41 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     def _filter_fields(self, item: dict) -> dict:
         """
-        过滤通用字段，保留有用字段供 LLM 使用
+        过滤字段，保留子类 input schema 需要的字段供 LLM 使用。
+
+        普通 thread 事件里的字段可能嵌套在 content/source/metadata 中；
+        二级 artifact processor 的字段通常直接在顶层。这里优先保留
+        schema 声明的顶层字段，再兼容 thread 特殊结构。
         子类可 override
         """
-        # 需要保留的字段
-        result = {}
-        # id 必须保留，用于后续拼接
-        if "id" in item:
-            result["id"] = item["id"]
-        # content.text 是主要内容
-        if "content" in item:
-            if isinstance(item["content"], dict):
-                result["content"] = item["content"].get("text", "")
-            elif isinstance(item["content"], str):
-                result["content"] = item["content"]
-        # metadata 里的 topic
+        wanted = set(self.get_input_schema().model_fields.keys())
+        result = {key: item[key] for key in wanted if key in item}
+
+        if "content" in wanted and "content" in item:
+            content = item["content"]
+            if isinstance(content, dict):
+                result["content"] = content.get("text", "")
+            elif isinstance(content, str):
+                result["content"] = content
+
         if "metadata" in item and isinstance(item["metadata"], dict):
-            if "topic" in item["metadata"]:
-                result["topic"] = item["metadata"].get("topic")
-            if "mode" in item["metadata"]:
-                result["mode"] = item["metadata"].get("mode")
-        # source 里的 mode 和 session_uuid
+            topic = item["metadata"].get("topic")
+            mode = item["metadata"].get("mode")
+            if "topic" in wanted and "topic" not in result and topic is not None:
+                result["topic"] = topic
+            if "mode" in wanted and "mode" not in result and mode is not None:
+                result["mode"] = mode
+
         if "source" in item and isinstance(item["source"], dict):
-            if "mode" in item["source"]:
-                result["mode"] = item["source"].get("mode")
-            if "session_uuid" in item["source"]:
-                result["session_uuid"] = item["source"].get("session_uuid")
+            mode = item["source"].get("mode")
+            session_uuid = item["source"].get("session_uuid")
+            message_index = item["source"].get("message_index")
+            if "mode" in wanted and "mode" not in result and mode is not None:
+                result["mode"] = mode
+            if "session_uuid" in wanted and session_uuid is not None:
+                result["session_uuid"] = session_uuid
+            if "message_index" in wanted and message_index is not None:
+                result["message_index"] = message_index
         return result
 
     def process_all(
@@ -145,6 +192,41 @@ class BaseDataProcessor(ABC, Generic[T, U]):
             system_prompt = self.get_system_prompt()
 
             raw_output = self._call_llm(system_prompt, user_prompt)
+            if not raw_output:
+                continue
+
+            parsed = self.parse_llm_output(raw_output)
+            if parsed:
+                self.serialize(parsed, output_path, format)
+
+    async def aprocess_all(
+        self,
+        input_path: Path,
+        output_path: Path,
+        batch_size: int = 50,
+        format: str = "both",
+    ):
+        """
+        Async version of process_all for nanobot runtime execution.
+
+        AgentLoop already runs inside an event loop, so processor LLM calls must
+        be awaited instead of using asyncio.run() from inside process_all().
+        """
+        all_data = self.read(input_path)
+        total = len(all_data)
+
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            batch = all_data[start:end]
+
+            processed = self.preprocess(batch)
+            if not processed:
+                continue
+
+            user_prompt = self.build_user_prompt(processed)
+            system_prompt = self.get_system_prompt()
+
+            raw_output = await self._acall_llm(system_prompt, user_prompt)
             if not raw_output:
                 continue
 
@@ -192,6 +274,20 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         调用 LLM via SubagentManager
         子类可 override 以更换实现
         """
-        raise NotImplementedError(
-            f"{self.name} processor does not implement _call_llm()"
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self._acall_llm(system, user))
+        raise RuntimeError(
+            f"{self.name} processor is running inside an event loop; "
+            "use aprocess_all() instead of process_all()."
         )
+
+    async def _acall_llm(self, system: str, user: str) -> str:
+        """Call the configured LLM runtime."""
+        if self._llm_caller is None:
+            raise RuntimeError(
+                f"{self.name} processor has no LLM runtime configured. "
+                "Call configure_llm() before running it."
+            )
+        return await self._llm_caller(system, user)

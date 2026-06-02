@@ -70,9 +70,9 @@ Correct this sentence if needed: "This restaurant has excellent food."	Excellent
                 line = line.strip()
                 if not line or line == "(none)":
                     continue
-                parsed = parse_tab_line(line, len(field_names))
+                parsed = parse_tab_line(line, len(field_names), min_fields=3)
                 if parsed and len(parsed) >= 3:  # topic is optional
-                    results.append(QuizOutput(**parsed))
+                    results.append(QuizOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[QuizOutput]) -> str:

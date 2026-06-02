@@ -692,7 +692,7 @@ export interface WikiPageResponse {
 export interface WikiGraphNode {
   id: string;
   label: string;
-  kind: "page" | "topic" | "entity" | "concept";
+  kind: "page" | "domain" | "topic" | "entity" | "concept";
   type?: string;
   mode?: string;
   tags?: string[];
@@ -705,7 +705,16 @@ export interface WikiGraphNode {
 export interface WikiGraphEdge {
   source: string;
   target: string;
-  kind: "link" | "has_topic" | "mentions_entity" | "mentions_concept";
+  kind:
+    | "link"
+    | "has_domain"
+    | "has_topic"
+    | "contains_topic"
+    | "has_subtype"
+    | "topic_entity"
+    | "mentions_entity"
+    | "mentions_concept"
+    | `relation:${string}`;
 }
 
 export interface WikiGraphResponse {

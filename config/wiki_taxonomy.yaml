@@ -1,0 +1,161 @@
+version: 1
+fallback:
+  domain: other
+  topic: uncategorized
+  subtype: unknown
+domains:
+  user_profile:
+    description: Stable user preferences, goals, experiences, and personal learning context.
+    topics:
+      preference:
+        description: Likes, dislikes, favorites, and recurring habits.
+        subtypes: [like, dislike, favorite, habit, preference]
+        examples:
+          - User likes basketball.
+          - User's favorite team is Arsenal.
+      goal:
+        description: Learning, travel, career, exam, or personal goals.
+        subtypes: [learning_goal, travel_goal, career_goal, exam_goal, personal_goal]
+        examples:
+          - User wants to watch Arsenal live in Europe.
+      experience:
+        description: Past events, memories, achievements, and challenges.
+        subtypes: [past_event, memory, achievement, challenge, story]
+        examples:
+          - User played basketball with friends after work.
+  sports:
+    description: Sports interests, activities, teams, match experiences, and sports vocabulary.
+    topics:
+      basketball:
+        description: Basketball habits, preferences, vocabulary, and experiences.
+        subtypes: [habit, vocabulary, experience, preference, goal]
+        examples:
+          - User often plays basketball with friends.
+      football:
+        description: Football clubs, matches, fan identity, matchday vocabulary, and football travel.
+        subtypes: [favorite_team, matchday, vocabulary, experience, travel_goal, preference]
+        examples:
+          - User's favorite club is Arsenal.
+          - User wants to watch a football match in Paris.
+      fitness:
+        description: Exercise routines, running, gym habits, and health goals.
+        subtypes: [routine, habit, goal, health, preference]
+        examples:
+          - User runs on weekends.
+  travel:
+    description: Destinations, trips, transport, local culture, and travel goals.
+    topics:
+      city_trip:
+        description: City destinations, itineraries, landmarks, and urban travel plans.
+        subtypes: [destination, plan, experience, preference, travel_goal]
+        examples:
+          - User wants to visit Paris.
+      culture_trip:
+        description: Travel for food, festivals, local customs, sports culture, and landmarks.
+        subtypes: [food, festival, local_custom, landmark, sports_culture]
+        examples:
+          - User likes cities with strong football culture.
+      transport:
+        description: Flights, trains, routes, stations, and transport problems.
+        subtypes: [flight, train, route, station, problem]
+        examples:
+          - User asks how to speak at a train station.
+  food:
+    description: Local food, restaurants, cooking, ingredients, and preferences.
+    topics:
+      local_food:
+        description: Hometown food, local cuisine, ingredients, and traditions.
+        subtypes: [hometown, ingredient, tradition, preference, dish]
+        examples:
+          - User says donkey meat is local food in their hometown.
+      restaurant:
+        description: Ordering, reservations, service, reviews, and menu vocabulary.
+        subtypes: [ordering, preference, service, review, menu]
+        examples:
+          - User wants to order food in English.
+  culture:
+    description: Local culture, entertainment, customs, festivals, and identity.
+    topics:
+      local_culture:
+        description: Traditions, festivals, customs, and everyday local identity.
+        subtypes: [tradition, festival, custom, identity, habit]
+        examples:
+          - User talks about hometown culture.
+      entertainment:
+        description: Movies, music, games, concerts, live events, and leisure culture.
+        subtypes: [movie, music, game, event, live_match]
+        examples:
+          - User talks about watching football live.
+  study:
+    description: English learning, IELTS preparation, school, and study routines.
+    topics:
+      english_learning:
+        description: Vocabulary, grammar, fluency, pronunciation, IELTS speaking, and learning questions.
+        subtypes: [vocabulary, grammar, fluency, pronunciation, ielts, question]
+        examples:
+          - User asks what football vocabulary to learn.
+      school:
+        description: School subjects, teachers, exams, classes, and study memories.
+        subtypes: [subject, teacher, exam, class, memory]
+        examples:
+          - User describes university life.
+  work:
+    description: Career, workplace, interviews, projects, communication, and teamwork.
+    topics:
+      career:
+        description: Roles, skills, goals, interviews, and resume preparation.
+        subtypes: [role, skill, goal, challenge, interview]
+        examples:
+          - User prepares for software engineering interviews.
+      workplace:
+        description: Work routines, meetings, projects, conflict, and collaboration.
+        subtypes: [routine, communication, project, conflict, teamwork]
+        examples:
+          - User talks about playing sports after work.
+  technology:
+    description: Software projects, AI, agents, tools, architecture, and debugging.
+    topics:
+      software:
+        description: Software projects, architecture, tools, testing, and debugging.
+        subtypes: [project, tool, architecture, debugging, testing]
+        examples:
+          - User discusses the processor architecture.
+      ai:
+        description: Agents, LLMs, prompts, memory, RAG, automation, and model behavior.
+        subtypes: [agent, llm, prompt, memory, automation, rag]
+        examples:
+          - User compares LLM Wiki with RAG.
+  relationships:
+    description: Family, friends, social activities, communication, and support.
+    topics:
+      family:
+        description: Family members, routines, memories, meals, and values.
+        subtypes: [member, memory, routine, value, meal]
+        examples:
+          - User talks about family meals.
+      friends:
+        description: Friend activities, support, conflict, and shared memories.
+        subtypes: [activity, support, conflict, memory, habit]
+        examples:
+          - User plays basketball with friends.
+  lifestyle:
+    description: Daily life, routines, personality, values, health, and leisure.
+    topics:
+      routine:
+        description: Daily habits, weekends, after-work activities, and productivity.
+        subtypes: [daily_habit, weekend, leisure, productivity, after_work]
+        examples:
+          - User plays basketball after work.
+      personality:
+        description: Strengths, weaknesses, values, communication style, and identity.
+        subtypes: [strength, weakness, value, communication, identity]
+        examples:
+          - User describes leadership and communication ability.
+  other:
+    description: Fallback domain for evidence that does not fit the current taxonomy.
+    topics:
+      uncategorized:
+        description: Temporary fallback topic. Repeated evidence should enter review.
+        subtypes: [unknown, candidate_new_topic]
+        examples:
+          - Use this only when no existing domain/topic/subtype fits.

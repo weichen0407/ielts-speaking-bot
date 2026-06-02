@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -20,20 +21,23 @@ async def sync_session_to_wiki(
 ) -> dict[str, Any]:
     """Sync latest session messages to wiki through ingest/query/save/lint.
 
-    Returns a structured run record. The provider/model parameters are kept
-    for compatibility with the old LLM-based sync entrypoint; the current core
-    pipeline is local and deterministic.
+    Returns a structured run record. The core pipeline remains local and
+    deterministic by default. Set NANOBOT_WIKI_LLM_EXTRACTOR=1 to add the
+    taxonomy-guided LLM extractor before crystallization.
     """
 
-    del session_dir, provider, model
+    del session_dir
 
     workspace = Path(workspace)
     _ensure_repo_importable(workspace)
 
     from subagent.cross_session.wiki.processor.wiki_crystallizer import WikiCrystallizer
-    from subagent.cross_session.wiki.processor.wiki_ingest import WikiIngestor
+    from subagent.cross_session.wiki.processor.wiki_ingest import WikiIngestAnalysis, WikiIngestor
     from subagent.cross_session.wiki.processor.wiki_lint import WikiLinter
     from subagent.cross_session.wiki.processor.wiki_layout import ensure_wiki_layout
+    from subagent.cross_session.wiki.processor.wiki_llm_extractor import WikiLLMExtractor
+    from subagent.cross_session.wiki.processor.wiki_taxonomy import WikiTaxonomy, default_taxonomy_path
+    from subagent.cross_session.wiki.processor.wiki_topic_review import TopicReviewQueue
 
     wiki_root = workspace / "persona" / "wiki"
     layout = ensure_wiki_layout(wiki_root)
@@ -47,6 +51,9 @@ async def sync_session_to_wiki(
         "patches": 0,
         "applied": 0,
         "lint_findings": 0,
+        "llm_extractor_enabled": False,
+        "llm_candidates": 0,
+        "topic_review_items": 0,
     }
 
     try:
@@ -57,6 +64,26 @@ async def sync_session_to_wiki(
             advance_cursor=True,
         )
         analysis = ingestor.analyze(batch)
+        if _should_run_llm_extractor(provider, batch.messages):
+            record["llm_extractor_enabled"] = True
+            try:
+                taxonomy = WikiTaxonomy.load(default_taxonomy_path(workspace))
+                extraction = await WikiLLMExtractor(
+                    provider=provider,
+                    model=model,
+                    taxonomy=taxonomy,
+                ).extract(batch)
+                review_queue = TopicReviewQueue(layout.state_root / "topic_review_queue.jsonl")
+                for item in extraction.topic_review_items:
+                    review_queue.upsert(item)
+                candidates = _merge_candidates(analysis.candidates, extraction.candidates)
+                analysis = WikiIngestAnalysis(batch=batch, candidates=candidates)
+                record["llm_candidates"] = len(extraction.candidates)
+                record["topic_review_items"] = len(extraction.topic_review_items)
+                record["llm_invalid_lines"] = extraction.invalid_lines
+            except Exception as e:
+                record["llm_extractor_error"] = str(e)
+                logger.warning("Wiki LLM extractor failed for session {}: {}", session_key, e)
         result = WikiCrystallizer(wiki_root=wiki_root).save_analysis(
             analysis,
             mode=_mode_from_session_dir(workspace, session_key),
@@ -106,6 +133,25 @@ def _append_sync_log(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _should_run_llm_extractor(provider: Any | None, messages: list[Any]) -> bool:
+    flag = os.environ.get("NANOBOT_WIKI_LLM_EXTRACTOR", "").strip().lower()
+    enabled = flag in {"1", "true", "yes", "on"}
+    return bool(enabled and provider is not None and messages)
+
+
+def _merge_candidates(*groups):
+    seen: set[tuple[str, str]] = set()
+    merged = []
+    for group in groups:
+        for candidate in group:
+            key = (candidate.type, candidate.content.lower().strip())
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(candidate)
+    return merged
 
 
 def _mode_from_session_dir(workspace: Path, session_key: str) -> str:

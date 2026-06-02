@@ -69,7 +69,7 @@ If no content to process, output (none)."""
 
             parsed = parse_tab_line(line, len(field_names))
             if parsed and len(parsed) >= 3:
-                results.append(ProgressOrganizerOutput(**parsed))
+                results.append(ProgressOrganizerOutput(**dict(zip(field_names, parsed))))
         return results
 
     def to_md(self, parsed_data: list[ProgressOrganizerOutput]) -> str:

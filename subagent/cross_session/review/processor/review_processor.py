@@ -19,6 +19,50 @@ class ReviewProcessor(BaseDataProcessor[ReviewInput, ReviewOutput]):
     def get_output_schema(self) -> type[ReviewOutput]:
         return ReviewOutput
 
+    def _filter_fields(self, item: dict) -> dict:
+        """Adapt Level 2 processor artifacts into ReviewInput."""
+        result = super()._filter_fields(item)
+        if result.get("content"):
+            result.setdefault("role", item.get("role") or "processor")
+            return result
+
+        if {"original", "improved", "type", "reason"} <= item.keys():
+            result.update({
+                "role": "processor",
+                "source": "vocab",
+                "content": (
+                    f"{item.get('original')} -> {item.get('improved')} "
+                    f"({item.get('type')}): {item.get('reason')}"
+                ),
+            })
+        elif {"original", "improved", "grammar_type"} <= item.keys():
+            explanation = item.get("explanation") or ""
+            result.update({
+                "role": "processor",
+                "source": "polisher",
+                "content": (
+                    f"{item.get('original')} -> {item.get('improved')} "
+                    f"({item.get('grammar_type')}): {explanation}"
+                ),
+            })
+        elif {"title", "content"} <= item.keys():
+            details = [
+                str(item.get("title") or ""),
+                str(item.get("content") or ""),
+                str(item.get("category") or ""),
+                str(item.get("reference") or ""),
+                str(item.get("context") or ""),
+            ]
+            result.update({
+                "role": "processor",
+                "source": "notes",
+                "content": " | ".join(part for part in details if part),
+            })
+
+        if "topic" in item and item.get("topic") is not None:
+            result["topic"] = item.get("topic")
+        return result
+
     def get_system_prompt(self) -> str:
         return r"""You are a review point extractor.
 Given content from Level 2 processed files (vocab, polisher, notes), extract meaningful knowledge points worth reviewing.
@@ -146,6 +190,49 @@ If no content to process, output (none)."""
         self._update_store(review_store, parsed)
 
         # Serialize
+        self.serialize(parsed, output_path, format)
+
+    async def aprocess_all(
+        self,
+        input_paths: list[Path],
+        output_path: Path,
+        batch_size: int = 50,
+        format: str = "both",
+    ):
+        """
+        Async runtime version for AgentLoop.
+
+        ReviewProcessor consumes multiple Level 2 files, so it cannot rely on
+        BaseDataProcessor.aprocess_all(input_path=...).
+        """
+        from .store import ReviewStore
+
+        all_data = []
+        for input_path in input_paths:
+            if input_path.exists():
+                file_data = self.read(input_path)
+                all_data.extend(file_data)
+
+        if not all_data:
+            return
+
+        processed = self.preprocess(all_data)
+        if not processed:
+            return
+
+        user_prompt = self.build_user_prompt(processed)
+        system_prompt = self.get_system_prompt()
+
+        raw_output = await self._acall_llm(system_prompt, user_prompt)
+        if not raw_output:
+            return
+
+        parsed = self.parse_llm_output(raw_output)
+        if not parsed:
+            return
+
+        review_store = ReviewStore(output_path.parent)
+        self._update_store(review_store, parsed)
         self.serialize(parsed, output_path, format)
 
     def _update_store(self, store: ReviewStore, outputs: list[ReviewOutput]) -> None:
