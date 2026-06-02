@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronLeft,
   Clock3,
+  Cpu,
   Database,
   DollarSign,
   FileText,
@@ -20,6 +21,7 @@ import {
   fetchAdminMonitor,
   updateAdminTrigger,
   type AdminMonitorPayload,
+  type AdminProcessorRun,
   type AdminPrompt,
   type AdminSubagentRun,
   type AdminTriggerDecision,
@@ -68,6 +70,10 @@ function decisionKey(decision: AdminTriggerDecision, index: number): string {
   return `${decision.timestamp}:${decision.source ?? ""}:${decision.trigger_id}:${decision.reason}:${index}`;
 }
 
+function processorRunKey(run: AdminProcessorRun): string {
+  return `${run.timestamp}:${run.trigger_id}:${run.processor}`;
+}
+
 function formatUsd(value?: number): string {
   if (!value) return "$0.0000";
   if (value < 0.0001) return `<$0.0001`;
@@ -80,6 +86,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const [selectedTriggerKey, setSelectedTriggerKey] = useState<string | null>(null);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [selectedProcessorRunKey, setSelectedProcessorRunKey] = useState<string | null>(null);
   const [selectedDecisionKey, setSelectedDecisionKey] = useState<string | null>(null);
   const [modeFilter, setModeFilter] = useState("all");
   const [countDraft, setCountDraft] = useState("");
@@ -168,6 +175,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const promptCount = payload?.prompts.length ?? 0;
   const activityCount = payload?.recent_activity.length ?? 0;
   const subagentRuns = payload?.subagent_runs ?? [];
+  const processorRuns = payload?.processor_runs ?? [];
   const triggerDecisions = payload?.trigger_decisions ?? [];
   const wikiSyncRuns = payload?.wiki_sync_runs ?? [];
   const costSummary = payload?.cost_summary;
@@ -175,6 +183,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const capabilityModes = Object.keys(payload?.capabilities?.modes ?? {});
   const selectedRegistrySubagent = selectedTrigger?.subagent
     ? payload?.capabilities?.subagents?.[selectedTrigger.subagent]
+    : undefined;
+  const selectedRegistryProcessor = selectedTrigger?.processor
+    ? payload?.capabilities?.processors?.[selectedTrigger.processor]
     : undefined;
   const selectedRun = useMemo(
     () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
@@ -184,6 +195,15 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   useEffect(() => {
     setSelectedRunKey((current) => current ?? (subagentRuns[0] ? runKey(subagentRuns[0]) : null));
   }, [subagentRuns]);
+
+  const selectedProcessorRun = useMemo(
+    () => processorRuns.find((run) => processorRunKey(run) === selectedProcessorRunKey) ?? processorRuns[0] ?? null,
+    [selectedProcessorRunKey, processorRuns],
+  );
+
+  useEffect(() => {
+    setSelectedProcessorRunKey((current) => current ?? (processorRuns[0] ? processorRunKey(processorRuns[0]) : null));
+  }, [processorRuns]);
 
   const selectedDecision = useMemo(
     () => triggerDecisions.find((decision, index) => decisionKey(decision, index) === selectedDecisionKey) ?? triggerDecisions[0] ?? null,
@@ -220,10 +240,11 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
         </div>
       ) : null}
 
-      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-6">
+      <div className="grid shrink-0 grid-cols-2 gap-3 px-5 py-4 lg:grid-cols-7">
         <Metric icon={Settings2} label="启用触发器" value={enabledCount} />
         <Metric icon={FileText} label="Prompt 文件" value={promptCount} />
         <Metric icon={Bot} label="运行中 subagent" value={activeCount} />
+        <Metric icon={Cpu} label="Processor 调用" value={processorRuns.length} />
         <Metric icon={Database} label="Registry" value={`${capabilityModes.length}/${capabilitySubagents.length}`} />
         <Metric icon={Activity} label="触发决策" value={triggerDecisions.length} />
         <Metric icon={DollarSign} label="估算花费" value={formatUsd(costSummary?.estimated_usd)} />
@@ -282,6 +303,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                   <span className="rounded bg-muted px-1.5 py-0.5">{trigger.mode}</span>
                   <span className="rounded bg-muted px-1.5 py-0.5">{triggerSchedule(trigger)}</span>
                   {trigger.subagent ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.subagent}</span> : null}
+                  {trigger.processor ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.processor}</span> : null}
                 </div>
               </button>
             ))}
@@ -294,19 +316,34 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
               {selectedTrigger ? (
                 <div className="space-y-3 text-sm">
                   <KeyValue label="Subagent" value={selectedTrigger.subagent || "-"} />
+                  <KeyValue label="Processor" value={selectedTrigger.processor || "-"} />
                   <KeyValue label="Model" value={selectedTrigger.model || "default"} />
                   <KeyValue label="Prompt" value={selectedTrigger.prompt_file || "-"} />
+                  <KeyValue label="Depends On" value={selectedTrigger.depends_on || "-"} />
                   <KeyValue label="Source" value={selectedTrigger.source} />
                   <div>
                     <p className="mb-1 text-xs font-medium text-muted-foreground">Registry</p>
                     <pre className="max-h-28 overflow-auto rounded-md bg-muted p-2 text-[11px]">
-                      {formatJson(selectedRegistrySubagent ?? {
-                        warning: selectedTrigger.subagent
-                          ? "这个 subagent 还没有登记在 config/capabilities.yaml"
-                          : "这个 trigger 没有关联 subagent",
+                      {formatJson(selectedRegistrySubagent ?? selectedRegistryProcessor ?? {
+                        warning: selectedTrigger.subagent || selectedTrigger.processor
+                          ? "这个 target 还没有登记在 config/capabilities.yaml"
+                          : "这个 trigger 没有关联 subagent 或 processor",
                       })}
                     </pre>
                   </div>
+                  {selectedTrigger.processor ? (
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">Processor IO</p>
+                      <pre className="max-h-32 overflow-auto rounded-md bg-muted p-2 text-[11px]">
+                        {formatJson({
+                          input_path: selectedTrigger.input_path,
+                          input_paths: selectedTrigger.input_paths,
+                          output_path: selectedTrigger.output_path,
+                          batch_size: selectedTrigger.batch_size,
+                        })}
+                      </pre>
+                    </div>
+                  ) : null}
                   {selectedTrigger.condition?.kind === "turn_count" ? (
                     <div>
                       <p className="mb-1 text-xs font-medium text-muted-foreground">触发轮数</p>
@@ -366,7 +403,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
             </Panel>
           </div>
 
-          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid min-h-0 grid-cols-1 gap-4 overflow-y-auto pr-1 lg:grid-cols-2 2xl:grid-cols-4">
             <Panel title="Subagent 调用列表" icon={Bot}>
               <div className="h-full overflow-y-auto pr-1">
                 {subagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
@@ -393,6 +430,42 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                     <p className="mt-1 truncate text-muted-foreground">{shortTime(run.timestamp)} · {run.model || "default model"}</p>
                     <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-muted-foreground">
                       {run.error || run.result || "-"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+
+            <Panel title="Processor 调用列表" icon={Cpu}>
+              <div className="h-full overflow-y-auto pr-1">
+                {processorRuns.length === 0 ? <EmptyText text="还没有 processor run log；触发后会写入 processor_runs.jsonl" /> : null}
+                {processorRuns.map((run) => (
+                  <button
+                    key={processorRunKey(run)}
+                    onClick={() => setSelectedProcessorRunKey(processorRunKey(run))}
+                    className={cn(
+                      "mb-2 w-full rounded-md border p-2 text-left text-xs transition-colors",
+                      selectedProcessorRun && processorRunKey(selectedProcessorRun) === processorRunKey(run)
+                        ? "border-primary/50 bg-primary/5"
+                        : "border-border/70 hover:bg-muted/50",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium">{run.processor}</span>
+                      <span className={cn(
+                        "shrink-0 rounded px-1.5 py-0.5",
+                        run.status === "error"
+                          ? "bg-red-500/10 text-red-600"
+                          : run.status === "completed"
+                            ? "bg-emerald-500/10 text-emerald-600"
+                            : "bg-muted text-muted-foreground",
+                      )}>{run.status}</span>
+                    </div>
+                    <p className="mt-1 truncate text-muted-foreground">
+                      {shortTime(run.timestamp)} · {run.model || "default model"}
+                    </p>
+                    <p className="mt-1 truncate text-muted-foreground">
+                      in {run.input_rows ?? 0} · out {run.output_rows ?? 0} · {run.duration_ms ?? 0}ms
                     </p>
                   </button>
                 ))}
@@ -497,7 +570,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                   <div className="space-y-3">
                     <div className="rounded-md border p-2">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">Subagent 估算</span>
+                        <span className="font-medium">LLM 调用估算</span>
                         <span className="font-semibold">{formatUsd(costSummary.estimated_usd)}</span>
                       </div>
                       <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
@@ -535,6 +608,67 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                     <p className="text-[10px] leading-4 text-muted-foreground">
                       {costSummary.note || "本地估算，官方账单为准。"}
                     </p>
+                  </div>
+                ) : null}
+              </div>
+            </Panel>
+
+            <Panel title="Processor 详情" icon={Cpu}>
+              <div className="h-full overflow-y-auto">
+                {!selectedProcessorRun ? <EmptyText text="选择一次 processor 调用查看详情" /> : null}
+                {selectedProcessorRun ? (
+                  <div className="space-y-3 text-xs">
+                    <div className="rounded-md border p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium">{selectedProcessorRun.processor}</span>
+                        <span className={cn(
+                          "rounded px-1.5 py-0.5",
+                          selectedProcessorRun.status === "error"
+                            ? "bg-red-500/10 text-red-600"
+                            : selectedProcessorRun.status === "completed"
+                              ? "bg-emerald-500/10 text-emerald-600"
+                              : "bg-muted text-muted-foreground",
+                        )}>{selectedProcessorRun.status}</span>
+                      </div>
+                      <p className="mt-1 text-muted-foreground">
+                        {shortTime(selectedProcessorRun.timestamp)} · {selectedProcessorRun.model || "default model"}
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                        <span>input {selectedProcessorRun.input_rows ?? 0}</span>
+                        <span>output {selectedProcessorRun.output_rows ?? 0}</span>
+                        <span>{selectedProcessorRun.duration_ms ?? 0}ms</span>
+                        <span>{selectedProcessorRun.cursor_kind || "-"}</span>
+                      </div>
+                      {selectedProcessorRun.error ? <p className="mt-2 text-red-600">{selectedProcessorRun.error}</p> : null}
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">Input / Cursor</p>
+                      <pre className="max-h-36 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                        {formatJson({
+                          input_paths: selectedProcessorRun.input_paths,
+                          output_path: selectedProcessorRun.output_path,
+                          cursor_before: selectedProcessorRun.cursor_before,
+                          cursor_after: selectedProcessorRun.cursor_after,
+                        })}
+                      </pre>
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">本次输出增量</p>
+                      {(selectedProcessorRun.output_preview ?? []).length === 0 ? (
+                        <p className="text-muted-foreground">这次没有解析出的新增 artifact</p>
+                      ) : null}
+                      {(selectedProcessorRun.output_preview ?? []).map((item, index) => (
+                        <pre key={index} className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-muted p-2">
+                          {formatJson(item)}
+                        </pre>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="mb-1 font-medium text-muted-foreground">Usage</p>
+                      <pre className="max-h-28 overflow-auto rounded bg-muted p-2">
+                        {formatJson(selectedProcessorRun.usage)}
+                      </pre>
+                    </div>
                   </div>
                 ) : null}
               </div>

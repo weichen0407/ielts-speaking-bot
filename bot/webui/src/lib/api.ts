@@ -132,7 +132,13 @@ export interface AdminTrigger {
   enabled: boolean;
   condition?: Record<string, unknown>;
   subagent?: string | null;
+  processor?: string | null;
   model?: string | null;
+  input_path?: string | null;
+  input_paths?: string[];
+  output_path?: string | null;
+  batch_size?: number | null;
+  depends_on?: string | null;
   prompt_file?: string | null;
   prompt_id?: string;
   task_template?: string | null;
@@ -180,6 +186,28 @@ export interface AdminSubagentRun {
     error?: string;
   }>;
   announce_result?: boolean;
+}
+
+export interface AdminProcessorRun {
+  timestamp: string;
+  trigger_id: string;
+  processor: string;
+  mode?: string | null;
+  session_key?: string | null;
+  session_uuid?: string | null;
+  status: "completed" | "skipped" | "error" | string;
+  model?: string | null;
+  input_paths?: string[];
+  output_path?: string | null;
+  cursor_kind?: string | null;
+  cursor_before?: Record<string, unknown>;
+  cursor_after?: Record<string, unknown>;
+  input_rows?: number;
+  output_rows?: number;
+  duration_ms?: number;
+  usage?: Record<string, unknown>;
+  output_preview?: Array<Record<string, unknown>>;
+  error?: string | null;
 }
 
 export interface WikiSyncRun {
@@ -290,6 +318,7 @@ export interface AdminMonitorPayload {
   prompts: AdminPrompt[];
   subagent_statuses: AdminSubagentStatus[];
   subagent_runs: AdminSubagentRun[];
+  processor_runs?: AdminProcessorRun[];
   trigger_decisions?: AdminTriggerDecision[];
   cost_summary?: AdminCostSummary;
   wiki_sync_runs?: WikiSyncRun[];

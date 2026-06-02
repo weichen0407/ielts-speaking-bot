@@ -126,5 +126,8 @@ observability:
   subagent_runs:
     path: monitor/subagent_runs.jsonl
     rotation: size_10_mib_keep_10
+  processor_runs:
+    path: monitor/processor_runs.jsonl
+    rotation: size_10_mib_keep_10
   wiki_sync:
     path: persona/wiki/state/sync_log.jsonl

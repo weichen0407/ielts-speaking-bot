@@ -41,6 +41,7 @@ class BaseDataProcessor(ABC, Generic[T, U]):
 
     def __init__(self) -> None:
         self._llm_caller: Callable[[str, str], Awaitable[str]] | None = None
+        self._usage_total: dict[str, int] = {}
 
     @abstractmethod
     def get_input_schema(self) -> type[T]:
@@ -101,9 +102,18 @@ class BaseDataProcessor(ABC, Generic[T, U]):
             )
             if response.finish_reason == "error":
                 raise RuntimeError(response.content or "LLM processor call failed")
+            for key, value in (response.usage or {}).items():
+                try:
+                    self._usage_total[key] = self._usage_total.get(key, 0) + int(value)
+                except (TypeError, ValueError):
+                    continue
             return response.content or ""
 
         self._llm_caller = _caller
+
+    def get_usage(self) -> dict[str, int]:
+        """Return accumulated LLM token usage for this processor run."""
+        return dict(self._usage_total)
 
     def preprocess(self, raw_data: list[dict]) -> list[T]:
         """

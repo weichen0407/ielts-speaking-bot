@@ -151,7 +151,7 @@
       },
       "target": {
         "processor": "progress_organizer",
-        "depends_on": "ielts_quiz_processor",
+        "depends_on": "ielts_progress_tracker_processor",
         "input_path": "persona/processor/ielts/progress_tracker.jsonl",
         "output_path": "persona/processor/ielts/progress_organizer.jsonl",
         "batch_size": 50,

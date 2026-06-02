@@ -19,6 +19,7 @@ persona/events/*.tmp
 persona/trigger/cron/jobs.json
 persona/trigger/cron/.cursor_*.json
 persona/trigger/count/.cursor_*.json
+persona/trigger/processor/.cursor_*.json
 
 # Legacy runtime data
 shared/.cursor_*.json

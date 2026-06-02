@@ -2470,7 +2470,13 @@ class WebSocketChannel(BaseChannel):
                     "enabled": item.get("enabled", True),
                     "condition": condition,
                     "subagent": target.get("subagent") if isinstance(target, dict) else None,
+                    "processor": target.get("processor") if isinstance(target, dict) else None,
                     "model": target.get("model") if isinstance(target, dict) else None,
+                    "input_path": target.get("input_path") if isinstance(target, dict) else None,
+                    "input_paths": target.get("input_paths") if isinstance(target.get("input_paths"), list) else [],
+                    "output_path": target.get("output_path") if isinstance(target, dict) else None,
+                    "batch_size": target.get("batch_size") if isinstance(target, dict) else None,
+                    "depends_on": target.get("depends_on") if isinstance(target, dict) else None,
                     "prompt_file": prompt_file,
                     "prompt_id": prompt_id,
                     "task_template": target.get("task_template") if isinstance(target, dict) else None,
@@ -2530,6 +2536,14 @@ class WebSocketChannel(BaseChannel):
         from nanobot.utils.monitor_rotator import read_monitor_records
 
         monitor_dir, log_name = monitor_log(root, "subagent_runs", "subagent_runs.jsonl")
+        records = read_monitor_records(monitor_dir, log_name, limit=limit)
+        records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+        return records
+
+    def _monitor_processor_runs(self, root: Path, *, limit: int = 100) -> list[dict[str, Any]]:
+        from nanobot.utils.monitor_rotator import read_monitor_records
+
+        monitor_dir, log_name = monitor_log(root, "processor_runs", "processor_runs.jsonl")
         records = read_monitor_records(monitor_dir, log_name, limit=limit)
         records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return records
@@ -2702,6 +2716,7 @@ class WebSocketChannel(BaseChannel):
             root = self._project_root()
             triggers, trigger_prompts = self._monitor_triggers(root)
             subagent_runs = self._monitor_subagent_runs(root)
+            processor_runs = self._monitor_processor_runs(root)
             trigger_decisions = self._monitor_trigger_decisions(root)
             known_prompt_ids = {p["id"] for p in trigger_prompts}
             extra_prompts: list[dict[str, Any]] = []
@@ -2736,8 +2751,9 @@ class WebSocketChannel(BaseChannel):
                 "prompts": trigger_prompts + extra_prompts,
                 "subagent_statuses": list(reversed(self._subagent_status_history[-100:])),
                 "subagent_runs": subagent_runs,
+                "processor_runs": processor_runs,
                 "trigger_decisions": trigger_decisions,
-                "cost_summary": self._monitor_cost_summary(subagent_runs),
+                "cost_summary": self._monitor_cost_summary(subagent_runs + processor_runs),
                 "wiki_sync_runs": self._wiki_sync_runs(root),
                 "recent_activity": self._monitor_recent_activity(root),
             })

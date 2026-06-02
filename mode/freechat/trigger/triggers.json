@@ -151,7 +151,7 @@
       },
       "target": {
         "processor": "progress_organizer",
-        "depends_on": "freechat_quiz_processor",
+        "depends_on": "freechat_progress_tracker_processor",
         "input_path": "persona/processor/freechat/progress_tracker.jsonl",
         "output_path": "persona/processor/freechat/progress_organizer.jsonl",
         "batch_size": 50,

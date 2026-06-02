@@ -11,7 +11,6 @@ from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
@@ -272,8 +271,26 @@ class AgentLoop:
         from pathlib import Path
 
         from subagent._shared.registry import discover_processors
+        from nanobot.utils.processor_monitor import (
+            append_processor_run,
+            line_count,
+            materialize_processor_delta,
+            output_delta_records,
+            update_processor_cursor,
+        )
 
         target = trigger.target
+        root = Path(self.counter_engine.workspace)
+        output_path = root / target.output_path
+        output_before = line_count(output_path)
+        started_at = time.monotonic()
+        delta_bundle = None
+        model = target.model or self.model
+        source_paths = (
+            [root / p for p in target.input_paths]
+            if target.input_paths
+            else [root / target.input_path]
+        )
         try:
             processors = discover_processors()
             processor_cls = processors.get(target.processor)
@@ -289,56 +306,80 @@ class AgentLoop:
             if hasattr(processor, "configure_llm"):
                 processor.configure_llm(
                     provider=self.provider,
-                    model=target.model or self.model,
+                    model=model,
                     retry_mode=self.provider_retry_mode,
                 )
-            output_path = Path(self.counter_engine.workspace) / target.output_path
             batch_size = target.batch_size or 50
 
-            def materialize_delta_input(source_path: Path) -> tuple[Path, TemporaryDirectory[str] | None]:
-                """Return a delta-only jsonl file for cursor-based processor triggers."""
-                if trigger.condition.kind != "file_line_count" or not trigger.condition.path:
-                    return source_path, None
+            file_line_cursor = None
+            if trigger.condition.kind == "file_line_count":
+                file_line_cursor = int(trigger._cursor.get("offset", 0) or 0)
 
-                cursor_offset = int(trigger._cursor.get("offset", 0) or 0)
-                try:
-                    lines = source_path.read_text(encoding="utf-8").splitlines()
-                except FileNotFoundError:
-                    return source_path, None
-                if cursor_offset > len(lines):
-                    cursor_offset = 0
-                delta_lines = lines[cursor_offset:]
+            delta_bundle = materialize_processor_delta(
+                root=root,
+                trigger_id=trigger.id,
+                source_paths=source_paths,
+                file_line_cursor=file_line_cursor,
+            )
+            input_rows = delta_bundle.input_rows
+            input_records = [item.to_record(root) for item in delta_bundle.inputs]
+            input_paths_for_log = [item["path"] for item in input_records]
+            cursor_before = delta_bundle.cursor_before
+            cursor_after = delta_bundle.cursor_after
 
-                temp_dir = TemporaryDirectory(prefix="nanobot_processor_delta_")
-                delta_path = Path(temp_dir.name) / source_path.name
-                delta_path.write_text(
-                    "\n".join(delta_lines) + ("\n" if delta_lines else ""),
-                    encoding="utf-8",
+            if input_rows <= 0:
+                append_processor_run(
+                    root,
+                    trigger_id=trigger.id,
+                    processor=target.processor,
+                    mode=session.metadata.get("mode"),
+                    session_key=session.key,
+                    session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                    status="skipped",
+                    model=model,
+                    input_paths=input_paths_for_log,
+                    output_path=str(output_path.relative_to(root)),
+                    cursor_kind=delta_bundle.cursor_kind,
+                    cursor_before=cursor_before,
+                    cursor_after=cursor_after,
+                    input_rows=0,
+                    output_rows=0,
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
                 )
-                return delta_path, temp_dir
+                self._log_counter_trigger_decision(
+                    session,
+                    trigger,
+                    decision="skipped",
+                    reason="processor_no_delta",
+                    cursor_after=dict(trigger._cursor),
+                    details={
+                        "processor": target.processor,
+                        "inputs": input_records,
+                    },
+                )
+                return
 
             # Determine input paths (single or multiple)
             if target.input_paths:
                 # Multiple input files (Level 3 processors)
-                input_paths = [Path(self.counter_engine.workspace) / p for p in target.input_paths]
                 logger.info(
                     "Executing processor [{}] with inputs={}, output={}, batch_size={}",
                     target.processor,
-                    input_paths,
+                    delta_bundle.run_paths,
                     output_path,
                     batch_size,
                 )
                 # Call with input_paths for multi-input processors
                 if hasattr(processor, "aprocess_all") and "input_paths" in str(inspect.signature(processor.aprocess_all)):
                     await processor.aprocess_all(
-                        input_paths=input_paths,
+                        input_paths=delta_bundle.run_paths,
                         output_path=output_path,
                         batch_size=batch_size,
                         format="both",
                     )
                 elif hasattr(processor, 'process_all') and 'input_paths' in str(inspect.signature(processor.process_all)):
                     processor.process_all(
-                        input_paths=input_paths,
+                        input_paths=delta_bundle.run_paths,
                         output_path=output_path,
                         batch_size=batch_size,
                         format="both",
@@ -347,22 +388,21 @@ class AgentLoop:
                     # Fallback for processors expecting single input_path
                     if hasattr(processor, "aprocess_all"):
                         await processor.aprocess_all(
-                            input_path=input_paths[0] if input_paths else Path(""),
+                            input_path=delta_bundle.run_paths[0] if delta_bundle.run_paths else Path(""),
                             output_path=output_path,
                             batch_size=batch_size,
                             format="both",
                         )
                     else:
                         processor.process_all(
-                            input_path=input_paths[0] if input_paths else Path(""),
+                            input_path=delta_bundle.run_paths[0] if delta_bundle.run_paths else Path(""),
                             output_path=output_path,
                             batch_size=batch_size,
                             format="both",
                         )
             else:
                 # Single input file (Level 2 processors)
-                input_path = Path(self.counter_engine.workspace) / target.input_path
-                run_input_path, temp_dir = materialize_delta_input(input_path)
+                run_input_path = delta_bundle.run_paths[0]
                 logger.info(
                     "Executing processor [{}] with input={}, output={}, batch_size={}",
                     target.processor,
@@ -370,42 +410,90 @@ class AgentLoop:
                     output_path,
                     batch_size,
                 )
-                try:
-                    if hasattr(processor, "aprocess_all"):
-                        await processor.aprocess_all(
-                            input_path=run_input_path,
-                            output_path=output_path,
-                            batch_size=batch_size,
-                            format="both",
-                        )
-                    else:
-                        processor.process_all(
-                            input_path=run_input_path,
-                            output_path=output_path,
-                            batch_size=batch_size,
-                            format="both",
-                        )
-                finally:
-                    if temp_dir is not None:
-                        temp_dir.cleanup()
+                if hasattr(processor, "aprocess_all"):
+                    await processor.aprocess_all(
+                        input_path=run_input_path,
+                        output_path=output_path,
+                        batch_size=batch_size,
+                        format="both",
+                    )
+                else:
+                    processor.process_all(
+                        input_path=run_input_path,
+                        output_path=output_path,
+                        batch_size=batch_size,
+                        format="both",
+                    )
+
+            output_after = line_count(output_path)
+            output_rows = max(output_after - output_before, 0)
+            if delta_bundle.processor_cursor_after is not None:
+                update_processor_cursor(root, trigger.id, delta_bundle.processor_cursor_after)
 
             self.counter_engine.record_trigger(session.metadata, trigger.id)
+            usage = processor.get_usage() if hasattr(processor, "get_usage") else {}
+            append_processor_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="completed",
+                model=model,
+                input_paths=input_paths_for_log,
+                output_path=str(output_path.relative_to(root)),
+                cursor_kind=delta_bundle.cursor_kind,
+                cursor_before=cursor_before,
+                cursor_after=cursor_after,
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                usage=usage,
+                output_preview=output_delta_records(output_path, start_line=output_before),
+            )
             self._log_counter_trigger_decision(
                 session,
                 trigger,
                 decision="spawned",
                 reason="processor_completed",
                 cursor_after=dict(trigger._cursor),
-                details={"processor": target.processor},
+                details={
+                    "processor": target.processor,
+                    "input_rows": input_rows,
+                    "output_rows": output_rows,
+                    "inputs": input_records,
+                },
             )
             logger.info(
                 "Processor [{}] completed, chaining dependents in background",
                 target.processor,
             )
-            self._schedule_background(
-                self._chain_dependent_triggers(session, msg, trigger.id, session_dir, None),
-            )
+            if delta_bundle.cursor_kind == "file_line_count" or output_rows > 0:
+                self._schedule_background(
+                    self._chain_dependent_triggers(session, msg, trigger.id, session_dir, None),
+                )
         except Exception as e:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            append_processor_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="error",
+                model=model,
+                input_paths=[str(p.relative_to(root)) if p.is_relative_to(root) else str(p) for p in source_paths],
+                output_path=str(output_path.relative_to(root)) if output_path.is_relative_to(root) else str(output_path),
+                cursor_kind=delta_bundle.cursor_kind if delta_bundle else None,
+                cursor_before=delta_bundle.cursor_before if delta_bundle else {},
+                cursor_after=delta_bundle.cursor_after if delta_bundle else {},
+                input_rows=delta_bundle.input_rows if delta_bundle else 0,
+                output_rows=max(line_count(output_path) - output_before, 0),
+                duration_ms=duration_ms,
+                error=str(e),
+            )
             self._log_counter_trigger_decision(
                 session,
                 trigger,
@@ -414,6 +502,9 @@ class AgentLoop:
                 details={"error": str(e), "processor": target.processor},
             )
             logger.warning("Failed to execute processor [{}]: {}", target.processor, e)
+        finally:
+            if delta_bundle is not None:
+                delta_bundle.cleanup()
 
     def _log_counter_trigger_decision(
         self,
