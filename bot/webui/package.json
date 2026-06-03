@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc -p tsconfig.build.json --noEmit",
-    "check": "pnpm run lint && pnpm test -- --run"
+    "check": "bun run lint && bun run test -- --run"
   },
   "dependencies": {
     "@deepgram/sdk": "^5.2.0",

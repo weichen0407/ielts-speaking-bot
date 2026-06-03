@@ -96,32 +96,37 @@ artifacts.
 Install dependencies:
 
 ```bash
+cd bot
 uv sync
 ```
 
 Start Nanobot gateway:
 
 ```bash
+cd bot
 uv run nanobot gateway
 ```
 
 Check Nanobot workspace status:
 
 ```bash
+cd bot
 uv run nanobot status
 ```
 
 Run focused tests:
 
 ```bash
-uv run pytest bot/tests/counter bot/tests/subagent bot/tests/wiki
+cd bot
+uv run pytest tests/counter tests/subagent tests/wiki
 ```
 
 Run WebUI checks:
 
 ```bash
 cd bot/webui
-pnpm run check
+bun install
+bun run check
 ```
 
 ## Runtime Data Policy
