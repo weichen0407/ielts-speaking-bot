@@ -715,7 +715,7 @@ ingest path:
 subagent/single_session/vocab/data/vocab.jsonl
 subagent/single_session/polisher/data/polisher.jsonl
 subagent/single_session/notes/data/notes.jsonl
-subagent/cross_session/progress_tracker/data/progress_bank.jsonl
+persona/processor/freechat/progress_tracker.jsonl
 persona/memory/MEMORY.md
 ```
 
@@ -757,7 +757,7 @@ SOURCES = [
     "subagent/single_session/vocab/data/vocab.jsonl",
     "subagent/single_session/polisher/data/polisher.jsonl",
     "subagent/single_session/notes/data/notes.jsonl",
-    "subagent/cross_session/progress_tracker/data/progress_bank.jsonl",
+    "persona/processor/freechat/progress_tracker.jsonl",
 ]
 ```
 

@@ -72,7 +72,7 @@ bot/webui/
 Command:
 
 ```text
-pnpm test -- --run
+bun run test -- --run
 ```
 
 Expected:
@@ -99,7 +99,7 @@ bot/webui/
 Command:
 
 ```text
-pnpm run build
+bun run build
 ```
 
 Expected:
@@ -126,7 +126,7 @@ bot/webui/
 Command:
 
 ```text
-pnpm run lint
+bun run lint
 ```
 
 Current issue:
@@ -498,24 +498,22 @@ After wiki work, verify:
 
 ## 5. Known Issues Found During Review
 
-### 5.1 `pnpm run check` Does Not Exist
+### 5.1 Historical: WebUI Check Script Did Not Exist
 
-Use:
-
-```text
-pnpm test -- --run
-pnpm run build
-```
-
-Do not use:
+Current WebUI validation uses:
 
 ```text
-pnpm run check
+bun run check
 ```
 
-unless a `check` script is added later.
+The older fallback was:
 
-### 5.2 `pnpm run lint` Currently Fails
+```text
+bun run test -- --run
+bun run build
+```
+
+### 5.2 Historical: WebUI Lint Script Failed
 
 Reason:
 
@@ -549,8 +547,7 @@ Before considering the wiki feature ready:
 
 1. `uv run python -m pytest tests/wiki` passes from `bot/`.
 2. `uv run python -m compileall subagent/cross_session/wiki bot/nanobot/agent/tools/wiki.py` passes from repo root.
-3. `pnpm test -- --run` passes from `bot/webui/`.
-4. `pnpm run build` passes from `bot/webui/`.
+3. `bun run test -- --run` passes from `bot/webui/`.
+4. `bun run build` passes from `bot/webui/`.
 5. Manual patch/search/graph tests pass.
 6. Existing chat and notes flows still work.
-

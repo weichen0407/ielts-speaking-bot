@@ -323,7 +323,7 @@ Initial sources from the old patch-JSONL plan, superseded by the current
 subagent/single_session/vocab/data/vocab.jsonl
 subagent/single_session/polisher/data/polisher.jsonl
 subagent/single_session/notes/data/notes.jsonl
-subagent/cross_session/progress_tracker/data/progress_bank.jsonl
+persona/processor/freechat/progress_tracker.jsonl
 ```
 
 Acceptance:
@@ -475,7 +475,7 @@ Acceptance:
 Suggested command:
 
 ```text
-pnpm run build
+bun run build
 ```
 
 ---
@@ -530,8 +530,8 @@ bot/webui/src/tests/wiki-memory-panel.test.tsx
 Suggested command:
 
 ```text
-pnpm test -- --run
-pnpm run build
+bun run test -- --run
+bun run build
 ```
 
 ---
@@ -593,8 +593,8 @@ bot/webui/src/tests/wiki-graph-view.test.tsx
 Suggested command:
 
 ```text
-pnpm test -- --run
-pnpm run build
+bun run test -- --run
+bun run build
 ```
 
 ---
@@ -630,8 +630,8 @@ Acceptance:
 Suggested command:
 
 ```text
-pnpm test -- --run
-pnpm run build
+bun run test -- --run
+bun run build
 ```
 
 ---
@@ -743,7 +743,7 @@ Implement only the WebUI wiki panel and graph view from docs/06-llm-wiki-impleme
 Use existing UI components.
 Use react-force-graph-2d for the bubble graph if dependency installation is available.
 Do not modify backend behavior.
-Run `pnpm test -- --run` and `pnpm run build`.
+Run `bun run test -- --run` and `bun run build`.
 ```
 
 ---
