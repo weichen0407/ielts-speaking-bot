@@ -3,6 +3,19 @@ import { beforeEach } from "vitest";
 
 import i18n from "@/i18n";
 
+if (!document.doctype) {
+  document.insertBefore(
+    document.implementation.createDocumentType("html", "", ""),
+    document.documentElement,
+  );
+}
+if (document.compatMode !== "CSS1Compat") {
+  Object.defineProperty(document, "compatMode", {
+    configurable: true,
+    value: "CSS1Compat",
+  });
+}
+
 // happy-dom doesn't ship with ``crypto.randomUUID``; shim a tiny v4-ish helper.
 if (!("randomUUID" in globalThis.crypto)) {
   Object.defineProperty(globalThis.crypto, "randomUUID", {

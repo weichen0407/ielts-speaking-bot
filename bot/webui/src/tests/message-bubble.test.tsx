@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
+import { preloadMarkdownText } from "@/components/MarkdownText";
 import type { UIMessage } from "@/lib/types";
 
 describe("MessageBubble", () => {
@@ -159,7 +160,9 @@ describe("MessageBubble", () => {
   });
 
   it("renders reasoning body as markdown so headings are not left as raw ###", async () => {
-    await import("@/components/MarkdownTextRenderer");
+    await act(async () => {
+      await preloadMarkdownText();
+    });
     const message: UIMessage = {
       id: "a-reasoning-md",
       role: "assistant",
@@ -180,7 +183,9 @@ describe("MessageBubble", () => {
   });
 
   it("renders inline file paths as compact file references", async () => {
-    await import("@/components/MarkdownTextRenderer");
+    await act(async () => {
+      await preloadMarkdownText();
+    });
     const message: UIMessage = {
       id: "a-file-path",
       role: "assistant",

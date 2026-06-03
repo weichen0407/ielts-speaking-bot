@@ -460,21 +460,13 @@ class CounterEngine:
         )
 
     def load_prompt(self, trigger: CounterTrigger) -> str | None:
-        """Load the system prompt file for a trigger.
-
-        Searches in order:
-        1. subagent/{category}/{name}/context/{name}_subagent.md
-        2. subagent/{category}/{name}/context/{prompt_file}
-        """
+        """Load the explicitly configured system prompt file for a trigger."""
         if not trigger.target.prompt_file:
-            # Default to standard path
-            for category in ["single_session", "cross_session"]:
-                for subagent_dir in (self.workspace / "subagent" / category).iterdir():
-                    if not subagent_dir.is_dir():
-                        continue
-                    ctx_path = subagent_dir / "context" / f"{subagent_dir.name}_subagent.md"
-                    if ctx_path.exists():
-                        return ctx_path.read_text(encoding="utf-8")
+            logger.warning(
+                "Counter trigger '{}' has subagent target '{}' but no prompt_file",
+                trigger.id,
+                trigger.target.subagent,
+            )
             return None
 
         prompt_file = trigger.target.prompt_file

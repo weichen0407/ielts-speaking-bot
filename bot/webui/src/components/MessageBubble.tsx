@@ -535,7 +535,7 @@ export function ReasoningBubble({
   };
   useEffect(() => {
     if (open && text.length > 0) {
-      preloadMarkdownText();
+      void preloadMarkdownText();
     }
   }, [open, text.length]);
   return (

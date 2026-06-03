@@ -18,7 +18,11 @@ interface MarkdownTextProps {
   streaming?: boolean;
 }
 
-const loadMarkdownRenderer = () => import("@/components/MarkdownTextRenderer");
+let markdownRendererPromise: Promise<typeof import("@/components/MarkdownTextRenderer")> | null = null;
+const loadMarkdownRenderer = () => {
+  markdownRendererPromise ??= import("@/components/MarkdownTextRenderer");
+  return markdownRendererPromise;
+};
 const LazyMarkdownRenderer = lazy(loadMarkdownRenderer);
 
 const MemoizedMarkdownRenderer = memo(function MemoizedMarkdownRenderer({
@@ -41,8 +45,8 @@ const SHORT_STREAM_COMMIT_MS = 80;
 const MEDIUM_STREAM_COMMIT_MS = 140;
 const LONG_STREAM_COMMIT_MS = 220;
 
-export function preloadMarkdownText(): void {
-  void loadMarkdownRenderer();
+export function preloadMarkdownText(): Promise<void> {
+  return loadMarkdownRenderer().then(() => undefined);
 }
 
 /**
@@ -59,7 +63,7 @@ export function MarkdownText({
   const highlightCode = !streaming && renderedSource === children;
 
   useEffect(() => {
-    if (streaming) preloadMarkdownText();
+    if (streaming) void preloadMarkdownText();
   }, [streaming]);
 
   return (

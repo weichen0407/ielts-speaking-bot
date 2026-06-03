@@ -89,6 +89,42 @@ def test_counter_engine_resolves_project_root_when_workspace_is_persona(tmp_path
     assert f"Workspace: {tmp_path}" in engine.build_task(trigger, str(persona_dir / "sessions" / "abc"))
 
 
+def test_load_prompt_requires_explicit_prompt_file(tmp_path: Path) -> None:
+    trigger_file = tmp_path / "mode" / "freechat" / "trigger" / "triggers.json"
+    trigger_file.parent.mkdir(parents=True)
+    trigger_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "vocab_analysis",
+                        "enabled": True,
+                        "condition": {
+                            "kind": "turn_count",
+                            "count": 1,
+                            "scope": "session",
+                        },
+                        "target": {"subagent": "vocab"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    fallback_prompt = tmp_path / "subagent" / "single_session" / "vocab" / "context" / "vocab_subagent.md"
+    fallback_prompt.parent.mkdir(parents=True)
+    fallback_prompt.write_text("must not be loaded implicitly", encoding="utf-8")
+
+    engine = CounterEngine(tmp_path)
+    metadata = {"mode": "freechat"}
+    engine.ensure_mode(metadata["mode"])
+    engine.increment_turn(metadata)
+    trigger = engine.check_triggers(metadata)[0]
+
+    assert engine.load_prompt(trigger) is None
+
+
 def test_counter_engine_uses_capability_registry_trigger_paths(tmp_path: Path) -> None:
     config_file = tmp_path / "config" / "capabilities.yaml"
     config_file.parent.mkdir(parents=True)
