@@ -455,8 +455,12 @@ async def test_drain_pending_timeout(tmp_path):
     assert injection_callback is not None
 
     # Patch the timeout to be very short for testing
+    def _timeout_and_close(coro, *args, **kwargs):
+        coro.close()
+        raise asyncio.TimeoutError
+
     with patch("nanobot.agent.loop.asyncio.wait_for") as mock_wait:
-        mock_wait.side_effect = asyncio.TimeoutError
+        mock_wait.side_effect = _timeout_and_close
         results = await injection_callback()
         assert results == []
 

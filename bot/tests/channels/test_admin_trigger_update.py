@@ -3,7 +3,6 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import WebSocketChannel
 
 
@@ -27,7 +26,7 @@ def test_admin_trigger_update_writes_count(tmp_path: Path, monkeypatch) -> None:
         encoding="utf-8",
     )
 
-    channel = WebSocketChannel({"enabled": True}, MessageBus())
+    channel = WebSocketChannel({"enabled": True}, SimpleNamespace())
     channel._api_tokens["tok"] = time.monotonic() + 60
     monkeypatch.setattr(channel, "_project_root", lambda: tmp_path)
     request = SimpleNamespace(
@@ -65,7 +64,7 @@ def test_admin_monitor_includes_trigger_decisions(tmp_path: Path, monkeypatch) -
         encoding="utf-8",
     )
 
-    channel = WebSocketChannel({"enabled": True}, MessageBus())
+    channel = WebSocketChannel({"enabled": True}, SimpleNamespace())
     channel._api_tokens["tok"] = time.monotonic() + 60
     monkeypatch.setattr(channel, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(channel, "_monitor_triggers", lambda root: ([], []))

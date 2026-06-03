@@ -12,7 +12,6 @@ from nanobot.agent.tools.long_task import (
     CompleteGoalTool,
     LongTaskTool,
 )
-from nanobot.bus.queue import MessageBus
 from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
 
@@ -144,7 +143,7 @@ async def test_long_task_skips_ws_publish_without_bus(tmp_path):
 
 @pytest.mark.asyncio
 async def test_long_task_and_complete_goal_registered(tmp_path):
-    bus = MessageBus()
+    bus = MagicMock()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")

@@ -53,6 +53,17 @@ def _add_turns(session: Session, turns: int, *, prefix: str = "msg") -> None:
         session.add_message("assistant", f"{prefix} assistant {i}")
 
 
+def _scheduler_mock() -> MagicMock:
+    """Return a scheduler mock that consumes scheduled coroutines in sync tests."""
+    scheduler = MagicMock()
+
+    def _close(coro):
+        coro.close()
+
+    scheduler.side_effect = _close
+    return scheduler
+
+
 # ---------------------------------------------------------------------------
 # __init__
 # ---------------------------------------------------------------------------
@@ -192,7 +203,7 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = []
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 
@@ -203,7 +214,7 @@ class TestCheckExpired:
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
         mock_sm.list_sessions.return_value = [{"key": "cli:old", "updated_at": old_ts}]
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler)
         scheduler.assert_called_once()
         assert "cli:old" in ac._archiving
@@ -215,7 +226,7 @@ class TestCheckExpired:
         old_ts = (datetime.now() - timedelta(minutes=20)).isoformat()
         mock_sm.list_sessions.return_value = [{"key": "cli:busy", "updated_at": old_ts}]
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler, active_session_keys={"cli:busy"})
         scheduler.assert_not_called()
 
@@ -227,7 +238,7 @@ class TestCheckExpired:
         mock_sm.list_sessions.return_value = [{"key": "cli:dup", "updated_at": old_ts}]
         ac.sessions = mock_sm
         ac._archiving.add("cli:dup")
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 
@@ -237,7 +248,7 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = [{"key": "", "updated_at": "old"}]
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 
@@ -247,7 +258,7 @@ class TestCheckExpired:
         mock_sm = MagicMock(spec=SessionManager)
         mock_sm.list_sessions.return_value = [{"updated_at": "old"}]
         ac.sessions = mock_sm
-        scheduler = MagicMock()
+        scheduler = _scheduler_mock()
         ac.check_expired(scheduler)
         scheduler.assert_not_called()
 

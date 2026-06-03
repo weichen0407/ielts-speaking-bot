@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 
 
@@ -26,39 +25,39 @@ class _DummyChannel(BaseChannel):
 
 
 def test_is_allowed_requires_exact_match() -> None:
-    channel = _DummyChannel(SimpleNamespace(allow_from=["allow@email.com"]), MessageBus())
+    channel = _DummyChannel(SimpleNamespace(allow_from=["allow@email.com"]), SimpleNamespace())
 
     assert channel.is_allowed("allow@email.com") is True
     assert channel.is_allowed("attacker|allow@email.com") is False
 
 
 def test_is_allowed_supports_dict_allow_from_alias() -> None:
-    channel = _DummyChannel({"allowFrom": ["alice"]}, MessageBus())
+    channel = _DummyChannel({"allowFrom": ["alice"]}, SimpleNamespace())
 
     assert channel.is_allowed("alice") is True
 
 
 def test_is_allowed_denies_empty_dict_allow_from() -> None:
-    channel = _DummyChannel({"allow_from": []}, MessageBus())
+    channel = _DummyChannel({"allow_from": []}, SimpleNamespace())
 
     assert channel.is_allowed("alice") is False
 
 
 def test_is_allowed_handles_none_allow_from() -> None:
-    channel = _DummyChannel({"allow_from": None}, MessageBus())
+    channel = _DummyChannel({"allow_from": None}, SimpleNamespace())
     assert channel.is_allowed("alice") is False
 
-    channel2 = _DummyChannel({"allowFrom": None}, MessageBus())
+    channel2 = _DummyChannel({"allowFrom": None}, SimpleNamespace())
     assert channel2.is_allowed("alice") is False
 
 
 def test_is_allowed_star_allows_all() -> None:
-    channel = _DummyChannel({"allowFrom": ["*"]}, MessageBus())
+    channel = _DummyChannel({"allowFrom": ["*"]}, SimpleNamespace())
     assert channel.is_allowed("anyone") is True
 
 
 def test_is_allowed_pairing_fallback(monkeypatch) -> None:
-    channel = _DummyChannel({"allowFrom": []}, MessageBus())
+    channel = _DummyChannel({"allowFrom": []}, SimpleNamespace())
     monkeypatch.setattr(
         "nanobot.channels.base.is_approved", lambda _ch, sid: sid == "paired"
     )
@@ -68,7 +67,7 @@ def test_is_allowed_pairing_fallback(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
-    channel = _DummyChannel({"allowFrom": []}, MessageBus())
+    channel = _DummyChannel({"allowFrom": []}, SimpleNamespace())
     monkeypatch.setattr(
         "nanobot.channels.base.generate_code", lambda _ch, sid: "ABCD-EFGH"
     )
@@ -85,11 +84,10 @@ async def test_handle_message_dm_sends_pairing_code(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_message_group_ignores_unknown() -> None:
-    channel = _DummyChannel({"allowFrom": []}, MessageBus())
+    channel = _DummyChannel({"allowFrom": []}, SimpleNamespace())
 
     await channel._handle_message(
         sender_id="stranger", chat_id="chat1", content="hello", is_dm=False
     )
 
     assert channel._sent == []
-
