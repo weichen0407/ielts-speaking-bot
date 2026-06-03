@@ -832,51 +832,6 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             return None
 
-        # Progress organizer is a cross-session subagent — spawn directly, silently.
-        if job.name == "progress_organizer":
-            try:
-                # Find the progress_organizer trigger in counter_engine
-                trigger = next(
-                    (t for t in agent.counter_engine._triggers if t.id == "progress_organizer"),
-                    None,
-                )
-                if not trigger:
-                    logger.warning("progress_organizer cron job: trigger not found in counter_engine")
-                    return None
-
-                # Load prompt and build task (same logic as _spawn_counter_subagent)
-                prompt = agent.counter_engine.load_prompt(trigger)
-                if not prompt:
-                    logger.warning("progress_organizer cron job: failed to load prompt")
-                    return None
-
-                task = agent.counter_engine.build_task(trigger, session_dir="")
-                prompt = prompt.replace("{{ session_dir }}", "")
-                prompt = prompt.replace("{{ workspace }}", str(agent.workspace))
-
-                # Spawn silently (announce_result=False)
-                task_id = await agent.subagents.spawn(
-                    task=task,
-                    label=trigger.target.subagent,
-                    origin_channel="cli",
-                    origin_chat_id="cron",
-                    session_key=None,
-                    origin_message_id=None,
-                    extra_system_prompt=prompt,
-                    announce_result=False,
-                    model=trigger.target.model,
-                )
-                logger.info(
-                    "progress_organizer cron job spawned subagent [{}], waiting for completion",
-                    task_id,
-                )
-                # Wait for completion before returning
-                await agent.subagents.wait_for_subagent(task_id)
-                logger.info("progress_organizer cron job completed")
-            except Exception:
-                logger.exception("progress_organizer cron job failed")
-            return None
-
         # Memory cron: update MEMORY.md from sessions modified since last run
         if job.name == "memory_cron":
             trigger = None

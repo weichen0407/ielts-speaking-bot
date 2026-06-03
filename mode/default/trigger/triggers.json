@@ -42,27 +42,6 @@
       }
     },
     {
-      "id": "progress_tracker",
-      "name": "Progress Tracker",
-      "enabled": true,
-      "condition": {
-        "kind": "file_line_count",
-        "count": 20,
-        "scope": "global",
-        "path": "persona/user_responses.jsonl"
-      },
-      "target": {
-        "subagent": "progress_tracker",
-        "prompt_file": "subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md",
-        "model": "deepseek-v4-flash",
-        "task_template": "Track user expression progress.\n\nInput: {workspace}/persona/user_responses.jsonl\nOutput: {workspace}/persona/progress_bank.jsonl"
-      },
-      "cursor": {
-        "offset": 4,
-        "last_checked": "2026-06-02T16:39:17.000000Z"
-      }
-    },
-    {
       "id": "benative_article_fetcher",
       "name": "Benative Article Fetcher",
       "enabled": true,

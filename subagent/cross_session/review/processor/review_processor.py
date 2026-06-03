@@ -244,7 +244,7 @@ If no content to process, output (none)."""
                 content=output.review_point,
                 point_type=output.question_type,
                 topic=output.topic or "general",
-                source="kg_builder",  # TODO: track actual source
+                source="review_processor",
             )
             if created:
                 # Update index with familiarity hint

@@ -24,8 +24,9 @@ This project has three different kinds of files:
 
 | Path | Purpose | Rebuild/cleanup note |
 | --- | --- | --- |
-| `persona/progress_bank.jsonl` | Extracted expression highlights before aggregation. | Derived from `persona/user_responses.jsonl`. |
-| `persona/progress.json` | Aggregated progress summary. | Derived from `persona/progress_bank.jsonl`. |
+| `persona/processor/{mode}/progress_tracker.jsonl` | Extracted expression highlights from incremental user response deltas. | Derived from `persona/{mode}/sessions/{session_uuid}/responses.jsonl` and processor cursors. |
+| `persona/processor/{mode}/progress_organizer.jsonl` | Aggregated progress highlights materialized from progress tracker artifacts. | Derived from `persona/processor/{mode}/progress_tracker.jsonl`. |
+| `persona/trigger/processor/.cursor_*.json` | Processor cursor state used to avoid reprocessing old artifacts. | Runtime state; safe to reset during tests. |
 | `persona/sessions/{session_uuid}/notes/{vocab,polisher,profile}.md` | Single-session subagent outputs. | Recreated by count-triggered subagents. |
 | `persona/wiki/` | LLM wiki memory pages, SQLite index, graph metadata, and update cursors. | Pages are important runtime memory; indexes/cursors are derived. |
 

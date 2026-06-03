@@ -1065,42 +1065,6 @@ class SessionManager:
             content=content,
         )
 
-    # ─── Progress Bank ─────────────────────────────────────────────────────────────
-
-    @property
-    def _progress_bank_path(self) -> Path:
-        """Path to the progress bank file (cross-session user highlights)."""
-        return self.sessions_dir.parent / "progress_bank.jsonl"
-
-    def append_progress_entry(self, entry: dict) -> int:
-        """Append a single progress entry to the progress bank.
-
-        Returns the number of entries written (1).
-        """
-        try:
-            with open(self._progress_bank_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            return 1
-        except Exception:
-            logger.warning("Failed to append progress entry to {}", self._progress_bank_path)
-            return 0
-
-    def append_progress_entries(self, entries: list[dict]) -> int:
-        """Append multiple progress entries to the progress bank.
-
-        Returns the number of entries written.
-        """
-        if not entries:
-            return 0
-        try:
-            with open(self._progress_bank_path, "a", encoding="utf-8") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            return len(entries)
-        except Exception:
-            logger.warning("Failed to append {} progress entries to {}", len(entries), self._progress_bank_path)
-            return 0
-
     def clear_responses(self) -> bool:
         """Clear the user expressions file.
 

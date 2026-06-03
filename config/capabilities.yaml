@@ -58,12 +58,6 @@ subagents:
     trigger_ids: [memory_cron]
     writes:
       - persona/memory/MEMORY.md
-  progress_tracker:
-    scope: cross_session
-    prompt: subagent/cross_session/progress_tracker/context/progress_tracker_subagent.md
-    trigger_ids: [progress_tracker]
-    writes:
-      - persona/progress_bank.jsonl
   daily_consolidator:
     scope: cross_session
     prompt: subagent/cross_session/daily_consolidator/context/daily_consolidator_subagent.md
@@ -129,5 +123,11 @@ observability:
   processor_runs:
     path: monitor/processor_runs.jsonl
     rotation: size_10_mib_keep_10
+
+deprecated:
+  subagents:
+    progress_tracker:
+      replacement: processors.progress_tracker
+      reason: superseded by deterministic processor pipeline and processor cursor logs
   wiki_sync:
     path: persona/wiki/state/sync_log.jsonl
