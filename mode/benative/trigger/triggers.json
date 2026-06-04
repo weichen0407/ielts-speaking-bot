@@ -2,20 +2,105 @@
   "version": 1,
   "triggers": [
     {
-      "id": "benative_review",
-      "name": "Benative Review",
+      "id": "benative_article",
+      "name": "Be Native Article",
       "enabled": true,
       "condition": {
-        "kind": "turn_count",
-        "count": 10,
-        "scope": "session"
+        "kind": "file_line_count",
+        "count": 1,
+        "scope": "global",
+        "path": "persona/benative/sources/index.jsonl"
       },
       "target": {
+        "processor": "benative_article",
+        "subagent": "benative_article",
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
+        "input_path": "persona/benative/sources/index.jsonl",
+        "output_path": "persona/processor/benative/article.jsonl",
+        "batch_size": 5,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "benative_vocab",
+      "name": "Be Native Vocab",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 1,
+        "scope": "global",
+        "path": "persona/benative/events/responses.jsonl"
+      },
+      "target": {
+        "processor": "vocab",
+        "subagent": "vocab",
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
+        "input_path": "persona/benative/events/responses.jsonl",
+        "output_path": "persona/processor/benative/vocab.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "benative_polisher",
+      "name": "Be Native Polisher",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 1,
+        "scope": "global",
+        "path": "persona/benative/events/responses.jsonl"
+      },
+      "target": {
+        "processor": "polisher",
+        "subagent": "polisher",
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
+        "depends_on": "benative_vocab",
+        "input_path": "persona/benative/events/responses.jsonl",
+        "output_path": "persona/processor/benative/polisher.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
+      },
+      "cursor": {
+        "offset": 0,
+        "last_checked": null
+      }
+    },
+    {
+      "id": "benative_review",
+      "name": "Be Native Review",
+      "enabled": true,
+      "condition": {
+        "kind": "file_line_count",
+        "count": 1,
+        "scope": "global",
+        "path": "persona/benative/events/responses.jsonl"
+      },
+      "target": {
+        "processor": "benative_review",
         "subagent": "benative_review",
-        "prompt_file": "subagent/single_session/benative_review/context/benative_review_subagent.md",
-        "silent": true,
-        "model": "deepseek-v4-flash",
-        "task_template": "Review recent benative user responses and compare with original English.\n\nSession directory: {session_dir}/notes/\nWorkspace: {workspace}\n\n1. Read benative_progress.json to get article_id.\n2. Read user responses for this session.\n3. Read original sentence pairs for the selected article.\n\nOutput review to: {session_dir}/notes/benative_review.md"
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
+        "depends_on": "benative_polisher",
+        "input_path": "persona/benative/events/responses.jsonl",
+        "output_path": "persona/processor/benative/review.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash"
       },
       "cursor": {
         "offset": 0,

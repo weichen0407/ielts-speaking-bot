@@ -525,6 +525,8 @@ processor middleware
 
 ### Step 5. Register Four Triggers
 
+Status: done.
+
 Add:
 
 ```text
