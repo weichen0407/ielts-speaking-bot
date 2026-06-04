@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import json
 import os
 import time
 import uuid
@@ -2399,6 +2400,133 @@ Note Content:
         ctx.pending_summary = pending
         return "ok"
 
+    def _load_benative_pairs(self, article_id: str) -> list[dict[str, Any]]:
+        pairs_file = self.sessions.sessions_dir.parent / "benative" / "pairs" / f"{article_id}.jsonl"
+        pairs: list[dict[str, Any]] = []
+        if not pairs_file.exists():
+            return pairs
+        for line in pairs_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                pairs.append(item)
+        return pairs
+
+    def _benative_progress_file(self, session: Session) -> Path:
+        return self.sessions._get_session_dir(session.key) / "notes" / "benative_progress.json"
+
+    def _try_handle_benative_practice_turn(self, ctx: TurnContext, raw: str) -> OutboundMessage | None:
+        """Handle Be Native reconstruction turns without invoking the main LLM."""
+        if ctx.session is None:
+            return None
+        if raw.startswith("/"):
+            return None
+        if ctx.session.metadata.get("mode") != "benative":
+            return None
+
+        progress_file = self._benative_progress_file(ctx.session)
+        if not progress_file.exists():
+            return None
+
+        try:
+            progress = json.loads(progress_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        article_id = str(
+            progress.get("article_id")
+            or ctx.session.metadata.get("benative_article_id")
+            or ""
+        ).strip()
+        if not article_id:
+            return None
+
+        pairs = self._load_benative_pairs(article_id)
+        total = len(pairs)
+        current = int(progress.get("current_sentence", 0) or 0)
+        if total <= 0:
+            content = f"No sentence pairs were found for `{article_id}` yet."
+        elif current >= total:
+            content = (
+                f"This article is already complete: {total}/{total} sentences.\n\n"
+                "Use `/benative` to choose another article."
+            )
+        else:
+            from datetime import datetime
+
+            pair = pairs[current]
+            sentence_index = int(pair.get("sentence_index", current) or current)
+            zh = str(pair.get("zh", ""))
+            standard_en = str(pair.get("en", ""))
+            user_en = raw.strip()
+
+            from nanobot.benative.events import append_benative_response
+            from subagent._shared.benative_schema import BenativeResponse
+
+            append_benative_response(
+                Path(self.counter_engine.workspace),
+                BenativeResponse(
+                    session_uuid=ctx.session.session_uuid or ctx.session.key,
+                    article_id=article_id,
+                    sentence_index=sentence_index,
+                    zh=zh,
+                    standard_en=standard_en,
+                    user_en=user_en,
+                    timestamp=datetime.now().isoformat(),
+                ),
+            )
+            self.sessions.append_mode_response(
+                ctx.session,
+                current + 1,
+                article_id=article_id,
+                sentence_index=sentence_index,
+                zh=zh,
+                standard_en=standard_en,
+                user_en=user_en,
+            )
+
+            next_index = current + 1
+            progress["current_sentence"] = next_index
+            progress["total_sentences"] = total
+            progress_file.write_text(
+                json.dumps(progress, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+            if next_index < total:
+                next_pair = pairs[next_index]
+                content = (
+                    f"Recorded sentence {next_index}/{total}.\n\n"
+                    f"Sentence {next_index + 1}/{total}:\n"
+                    f"{next_pair.get('zh', '')}\n\n"
+                    "Please answer in natural English."
+                )
+            else:
+                content = (
+                    f"Recorded sentence {next_index}/{total}.\n\n"
+                    "This article is complete. Your answers have been saved for "
+                    "vocab, polisher, and review subagents."
+                )
+
+        ctx.user_persisted_early = self._persist_user_message_early(
+            ctx.msg,
+            ctx.session,
+            _benative_practice=True,
+        )
+        ctx.session.add_message("assistant", content, _benative_practice=True)
+        self.sessions.save(ctx.session)
+        self._clear_pending_user_turn(ctx.session)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
     async def _state_command(self, ctx: TurnContext) -> str:
         raw = ctx.msg.content.strip()
         cmd_ctx = CommandContext(
@@ -2421,6 +2549,9 @@ Note Content:
                 )
                 self.sessions.save(ctx.session)
                 self._clear_pending_user_turn(ctx.session)
+            return "shortcut"
+        if deterministic := self._try_handle_benative_practice_turn(ctx, raw):
+            ctx.outbound = deterministic
             return "shortcut"
         return "dispatch"
 

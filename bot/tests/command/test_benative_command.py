@@ -85,6 +85,8 @@ async def test_benative_select_counts_pairs_from_persona_benative(tmp_path: Path
 
     assert response is not None
     assert "0/2 sentences" in response.content
+    assert "Sentence 1/2" in response.content
+    assert "一" in response.content
     progress = json.loads(
         (tmp_path / "persona" / "sessions" / "s1" / "notes" / "benative_progress.json").read_text(
             encoding="utf-8"
@@ -114,5 +116,6 @@ async def test_benative_select_registered_as_prefix_command(tmp_path: Path) -> N
 
     assert response is not None
     assert "0/1 sentences" in response.content
+    assert "Sentence 1/1" in response.content
     assert session.metadata["mode"] == "benative"
     assert session.metadata["benative_article_id"] == "arsenal_matchday_001"

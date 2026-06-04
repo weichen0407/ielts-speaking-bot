@@ -700,6 +700,23 @@ async def cmd_ielts_score(ctx: CommandContext) -> OutboundMessage | None:
         )
 
 
+def _load_benative_pairs(pairs_file) -> list[dict]:
+    """Load Be Native sentence pairs from a jsonl artifact."""
+    pairs: list[dict] = []
+    if not pairs_file.exists():
+        return pairs
+    for line in pairs_file.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            pairs.append(item)
+    return pairs
+
+
 async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
     """Switch to Be Native mode for authentic expression practice.
 
@@ -736,12 +753,12 @@ async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
         notes_dir.mkdir(parents=True, exist_ok=True)
         progress_file = notes_dir / "benative_progress.json"
 
-        # Count total sentences
+        # Load fixed sentence pairs. Selecting an article should not call an LLM;
+        # it just starts the deterministic reconstruction cursor.
         benative_root = loop.sessions.sessions_dir.parent / "benative"
         pairs_file = benative_root / "pairs" / f"{article_id}.jsonl"
-        total_sentences = 0
-        if pairs_file.exists():
-            total_sentences = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
+        pairs = _load_benative_pairs(pairs_file)
+        total_sentences = len(pairs)
 
         progress_data = {
             "article_id": article_id,
@@ -751,16 +768,25 @@ async def cmd_benative(ctx: CommandContext) -> OutboundMessage | None:
         }
         progress_file.write_text(json.dumps(progress_data, ensure_ascii=False), encoding="utf-8")
 
-        return OutboundMessage(
-            channel=ctx.msg.channel,
-            chat_id=ctx.msg.chat_id,
-            content=f"""Article selected! You're now in Benative practice mode.
+        if pairs:
+            first_pair = pairs[0]
+            prompt = f"""Article selected! You're now in Benative practice mode.
 
 Current progress: 0/{total_sentences} sentences
 
-I'll show you Chinese sentences one by one. Try to translate them into natural English!
+Sentence 1/{total_sentences}:
+{first_pair.get("zh", "")}
 
-Type `/benative progress` to see your current progress.""",
+Please answer in natural English. Type `/benative progress` to see your current progress."""
+        else:
+            prompt = f"""Article selected! You're now in Benative practice mode.
+
+No sentence pairs were found for `{article_id}` yet."""
+
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=prompt,
             metadata=dict(ctx.msg.metadata or {}),
         )
 
