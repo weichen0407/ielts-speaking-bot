@@ -482,6 +482,8 @@ BenativeReviewItem
 
 ### Step 2. Add benative_article Processor + Subagent Prompt
 
+Status: done.
+
 Build:
 
 ```text
@@ -500,6 +502,8 @@ processor/benative/article.jsonl
 
 ### Step 3. Add Be Native Response Event Shape
 
+Status: done.
+
 Persist every user reconstruction answer to:
 
 ```text
@@ -507,6 +511,8 @@ persona/benative/events/responses.jsonl
 ```
 
 ### Step 4. Add benative_review Processor
+
+Status: done.
 
 Migrate old `benative_review` from file-writing subagent to:
 
