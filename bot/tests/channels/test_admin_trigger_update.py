@@ -82,3 +82,82 @@ def test_admin_monitor_includes_trigger_decisions(tmp_path: Path, monkeypatch) -
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["trigger_decisions"][0]["trigger_id"] == "vocab_analysis"
     assert payload["trigger_decisions"][0]["reason"] == "turn_count_not_due"
+
+
+def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: Path, monkeypatch) -> None:
+    monitor_dir = tmp_path / "monitor"
+    monitor_dir.mkdir()
+    (monitor_dir / "processor_runs.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-06-04T10:00:00Z",
+                "trigger_id": "benative_review",
+                "processor": "benative_review",
+                "subagent": "benative_review",
+                "execution_mode": "api",
+                "tools": [],
+                "mode": "benative",
+                "status": "completed",
+                "model": "deepseek-v4-flash",
+                "input_rows": 1,
+                "output_rows": 1,
+                "output_preview": [
+                    {
+                        "article_id": "article_001",
+                        "sentence_index": 2,
+                        "issue_type": "grammar",
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (monitor_dir / "subagent_runs.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-06-04T10:00:01Z",
+                "task_id": "task-1",
+                "label": "benative_review",
+                "subagent": "benative_review",
+                "phase": "done",
+                "model": "deepseek-v4-flash",
+                "stop_reason": "completed",
+                "origin": {
+                    "kind": "processor_middleware",
+                    "trigger_id": "benative_review",
+                    "processor": "benative_review",
+                    "mode": "benative",
+                },
+                "result": "ARTICLE article_001 review complete",
+                "execution_mode": "api",
+                "tools": [],
+                "input_rows": 1,
+                "output_rows": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    channel = WebSocketChannel({"enabled": True}, SimpleNamespace())
+    channel._api_tokens["tok"] = time.monotonic() + 60
+    monkeypatch.setattr(channel, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(channel, "_monitor_triggers", lambda root: ([], []))
+    monkeypatch.setattr(channel, "_monitor_context_prompt_files", lambda root: [])
+    monkeypatch.setattr(channel, "_monitor_recent_activity", lambda root: [])
+    request = SimpleNamespace(
+        path="/api/admin/monitor",
+        headers={"Authorization": "Bearer tok"},
+        body=b"",
+    )
+
+    response = channel._handle_admin_monitor(request)
+
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["processor_runs"][0]["mode"] == "benative"
+    assert payload["processor_runs"][0]["output_preview"][0]["article_id"] == "article_001"
+    assert payload["processor_runs"][0]["output_preview"][0]["sentence_index"] == 2
+    assert payload["subagent_runs"][0]["origin"]["kind"] == "processor_middleware"
+    assert payload["subagent_runs"][0]["origin"]["mode"] == "benative"

@@ -74,6 +74,40 @@ function processorRunKey(run: AdminProcessorRun): string {
   return `${run.timestamp}:${run.trigger_id}:${run.processor}`;
 }
 
+function runMode(run: AdminSubagentRun | AdminProcessorRun | AdminTriggerDecision): string {
+  const direct = "mode" in run ? run.mode : undefined;
+  if (typeof direct === "string" && direct.trim()) return direct;
+  if ("origin" in run && run.origin && typeof run.origin === "object") {
+    const originMode = (run.origin as Record<string, unknown>).mode;
+    if (typeof originMode === "string" && originMode.trim()) return originMode;
+  }
+  return "unknown";
+}
+
+function previewValue(item: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = item[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function processorPreviewSummary(run: AdminProcessorRun): string {
+  const preview = run.output_preview ?? [];
+  const first = preview.find((item) => item && typeof item === "object");
+  if (!first) return "";
+  const articleId = previewValue(first, ["article_id"]);
+  const sentenceIndex = previewValue(first, ["sentence_index"]);
+  const recordType = previewValue(first, ["record_type", "issue_type", "type", "grammar_type"]);
+  const parts = [
+    articleId ? `article ${articleId}` : null,
+    sentenceIndex ? `sentence ${sentenceIndex}` : null,
+    recordType,
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function formatUsd(value?: number): string {
   if (!value) return "$0.0000";
   if (value < 0.0001) return `<$0.0001`;
@@ -94,6 +128,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const [selectedProcessorRunKey, setSelectedProcessorRunKey] = useState<string | null>(null);
   const [selectedDecisionKey, setSelectedDecisionKey] = useState<string | null>(null);
   const [modeFilter, setModeFilter] = useState("all");
+  const [runModeFilter, setRunModeFilter] = useState("all");
   const [countDraft, setCountDraft] = useState("");
   const [savingTrigger, setSavingTrigger] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -192,32 +227,66 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const selectedRegistryProcessor = selectedTrigger?.processor
     ? payload?.capabilities?.processors?.[selectedTrigger.processor]
     : undefined;
+
+  const runModes = useMemo(() => {
+    const values = new Set<string>();
+    for (const run of subagentRuns) values.add(runMode(run));
+    for (const run of processorRuns) values.add(runMode(run));
+    for (const decision of triggerDecisions) values.add(runMode(decision));
+    values.delete("unknown");
+    return ["all", ...Array.from(values).sort()];
+  }, [processorRuns, subagentRuns, triggerDecisions]);
+
+  const visibleSubagentRuns = useMemo(() => {
+    if (runModeFilter === "all") return subagentRuns;
+    return subagentRuns.filter((run) => runMode(run) === runModeFilter);
+  }, [runModeFilter, subagentRuns]);
+
+  const visibleProcessorRuns = useMemo(() => {
+    if (runModeFilter === "all") return processorRuns;
+    return processorRuns.filter((run) => runMode(run) === runModeFilter);
+  }, [processorRuns, runModeFilter]);
+
+  const visibleTriggerDecisions = useMemo(() => {
+    if (runModeFilter === "all") return triggerDecisions;
+    return triggerDecisions.filter((decision) => runMode(decision) === runModeFilter);
+  }, [runModeFilter, triggerDecisions]);
+
   const selectedRun = useMemo(
-    () => subagentRuns.find((run) => runKey(run) === selectedRunKey) ?? subagentRuns[0] ?? null,
-    [selectedRunKey, subagentRuns],
+    () => visibleSubagentRuns.find((run) => runKey(run) === selectedRunKey) ?? visibleSubagentRuns[0] ?? null,
+    [selectedRunKey, visibleSubagentRuns],
   );
 
   useEffect(() => {
-    setSelectedRunKey((current) => current ?? (subagentRuns[0] ? runKey(subagentRuns[0]) : null));
-  }, [subagentRuns]);
+    setSelectedRunKey((current) => {
+      if (current && visibleSubagentRuns.some((run) => runKey(run) === current)) return current;
+      return visibleSubagentRuns[0] ? runKey(visibleSubagentRuns[0]) : null;
+    });
+  }, [visibleSubagentRuns]);
 
   const selectedProcessorRun = useMemo(
-    () => processorRuns.find((run) => processorRunKey(run) === selectedProcessorRunKey) ?? processorRuns[0] ?? null,
-    [selectedProcessorRunKey, processorRuns],
+    () => visibleProcessorRuns.find((run) => processorRunKey(run) === selectedProcessorRunKey) ?? visibleProcessorRuns[0] ?? null,
+    [selectedProcessorRunKey, visibleProcessorRuns],
   );
 
   useEffect(() => {
-    setSelectedProcessorRunKey((current) => current ?? (processorRuns[0] ? processorRunKey(processorRuns[0]) : null));
-  }, [processorRuns]);
+    setSelectedProcessorRunKey((current) => {
+      if (current && visibleProcessorRuns.some((run) => processorRunKey(run) === current)) return current;
+      return visibleProcessorRuns[0] ? processorRunKey(visibleProcessorRuns[0]) : null;
+    });
+  }, [visibleProcessorRuns]);
 
   const selectedDecision = useMemo(
-    () => triggerDecisions.find((decision, index) => decisionKey(decision, index) === selectedDecisionKey) ?? triggerDecisions[0] ?? null,
-    [selectedDecisionKey, triggerDecisions],
+    () => visibleTriggerDecisions.find((decision, index) => decisionKey(decision, index) === selectedDecisionKey) ?? visibleTriggerDecisions[0] ?? null,
+    [selectedDecisionKey, visibleTriggerDecisions],
   );
 
   useEffect(() => {
-    setSelectedDecisionKey((current) => current ?? (triggerDecisions[0] ? decisionKey(triggerDecisions[0], 0) : null));
-  }, [triggerDecisions]);
+    setSelectedDecisionKey((current) => {
+      if (current && visibleTriggerDecisions.some((decision, index) => decisionKey(decision, index) === current)) return current;
+      return visibleTriggerDecisions[0] ? decisionKey(visibleTriggerDecisions[0], 0) : null;
+    });
+  }, [visibleTriggerDecisions]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -415,10 +484,24 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
           </div>
 
           <div className="grid min-h-0 grid-cols-1 gap-4 overflow-y-auto pr-1 lg:grid-cols-2 2xl:grid-cols-4">
+            <div className="col-span-full flex shrink-0 items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 text-xs">
+              <span className="font-medium">运行记录过滤</span>
+              <select
+                value={runModeFilter}
+                onChange={(event) => setRunModeFilter(event.target.value)}
+                className="h-8 rounded-md border bg-background px-2 text-xs"
+                aria-label="Filter monitor runs by mode"
+              >
+                {runModes.map((mode) => (
+                  <option key={mode} value={mode}>{mode}</option>
+                ))}
+              </select>
+            </div>
+
             <Panel title="Subagent 调用列表" icon={Bot}>
               <div className="h-full overflow-y-auto pr-1">
-                {subagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
-                {subagentRuns.map((run) => (
+                {visibleSubagentRuns.length === 0 ? <EmptyText text="还没有持久化的 subagent 回复；新运行的 subagent 会写入这里" /> : null}
+                {visibleSubagentRuns.map((run) => (
                   <button
                     key={runKey(run)}
                     onClick={() => setSelectedRunKey(runKey(run))}
@@ -442,7 +525,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                       {shortTime(run.timestamp)} · {run.model || "default model"}
                     </p>
                     <p className="mt-1 truncate text-muted-foreground">
-                      {run.subagent || run.label} · {run.execution_mode || "runtime"} · tools {(run.tools ?? []).length}
+                      {runMode(run)} · {run.subagent || run.label} · {run.execution_mode || "runtime"} · tools {(run.tools ?? []).length}
                     </p>
                     <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-muted-foreground">
                       {run.error || run.result || "-"}
@@ -454,8 +537,8 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
 
             <Panel title="Processor 调用列表" icon={Cpu}>
               <div className="h-full overflow-y-auto pr-1">
-                {processorRuns.length === 0 ? <EmptyText text="还没有 processor run log；触发后会写入 processor_runs.jsonl" /> : null}
-                {processorRuns.map((run) => (
+                {visibleProcessorRuns.length === 0 ? <EmptyText text="还没有 processor run log；触发后会写入 processor_runs.jsonl" /> : null}
+                {visibleProcessorRuns.map((run) => (
                   <button
                     key={processorRunKey(run)}
                     onClick={() => setSelectedProcessorRunKey(processorRunKey(run))}
@@ -481,11 +564,14 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                       {shortTime(run.timestamp)} · {run.model || "default model"}
                     </p>
                     <p className="mt-1 truncate text-muted-foreground">
-                      {run.subagent ? `${run.subagent} · ${run.execution_mode || "api"}` : "processor-only"}
+                      {runMode(run)} · {run.subagent ? `${run.subagent} · ${run.execution_mode || "api"}` : "processor-only"}
                     </p>
                     <p className="mt-1 truncate text-muted-foreground">
                       in {run.input_rows ?? 0} · out {run.output_rows ?? 0} · {run.duration_ms ?? 0}ms
                     </p>
+                    {processorPreviewSummary(run) ? (
+                      <p className="mt-1 truncate text-muted-foreground">{processorPreviewSummary(run)}</p>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -494,8 +580,8 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
             <Panel title="触发决策" icon={Clock3}>
               <div className="flex h-full min-h-0 flex-col gap-2">
                 <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                  {triggerDecisions.length === 0 ? <EmptyText text="还没有触发决策记录；用户回复后会写入这里" /> : null}
-                  {triggerDecisions.map((decision, index) => {
+                  {visibleTriggerDecisions.length === 0 ? <EmptyText text="还没有触发决策记录；用户回复后会写入这里" /> : null}
+                  {visibleTriggerDecisions.map((decision, index) => {
                     const key = decisionKey(decision, index);
                     return (
                       <button
@@ -503,7 +589,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         onClick={() => setSelectedDecisionKey(key)}
                         className={cn(
                           "mb-2 w-full rounded-md border p-2 text-left text-xs transition-colors",
-                          selectedDecision && decisionKey(selectedDecision, triggerDecisions.indexOf(selectedDecision)) === key
+                          selectedDecision && decisionKey(selectedDecision, visibleTriggerDecisions.indexOf(selectedDecision)) === key
                             ? "border-primary/50 bg-primary/5"
                             : "border-border/70 hover:bg-muted/50",
                         )}
@@ -520,7 +606,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                           )}>{decision.decision}</span>
                         </div>
                         <p className="mt-1 truncate text-muted-foreground">
-                          {shortTime(decision.timestamp)} · {decision.mode || "-"} · {decision.reason}
+                          {shortTime(decision.timestamp)} · {runMode(decision)} · {decision.reason}
                         </p>
                         <p className="mt-1 truncate text-muted-foreground">
                           {decision.subagent || "no subagent"}{typeof decision.turn_count === "number" ? ` · turn ${decision.turn_count}` : ""}
@@ -653,7 +739,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         {shortTime(selectedProcessorRun.timestamp)} · {selectedProcessorRun.model || "default model"}
                       </p>
                       <p className="mt-1 text-muted-foreground">
-                        {selectedProcessorRun.subagent || "processor-only"} · {selectedProcessorRun.execution_mode || "-"} · tools {formatTools(selectedProcessorRun.tools)}
+                        {runMode(selectedProcessorRun)} · {selectedProcessorRun.subagent || "processor-only"} · {selectedProcessorRun.execution_mode || "-"} · tools {formatTools(selectedProcessorRun.tools)}
                       </p>
                       <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
                         <span>input {selectedProcessorRun.input_rows ?? 0}</span>
@@ -661,6 +747,11 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         <span>{selectedProcessorRun.duration_ms ?? 0}ms</span>
                         <span>{selectedProcessorRun.cursor_kind || "-"}</span>
                       </div>
+                      {processorPreviewSummary(selectedProcessorRun) ? (
+                        <p className="mt-2 rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+                          {processorPreviewSummary(selectedProcessorRun)}
+                        </p>
+                      ) : null}
                       {selectedProcessorRun.error ? <p className="mt-2 text-red-600">{selectedProcessorRun.error}</p> : null}
                     </div>
                     <div>
@@ -711,7 +802,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                       </div>
                       <p className="mt-1 text-muted-foreground">{shortTime(selectedRun.timestamp)} · {selectedRun.model || "default model"}</p>
                       <p className="mt-1 text-muted-foreground">
-                        {selectedRun.subagent || selectedRun.label} · {selectedRun.execution_mode || "-"} · tools {formatTools(selectedRun.tools)}
+                        {runMode(selectedRun)} · {selectedRun.subagent || selectedRun.label} · {selectedRun.execution_mode || "-"} · tools {formatTools(selectedRun.tools)}
                       </p>
                       <p className="mt-1 text-muted-foreground">
                         input {selectedRun.input_rows ?? 0} · output {selectedRun.output_rows ?? 0} · {selectedRun.duration_ms ?? 0}ms

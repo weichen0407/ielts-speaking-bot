@@ -548,6 +548,8 @@ config/capabilities.yaml
 
 ### Step 7. Monitor Verification
 
+Status: done.
+
 Monitor should show for each run:
 
 ```text
