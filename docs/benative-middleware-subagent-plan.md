@@ -1,400 +1,411 @@
 # Be Native Middleware + Subagent Migration Plan
 
-> Scope: migrate Be Native into the same processor-middleware + subagent architecture used by freechat vocab/polisher.
+> Goal: build Be Native around the same processor-middleware + subagent architecture as freechat, with four registered subagent capabilities.
 
-## Current Subagents
+## Core Product Flow
 
-Current project subagent directories:
+Be Native is active reconstruction practice:
 
 ```text
-single_session:
-  benative_review
-  ielts_feedback
-  notes
-  polisher
-  quiz
-  vocab
-
-cross_session:
-  benative_article_fetcher
-  benative_translator
-  daily_consolidator
-  ielts_exam
-  memory_cron
-  notes_ai_assistant
-  progress_organizer
-  progress_tracker
-  review
-  wiki
+article/news material
+-> AI creates English/Chinese sentence pairs
+-> AI asks in Chinese
+-> user answers in English
+-> AI reviews the answer against the standard English
+-> vocab / polisher / review artifacts are generated
 ```
 
-Be Native currently has:
+The first version should use fixed local article materials or simple downloaded documents.
+Later, the article subagent can become agentic and search based on the user's interests and memory.
+
+## Four Registered Capabilities
+
+In this architecture, a subagent is a reusable capability. A mode registers the
+capabilities it needs; it does not need to duplicate the implementation.
+
+For Be Native, the four registered capabilities are:
 
 ```text
-benative_article_fetcher:
-  old agentic idea, fetch web articles
+benative_article:
+  Be Native-specific material preparation
 
-benative_translator:
-  old agentic idea, translate article sentence-by-sentence
+vocab:
+  shared lexical improvement capability already used by freechat
+
+polisher:
+  shared expression-polishing capability already used by freechat
 
 benative_review:
-  old review subagent, compare user English with original English
+  Be Native-specific answer evaluator
 ```
 
-The current Be Native trigger only runs `benative_review` every 10 turns.
+### 1. benative_article
 
-## Product Goal
+This is the material preparation subagent.
 
-Be Native mode should help the learner practice active English reconstruction from Chinese prompts.
+It replaces the older split between `benative_article_fetcher` and `benative_translator`.
 
-The basic learning loop:
+Purpose:
 
 ```text
-article source
--> AI processing
--> English / Chinese sentence pairs
--> AI asks user in Chinese
--> user answers in English
--> system compares user answer with original English
--> vocab / polisher / review feedback
+get article material
+clean it
+split it into sentence-level units
+translate into Chinese
+extract entities / key terms
+write stable learning artifacts
 ```
 
-The early version does not need a full agentic article search flow. Fixed local text sources are enough.
+API mode:
 
-Later, an agentic search/news subagent can replace or enrich the fixed text source.
-
-## Target Architecture
-
-```mermaid
-flowchart TD
-  A["Fixed article source"] --> B["ArticleIngestProcessor"]
-  B --> C["ArticlePairBuilder"]
-  C --> D["API subagent: benative_pair_builder"]
-  D --> E["pairs/{article_id}.jsonl"]
-  D --> F["entities/{article_id}.jsonl"]
-
-  E --> G["Be Native Session Runtime"]
-  G --> H["Pick next zh prompt"]
-  H --> I["AI asks user in Chinese"]
-  I --> J["User answers in English"]
-  J --> K["responses.jsonl"]
-
-  K --> L["BenativeReviewProcessor"]
-  E --> L
-  F --> L
-  L --> M["API subagent: benative_review"]
-  M --> N["review artifact"]
-
-  K --> O["VocabProcessor middleware"]
-  O --> P["vocab subagent"]
-  K --> Q["PolisherProcessor middleware"]
-  Q --> R["polisher subagent"]
+```text
+use fixed local materials or pre-downloaded documents
+processor reads source files
+LLM translates and extracts entities
+processor validates and writes artifacts
 ```
 
-## Phase 1 Scope
+Agentic mode:
 
-Use fixed local text materials.
+```text
+use user_profile / wiki_query / thread_query to infer user interests
+use web_search / web_fetch later to find interesting article material
+then reuse the same processor validation and storage path
+```
+
+Input examples:
 
 ```text
 persona/benative/sources/{article_id}.md
+persona/benative/downloads/{article_id}.txt
 ```
 
-The source can include frontmatter:
-
-```yaml
----
-id: article_001
-title: Why Family Meals Matter
-topic: family
-level: B1
-source_type: fixed
----
-```
-
-Then body text:
-
-```text
-Families often build stronger relationships by spending time together...
-```
-
-Phase 1 generated artifacts:
+Output artifacts:
 
 ```text
 persona/benative/articles/{article_id}.json
 persona/benative/pairs/{article_id}.jsonl
 persona/benative/entities/{article_id}.jsonl
-persona/benative/sessions/{session_uuid}/responses.jsonl
-persona/processor/benative/review.jsonl
-persona/processor/benative/vocab.jsonl
-persona/processor/benative/polisher.jsonl
+persona/processor/benative/article.jsonl
 ```
 
-## Article Pair Building
-
-This step is mostly API mode, not agentic.
-
-Input:
-
-```text
-fixed English article text
-```
-
-Processor responsibilities:
-
-```text
-read source md/json
-extract metadata
-split into paragraphs/sentences
-build compact prompt
-validate returned sentence pairs
-write article json and pair jsonl
-```
-
-Subagent responsibilities:
-
-```text
-translate English sentences into natural Chinese
-preserve sentence_index
-preserve entities
-return TSV/JSONL-like structured output
-```
-
-Output pair:
+Sentence pair output:
 
 ```jsonl
-{"article_id":"article_001","sentence_index":0,"en":"Families often build stronger relationships by spending time together.","zh":"家人经常通过共度时光来建立更牢固的关系。","paragraph_index":0}
+{"article_id":"article_001","sentence_index":0,"paragraph_index":0,"en":"Families often build stronger relationships by spending time together.","zh":"家人经常通过共度时光来建立更牢固的关系。"}
 ```
 
-## Entity Extraction
-
-This should also be API mode at first.
-
-Why it matters:
-
-```text
-some entities are hard for learners to spell
-speech recognition can benefit from entity hints
-review can avoid marking entity names as ordinary vocab mistakes
-future graph/wiki can connect topics, people, places, organizations
-```
-
-Entity categories:
-
-```text
-person
-organization
-location
-product
-event
-topic_keyword
-proper_noun
-term
-other
-```
-
-Output:
+Entity output:
 
 ```jsonl
 {"article_id":"article_001","surface":"Arsenal","type":"organization","canonical":"Arsenal Football Club","zh":"阿森纳足球俱乐部","aliases":["Arsenal"],"source_sentence_indexes":[3,7]}
 ```
 
-## User Practice Flow
-
-Runtime flow:
+Why entity extraction belongs here:
 
 ```text
-select article
-load pairs
-read current_sentence cursor
-send Chinese prompt to user
-user answers in English
-save response
-advance cursor
-optionally show original English after answer
-trigger processors
+the article subagent sees the full source material
+entities help users spell unfamiliar names
+entities can become ASR hints
+review should not treat proper nouns as ordinary vocabulary errors
+future wiki graph can connect people / places / topics
 ```
 
-Question format:
+### 2. vocab
+
+Reuse the same vocab subagent and processor from freechat, but register a Be Native target.
+
+Purpose:
 
 ```text
-请用英语表达这句话：
-“家人经常通过共度时光来建立更牢固的关系。”
+extract lexical improvements from the user's English reconstruction
+focus on word choice, collocations, article-specific expressions, topic vocabulary
 ```
 
-Saved response:
+API mode:
+
+```text
+read user answer + original English + Chinese prompt
+return structured lexical suggestions
+processor validates and writes vocab artifact
+```
+
+Agentic mode:
+
+```text
+optionally use user_profile / wiki_query / artifact_read
+personalize suggestions based on recurring vocabulary habits
+```
+
+Output:
+
+```text
+persona/processor/benative/vocab.jsonl
+```
+
+Example:
+
+```text
+user: Family can build strong relationship when they spend time together.
+standard: Families often build stronger relationships by spending time together.
+
+suggestion:
+strong relationship -> stronger relationships
+spend time together -> spend quality time together
+```
+
+### 3. polisher
+
+Reuse the same polisher subagent and processor from freechat, but register a Be Native target.
+
+Purpose:
+
+```text
+polish grammar, sentence structure, natural expression, and fluency
+compare user English against the original English without forcing exact memorization
+```
+
+API mode:
+
+```text
+read user answer + original English + Chinese prompt
+return concise rewrite and explanation
+```
+
+Agentic mode:
+
+```text
+optionally use user_profile / artifact_read to detect repeated grammar habits
+```
+
+Output:
+
+```text
+persona/processor/benative/polisher.jsonl
+```
+
+Example:
+
+```text
+user: Family can build strong relationship when they spend time together.
+polished: Families can build stronger relationships when they spend time together.
+reason: plural noun and comparative adjective make the sentence more natural.
+```
+
+### 4. benative_review
+
+This is the evaluator subagent.
+
+Purpose:
+
+```text
+compare user's English answer with the standard English sentence
+evaluate meaning accuracy, grammar, naturalness, vocabulary, and missing details
+produce actionable feedback
+```
+
+API mode:
+
+```text
+read current response event
+read standard sentence pair
+return structured review
+processor validates and writes review artifact
+```
+
+Agentic mode:
+
+```text
+use user_profile / wiki_query / artifact_read / thread_query
+personalize the feedback using known interests, memories, and recurring mistakes
+```
+
+Example agentic behavior:
+
+```text
+If the user previously said they like basketball,
+the review can suggest:
+"You could reuse this pattern for your own topic:
+Playing basketball helps me build stronger relationships with my friends."
+```
+
+Output:
+
+```text
+persona/processor/benative/review.jsonl
+persona/sessions/{session_uuid}/notes/benative_review.md
+```
+
+## Architecture Diagram
+
+```mermaid
+flowchart TD
+  A["Source article / downloaded document"] --> B["benative_article processor middleware"]
+  B --> C{"execution_mode"}
+  C -->|"api"| D["benative_article API subagent"]
+  C -->|"agentic"| E["benative_article agentic subagent"]
+  E --> F["user_profile / wiki_query / thread_query / future web_search"]
+  D --> G["pairs + entities"]
+  F --> G
+
+  G --> H["Be Native practice runtime"]
+  H --> I["Chinese prompt"]
+  I --> J["User English answer"]
+  J --> K["responses.jsonl"]
+
+  K --> L["vocab processor middleware"]
+  L --> M["vocab subagent"]
+  M --> N["benative vocab artifact"]
+
+  K --> O["polisher processor middleware"]
+  O --> P["polisher subagent"]
+  P --> Q["benative polisher artifact"]
+
+  K --> R["benative_review processor middleware"]
+  G --> R
+  R --> S{"review execution_mode"}
+  S -->|"api"| T["benative_review API subagent"]
+  S -->|"agentic"| U["benative_review agentic subagent"]
+  U --> V["user_profile / wiki_query / artifact_read / thread_query"]
+  T --> W["review artifact"]
+  V --> W
+```
+
+## Data Flow
+
+### Article Preparation
+
+```text
+persona/benative/sources/*.md
+-> benative_article processor
+-> benative_article subagent
+-> persona/benative/articles/*.json
+-> persona/benative/pairs/*.jsonl
+-> persona/benative/entities/*.jsonl
+```
+
+### Practice Response
+
+```text
+Chinese sentence prompt
+-> user English answer
+-> persona/benative/events/responses.jsonl
+```
+
+Use a global event file first:
+
+```text
+persona/benative/events/responses.jsonl
+```
+
+This avoids needing `{session_uuid}` placeholders in trigger paths for Phase 1.
+Rows still include `session_uuid`, so session-specific display is possible.
+
+Response row:
 
 ```jsonl
-{"session_uuid":"...","article_id":"article_001","sentence_index":0,"zh":"家人经常通过共度时光来建立更牢固的关系。","original_en":"Families often build stronger relationships by spending time together.","user_en":"Family can build strong relationship when they spend time together.","timestamp":"..."}
+{"session_uuid":"...","article_id":"article_001","sentence_index":0,"zh":"家人经常通过共度时光来建立更牢固的关系。","standard_en":"Families often build stronger relationships by spending time together.","user_en":"Family can build strong relationship when they spend time together.","timestamp":"..."}
 ```
 
-## Be Native Subagents
-
-### 1. benative_pair_builder
-
-Mode:
+### Post-Answer Processing
 
 ```text
-api default
-agentic future optional
+responses.jsonl
+-> vocab
+-> polisher
+-> benative_review
 ```
 
-Purpose:
+## Proposed Trigger Targets
 
-```text
-convert fixed English article into zh/en sentence pairs
+### benative_article
+
+```json
+{
+  "id": "benative_article",
+  "condition": {
+    "kind": "file_line_count",
+    "count": 1,
+    "scope": "global",
+    "path": "persona/benative/sources/index.jsonl"
+  },
+  "target": {
+    "processor": "benative_article",
+    "subagent": "benative_article",
+    "execution_mode": "api",
+    "tools": [],
+    "input_path": "persona/benative/sources/index.jsonl",
+    "output_path": "persona/processor/benative/article.jsonl",
+    "model": "deepseek-v4-flash"
+  }
+}
 ```
 
-Processor:
+Agentic version later:
 
-```text
-benative_pair_builder processor
+```json
+{
+  "execution_mode": "agentic",
+  "tools": ["user_profile", "wiki_query", "thread_query", "artifact_read"]
+}
 ```
 
-### 2. benative_entity_extractor
+Future web version:
 
-Mode:
-
-```text
-api default
+```json
+{
+  "execution_mode": "agentic",
+  "tools": ["user_profile", "wiki_query", "thread_query", "artifact_read", "web_search", "web_fetch"]
+}
 ```
 
-Purpose:
+### benative_vocab
 
-```text
-extract entities and speech-recognition hints from article text
+```json
+{
+  "id": "benative_vocab",
+  "condition": {
+    "kind": "file_line_count",
+    "count": 1,
+    "scope": "global",
+    "path": "persona/benative/events/responses.jsonl"
+  },
+  "target": {
+    "processor": "vocab",
+    "subagent": "vocab",
+    "execution_mode": "api",
+    "tools": [],
+    "input_path": "persona/benative/events/responses.jsonl",
+    "output_path": "persona/processor/benative/vocab.jsonl",
+    "model": "deepseek-v4-flash"
+  }
+}
 ```
 
-### 3. benative_review
+### benative_polisher
 
-Mode:
-
-```text
-api default
-agentic optional later
+```json
+{
+  "id": "benative_polisher",
+  "condition": {
+    "kind": "file_line_count",
+    "count": 1,
+    "scope": "global",
+    "path": "persona/benative/events/responses.jsonl"
+  },
+  "target": {
+    "processor": "polisher",
+    "subagent": "polisher",
+    "execution_mode": "api",
+    "tools": [],
+    "input_path": "persona/benative/events/responses.jsonl",
+    "output_path": "persona/processor/benative/polisher.jsonl",
+    "model": "deepseek-v4-flash"
+  }
+}
 ```
 
-Purpose:
-
-```text
-compare user English against original English
-identify accuracy, grammar, vocab, collocation, sentence structure issues
-```
-
-### 4. vocab
-
-Reuse existing subagent and processor.
-
-Be Native-specific focus:
-
-```text
-stronger alternatives for user's answer
-article-specific collocations
-entity-aware vocabulary suggestions
-```
-
-### 5. polisher
-
-Reuse existing subagent and processor.
-
-Be Native-specific focus:
-
-```text
-rewrite user's answer closer to natural English
-explain grammar/sentence structure differences
-```
-
-### 6. searchnews
-
-Future agentic subagent.
-
-Purpose:
-
-```text
-replace fixed hardcoded articles with interesting current articles
-based on user interests, past answers, wiki memory, and target topics
-```
-
-Tools:
-
-```text
-web_search
-web_fetch
-wiki_query
-user_profile
-thread_query
-artifact_read
-```
-
-This should not be Phase 1 because it adds external data quality, source trust, and cost complexity.
-
-## Suggested Additional Features
-
-### Entity Hints for ASR
-
-Use `entities/{article_id}.jsonl` to build a hint list for speech recognition:
-
-```text
-proper nouns
-topic keywords
-rare terms
-names and locations
-```
-
-### Difficulty Control
-
-Tag each sentence:
-
-```text
-length
-grammar pattern
-CEFR-ish level
-topic
-entity density
-```
-
-Then practice can choose:
-
-```text
-easy first
-mixed review
-entity-heavy practice
-grammar-targeted practice
-```
-
-### Answer Reveal Strategy
-
-After user answers, system can show:
-
-```text
-original English
-literal comparison
-one natural alternative
-key phrase
-```
-
-This should be configurable because too much feedback can interrupt speaking flow.
-
-### Spaced Review
-
-Store difficult sentences and retry later:
-
-```text
-persona/processor/benative/review_queue.jsonl
-```
-
-### Topic Personalization
-
-Use LLM Wiki / user profile later:
-
-```text
-if user likes Arsenal -> football articles
-if user likes travel -> city/travel articles
-if user is weak on articles/prepositions -> sentence selection emphasizes that
-```
-
-## Proposed Config Shape
-
-`mode/benative/trigger/triggers.json` should eventually include:
+### benative_review
 
 ```json
 {
@@ -403,151 +414,149 @@ if user is weak on articles/prepositions -> sentence selection emphasizes that
     "kind": "file_line_count",
     "count": 1,
     "scope": "global",
-    "path": "persona/benative/sessions/{session_uuid}/responses.jsonl"
+    "path": "persona/benative/events/responses.jsonl"
   },
   "target": {
     "processor": "benative_review",
     "subagent": "benative_review",
     "execution_mode": "api",
     "tools": [],
-    "input_path": "persona/benative/sessions/{session_uuid}/responses.jsonl",
+    "input_path": "persona/benative/events/responses.jsonl",
     "output_path": "persona/processor/benative/review.jsonl",
-    "model": "deepseek-v4-flash"
+    "model": "deepseek-v4-flash",
+    "depends_on": "benative_polisher"
   }
 }
 ```
 
-Note: `{session_uuid}` placeholders in trigger file paths may need runtime support. If not available, Phase 1 can write all responses to a global path:
+Agentic review version:
 
-```text
-persona/benative/events/responses.jsonl
+```json
+{
+  "execution_mode": "agentic",
+  "tools": ["user_profile", "wiki_query", "thread_query", "artifact_read"]
+}
+```
+
+## Capability Registry Target
+
+`config/capabilities.yaml` should eventually express:
+
+```yaml
+modes:
+  benative:
+    subagents: [benative_article, vocab, polisher, benative_review]
+
+# vocab and polisher remain shared capability definitions.
+# Be Native only adds trigger targets and output paths for this mode.
+
+subagents:
+  benative_article:
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [user_profile, wiki_query, thread_query, artifact_read]
+
+  benative_review:
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [user_profile, wiki_query, thread_query, artifact_read]
 ```
 
 ## Implementation Plan
 
-### Step 1. Data Schema
+### Step 1. Define Be Native Schemas
 
-Create Be Native artifact schemas:
+Create shared schemas:
 
 ```text
-ArticleSource
 ArticleRecord
 SentencePair
 ArticleEntity
-UserReconstructionResponse
+BenativeResponse
 BenativeReviewItem
 ```
 
-### Step 2. Fixed Article Source Loader
+### Step 2. Add benative_article Processor + Subagent Prompt
 
-Create processor for:
-
-```text
-persona/benative/sources/*.md
--> persona/benative/articles/*.json
-```
-
-### Step 3. Pair Builder Processor
-
-Create processor-mediated API subagent:
+Build:
 
 ```text
-article text
--> zh/en sentence pairs
--> persona/benative/pairs/{article_id}.jsonl
+subagent/cross_session/benative_article/processor
+subagent/cross_session/benative_article/context/benative_article_subagent.md
 ```
 
-### Step 4. Entity Extractor Processor
-
-Create processor-mediated API subagent:
+It should produce:
 
 ```text
-article text / pairs
--> entities
--> persona/benative/entities/{article_id}.jsonl
+articles/*.json
+pairs/*.jsonl
+entities/*.jsonl
+processor/benative/article.jsonl
 ```
 
-### Step 5. Practice Runtime
+### Step 3. Add Be Native Response Event Shape
 
-Add Be Native session state:
-
-```text
-selected_article_id
-current_sentence_index
-responses path
-```
-
-Add response persistence:
-
-```text
-persona/benative/sessions/{session_uuid}/responses.jsonl
-```
-
-or global fallback:
+Persist every user reconstruction answer to:
 
 ```text
 persona/benative/events/responses.jsonl
 ```
 
-### Step 6. Review Processor
+### Step 4. Add benative_review Processor
 
-Migrate `benative_review` from old file-writing subagent into:
+Migrate old `benative_review` from file-writing subagent to:
 
 ```text
 processor middleware
--> API subagent analysis
--> processor validates
+-> benative_review subagent
+-> processor validates review
 -> review.jsonl / review.md
 ```
 
-### Step 7. Reuse Vocab / Polisher
+### Step 5. Register Four Triggers
 
-Add Be Native trigger targets:
+Add:
 
 ```text
+benative_article
 benative_vocab
 benative_polisher
+benative_review
 ```
 
-They should read user response events and write:
+### Step 6. Register Capabilities
+
+Update:
 
 ```text
-persona/processor/benative/vocab.jsonl
-persona/processor/benative/polisher.jsonl
+config/capabilities.yaml
 ```
 
-### Step 8. Monitor / WebUI
+### Step 7. Monitor Verification
 
-Monitor should show:
-
-```text
-article id
-sentence index
-pair builder run
-entity extractor run
-review/vocab/polisher run
-api vs agentic mode
-```
-
-### Step 9. Future Searchnews Agent
-
-Add only after fixed-source flow works.
+Monitor should show for each run:
 
 ```text
-searchnews agentic subagent
--> discovers articles
--> stores article candidates
--> pair_builder processes selected candidate
+subagent
+processor
+execution_mode
+tools
+article_id
+sentence_index
+input/output rows
 ```
 
 ## Phase 1 Done Means
 
 ```text
-fixed article can be loaded
-sentence pairs can be generated
-entities can be extracted
-user can answer English from Chinese prompt
-response is persisted
-review/vocab/polisher artifacts are generated through processor middleware
-monitor shows the full chain
+four Be Native subagents are registered
+benative_article can create sentence pairs and entities from fixed material
+user responses are saved as Be Native events
+vocab / polisher / review run through middleware
+agentic mode is available by config but API mode is default
+monitor can show the full chain
 ```
