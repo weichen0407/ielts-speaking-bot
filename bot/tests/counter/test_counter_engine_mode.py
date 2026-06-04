@@ -312,3 +312,54 @@ def test_dependent_trigger_waits_for_chain_instead_of_firing_directly(tmp_path: 
     ]
     assert decisions[-1]["trigger_id"] == "dependent_processor"
     assert decisions[-1]["reason"] == "waiting_for_dependency"
+
+
+def test_processor_gated_subagent_target_fields_parse(tmp_path: Path) -> None:
+    trigger_file = tmp_path / "mode" / "freechat" / "trigger" / "triggers.json"
+    trigger_file.parent.mkdir(parents=True)
+    trigger_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "freechat_vocab",
+                        "enabled": True,
+                        "condition": {
+                            "kind": "file_line_count",
+                            "count": 1,
+                            "scope": "global",
+                            "path": "persona/events/thread.jsonl",
+                        },
+                        "target": {
+                            "processor": "vocab",
+                            "subagent": "vocab",
+                            "execution_mode": "agentic",
+                            "agentic": True,
+                            "tools": ["thread_query", "artifact_read"],
+                            "input_path": "persona/events/thread.jsonl",
+                            "output_path": "persona/processor/freechat/vocab.jsonl",
+                        },
+                        "cursor": {"offset": 0},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "persona" / "events" / "thread.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text("{}\n", encoding="utf-8")
+
+    engine = CounterEngine(tmp_path)
+    engine.ensure_mode("freechat")
+
+    firing = engine.check_triggers({"mode": "freechat"})
+
+    assert len(firing) == 1
+    target = firing[0].target
+    assert target.processor == "vocab"
+    assert target.subagent == "vocab"
+    assert target.execution_mode == "agentic"
+    assert target.agentic is True
+    assert target.tools == ["thread_query", "artifact_read"]

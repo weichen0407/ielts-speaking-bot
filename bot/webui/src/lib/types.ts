@@ -273,6 +273,23 @@ export type InboundEvent =
       phase: "started" | "done" | "error";
       error?: string;
     }
+  | {
+      event: "processor_status";
+      chat_id: string;
+      task_id: string;
+      trigger_id: string;
+      processor: string;
+      subagent?: string | null;
+      execution_mode?: string | null;
+      agentic?: boolean | null;
+      tools?: string[];
+      label: string;
+      phase: "started" | "done" | "skipped" | "error";
+      error?: string;
+      input_rows?: number;
+      output_rows?: number;
+      model?: string;
+    }
   | { event: "error"; chat_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.

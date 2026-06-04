@@ -80,6 +80,11 @@ function formatUsd(value?: number): string {
   return `$${value.toFixed(4)}`;
 }
 
+function formatTools(tools?: string[] | null): string {
+  if (!tools || tools.length === 0) return "-";
+  return tools.join(", ");
+}
+
 export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
   const { token } = useClient();
   const [payload, setPayload] = useState<AdminMonitorPayload | null>(null);
@@ -303,6 +308,7 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                   <span className="rounded bg-muted px-1.5 py-0.5">{trigger.mode}</span>
                   <span className="rounded bg-muted px-1.5 py-0.5">{triggerSchedule(trigger)}</span>
                   {trigger.subagent ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.subagent}</span> : null}
+                  {trigger.execution_mode ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.execution_mode}</span> : null}
                   {trigger.processor ? <span className="rounded bg-muted px-1.5 py-0.5">{trigger.processor}</span> : null}
                 </div>
               </button>
@@ -317,6 +323,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                 <div className="space-y-3 text-sm">
                   <KeyValue label="Subagent" value={selectedTrigger.subagent || "-"} />
                   <KeyValue label="Processor" value={selectedTrigger.processor || "-"} />
+                  <KeyValue label="Execution Mode" value={selectedTrigger.execution_mode || "-"} />
+                  <KeyValue label="Agentic" value={selectedTrigger.agentic ? "true" : "false"} />
+                  <KeyValue label="Tools" value={formatTools(selectedTrigger.tools)} />
                   <KeyValue label="Model" value={selectedTrigger.model || "default"} />
                   <KeyValue label="Prompt" value={selectedTrigger.prompt_file || "-"} />
                   <KeyValue label="Depends On" value={selectedTrigger.depends_on || "-"} />
@@ -340,6 +349,8 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                           input_paths: selectedTrigger.input_paths,
                           output_path: selectedTrigger.output_path,
                           batch_size: selectedTrigger.batch_size,
+                          execution_mode: selectedTrigger.execution_mode,
+                          tools: selectedTrigger.tools,
                         })}
                       </pre>
                     </div>
@@ -427,7 +438,12 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                           : "bg-emerald-500/10 text-emerald-600",
                       )}>{run.stop_reason || run.phase}</span>
                     </div>
-                    <p className="mt-1 truncate text-muted-foreground">{shortTime(run.timestamp)} · {run.model || "default model"}</p>
+                    <p className="mt-1 truncate text-muted-foreground">
+                      {shortTime(run.timestamp)} · {run.model || "default model"}
+                    </p>
+                    <p className="mt-1 truncate text-muted-foreground">
+                      {run.subagent || run.label} · {run.execution_mode || "runtime"} · tools {(run.tools ?? []).length}
+                    </p>
                     <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-muted-foreground">
                       {run.error || run.result || "-"}
                     </p>
@@ -463,6 +479,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                     </div>
                     <p className="mt-1 truncate text-muted-foreground">
                       {shortTime(run.timestamp)} · {run.model || "default model"}
+                    </p>
+                    <p className="mt-1 truncate text-muted-foreground">
+                      {run.subagent ? `${run.subagent} · ${run.execution_mode || "api"}` : "processor-only"}
                     </p>
                     <p className="mt-1 truncate text-muted-foreground">
                       in {run.input_rows ?? 0} · out {run.output_rows ?? 0} · {run.duration_ms ?? 0}ms
@@ -633,6 +652,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                       <p className="mt-1 text-muted-foreground">
                         {shortTime(selectedProcessorRun.timestamp)} · {selectedProcessorRun.model || "default model"}
                       </p>
+                      <p className="mt-1 text-muted-foreground">
+                        {selectedProcessorRun.subagent || "processor-only"} · {selectedProcessorRun.execution_mode || "-"} · tools {formatTools(selectedProcessorRun.tools)}
+                      </p>
                       <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
                         <span>input {selectedProcessorRun.input_rows ?? 0}</span>
                         <span>output {selectedProcessorRun.output_rows ?? 0}</span>
@@ -647,6 +669,9 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         {formatJson({
                           input_paths: selectedProcessorRun.input_paths,
                           output_path: selectedProcessorRun.output_path,
+                          subagent: selectedProcessorRun.subagent,
+                          execution_mode: selectedProcessorRun.execution_mode,
+                          tools: selectedProcessorRun.tools,
                           cursor_before: selectedProcessorRun.cursor_before,
                           cursor_after: selectedProcessorRun.cursor_after,
                         })}
@@ -685,6 +710,12 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         <span className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{selectedRun.task_id}</span>
                       </div>
                       <p className="mt-1 text-muted-foreground">{shortTime(selectedRun.timestamp)} · {selectedRun.model || "default model"}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        {selectedRun.subagent || selectedRun.label} · {selectedRun.execution_mode || "-"} · tools {formatTools(selectedRun.tools)}
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        input {selectedRun.input_rows ?? 0} · output {selectedRun.output_rows ?? 0} · {selectedRun.duration_ms ?? 0}ms
+                      </p>
                       {selectedRun.error ? <p className="mt-2 text-red-600">{selectedRun.error}</p> : null}
                     </div>
                     <div>

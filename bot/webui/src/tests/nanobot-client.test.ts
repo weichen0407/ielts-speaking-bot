@@ -243,6 +243,43 @@ describe("NanobotClient", () => {
     expect(chatHandler).not.toHaveBeenCalled();
   });
 
+  it("dispatches processor status globally", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const processorHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onProcessorStatus(processorHandler);
+    client.onChat("chat-processor", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "processor_status",
+      chat_id: "chat-processor",
+      task_id: "processor:vocab:session-1",
+      trigger_id: "freechat_vocab_processor",
+      processor: "vocab",
+      label: "vocab",
+      phase: "done",
+      input_rows: 2,
+      output_rows: 1,
+    });
+
+    expect(processorHandler).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "processor_status",
+        processor: "vocab",
+        phase: "done",
+        input_rows: 2,
+        output_rows: 1,
+      }),
+    );
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
   it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new NanobotClient({
       url: "ws://test",

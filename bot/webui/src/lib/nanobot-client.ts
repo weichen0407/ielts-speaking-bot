@@ -73,6 +73,18 @@ export type StreamError =
 
 type ErrorHandler = (error: StreamError) => void;
 type SubagentStatusHandler = (ev: { chat_id: string; task_id: string; label: string; phase: "started" | "done" | "error"; error?: string }) => void;
+type ProcessorStatusHandler = (ev: {
+  chat_id: string;
+  task_id: string;
+  trigger_id: string;
+  processor: string;
+  label: string;
+  phase: "started" | "done" | "skipped" | "error";
+  error?: string;
+  input_rows?: number;
+  output_rows?: number;
+  model?: string;
+}) => void;
 
 interface PendingNewChat {
   resolve: (chatId: string) => void;
@@ -105,6 +117,7 @@ export class NanobotClient {
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   private subagentStatusHandlers = new Set<SubagentStatusHandler>();
+  private processorStatusHandlers = new Set<ProcessorStatusHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
   /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
@@ -186,6 +199,13 @@ export class NanobotClient {
     this.subagentStatusHandlers.add(handler);
     return () => {
       this.subagentStatusHandlers.delete(handler);
+    };
+  }
+
+  onProcessorStatus(handler: ProcessorStatusHandler): Unsubscribe {
+    this.processorStatusHandlers.add(handler);
+    return () => {
+      this.processorStatusHandlers.delete(handler);
     };
   }
 
@@ -380,6 +400,13 @@ export class NanobotClient {
 
     if (parsed.event === "subagent_status") {
       for (const handler of this.subagentStatusHandlers) {
+        handler(parsed);
+      }
+      return;
+    }
+
+    if (parsed.event === "processor_status") {
+      for (const handler of this.processorStatusHandlers) {
         handler(parsed);
       }
       return;

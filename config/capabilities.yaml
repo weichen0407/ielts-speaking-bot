@@ -16,6 +16,7 @@ modes:
     context_dir: mode/freechat/context
     trigger_file: mode/freechat/trigger/triggers.json
     cron_file: mode/freechat/trigger/cron/cron.yaml
+    subagents: [vocab, polisher]
   ielts:
     context_dir: mode/ielts/context
     trigger_file: mode/ielts/trigger/triggers.json
@@ -29,14 +30,24 @@ subagents:
   vocab:
     scope: single_session
     prompt: subagent/single_session/vocab/context/vocab_subagent.md
-    trigger_ids: [vocab_analysis]
+    trigger_ids: [freechat_vocab]
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [thread_query, artifact_read, user_profile, wiki_query]
     writes:
       - persona/memory/MEMORY.md
       - persona/sessions/{session_uuid}/notes/vocab.md
   polisher:
     scope: single_session
     prompt: subagent/single_session/polisher/context/polisher_subagent.md
-    trigger_ids: [polish_feedback]
+    trigger_ids: [freechat_polisher]
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [thread_query, artifact_read, user_profile]
     writes:
       - persona/memory/MEMORY.md
       - persona/sessions/{session_uuid}/notes/polisher.md
@@ -112,6 +123,24 @@ processors:
     path: subagent/single_session/quiz/processor
     status: active
     output: persona/processor/freechat/quiz.jsonl
+
+tools:
+  thread_query:
+    status: planned
+    scope: read_only
+    description: Read recent or historical conversation turns from approved thread logs.
+  artifact_read:
+    status: planned
+    scope: read_only
+    description: Read processor artifacts such as vocab.jsonl and polisher.jsonl.
+  user_profile:
+    status: planned
+    scope: read_only
+    description: Read stable user profile, memory, habits, and recurring learning patterns.
+  wiki_query:
+    status: planned
+    scope: read_only
+    description: Query local LLM Wiki pages, graph, entities, concepts, and gaps.
 
 observability:
   trigger_decisions:

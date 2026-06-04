@@ -102,6 +102,22 @@ async def test_bootstrap_returns_token_for_localhost(
 
 
 @pytest.mark.asyncio
+async def test_health_route_is_served_by_websocket_channel(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus, port=29911)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        resp = await _http_get("http://127.0.0.1:29911/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_sessions_routes_require_bearer_token(
     bus: MagicMock, tmp_path: Path
 ) -> None:

@@ -223,6 +223,9 @@ def append_processor_run(
     *,
     trigger_id: str,
     processor: str,
+    subagent: str | None = None,
+    execution_mode: str | None = None,
+    tools: list[str] | None = None,
     mode: str | None,
     session_key: str | None,
     session_uuid: str | None,
@@ -247,6 +250,9 @@ def append_processor_run(
         "timestamp": _now_iso(),
         "trigger_id": trigger_id,
         "processor": processor,
+        "subagent": subagent,
+        "execution_mode": execution_mode,
+        "tools": tools or [],
         "mode": mode,
         "session_key": session_key,
         "session_uuid": session_uuid,
@@ -267,10 +273,67 @@ def append_processor_run(
     append_monitor_record(monitor_dir, log_name, record)
 
 
+def append_processor_subagent_run(
+    root: Path,
+    *,
+    trigger_id: str,
+    processor: str,
+    subagent: str,
+    execution_mode: str,
+    task_id: str,
+    mode: str | None,
+    session_key: str | None,
+    session_uuid: str | None,
+    status: str,
+    model: str | None = None,
+    tools: list[str] | None = None,
+    input_rows: int = 0,
+    output_rows: int = 0,
+    duration_ms: int = 0,
+    usage: dict[str, Any] | None = None,
+    result_preview: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Append a processor-mediated subagent execution to subagent_runs.jsonl."""
+    root = project_root_for(Path(root))
+    monitor_dir, log_name = monitor_log(root, "subagent_runs", "subagent_runs.jsonl")
+    record = {
+        "timestamp": _now_iso(),
+        "task_id": task_id,
+        "label": subagent,
+        "subagent": subagent,
+        "phase": "done" if status == "completed" else status,
+        "model": model,
+        "stop_reason": status,
+        "error": error,
+        "origin": {
+            "kind": "processor_middleware",
+            "trigger_id": trigger_id,
+            "processor": processor,
+            "mode": mode,
+            "session_key": session_key,
+            "session_uuid": session_uuid,
+        },
+        "task": f"{processor} middleware -> {subagent} ({execution_mode})",
+        "result": result_preview,
+        "usage": usage or {},
+        "tool_events": [],
+        "artifacts": [],
+        "announce_result": False,
+        "execution_mode": execution_mode,
+        "tools": tools or [],
+        "input_rows": input_rows,
+        "output_rows": output_rows,
+        "duration_ms": duration_ms,
+    }
+    append_monitor_record(monitor_dir, log_name, record)
+
+
 __all__ = [
     "ProcessorCursorStore",
     "ProcessorDeltaBundle",
     "append_processor_run",
+    "append_processor_subagent_run",
     "materialize_processor_delta",
     "output_delta_records",
     "update_processor_cursor",

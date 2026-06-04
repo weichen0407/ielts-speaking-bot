@@ -115,6 +115,48 @@ class BaseDataProcessor(ABC, Generic[T, U]):
         """Return accumulated LLM token usage for this processor run."""
         return dict(self._usage_total)
 
+    def prepare_subagent_input(
+        self,
+        processed_data: list[T],
+        *,
+        mode: str | None = None,
+        execution_mode: str = "api",
+        tools: list[str] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Build compact middleware output to pass into a subagent.
+
+        This is the explicit boundary between deterministic data processing
+        and semantic subagent execution. Existing processors inherit the old
+        prompt behavior by default, while richer processors can override this
+        to add task metadata, tool manifests, or tighter contracts.
+        """
+        body = self.build_user_prompt(processed_data)
+        tool_list = tools or []
+        header = [
+            f"processor: {self.name}",
+            f"mode: {mode or 'unknown'}",
+            f"execution_mode: {execution_mode}",
+            "tools: " + (", ".join(tool_list) if tool_list else "(none)"),
+        ]
+        if context:
+            compact_context = {
+                key: value
+                for key, value in context.items()
+                if isinstance(value, (str, int, float, bool)) or value is None
+            }
+            if compact_context:
+                header.append("context: " + json.dumps(compact_context, ensure_ascii=False, sort_keys=True))
+        return "\n".join(header) + "\n\n" + body
+
+    def parse_subagent_output(self, raw_output: str) -> list[U]:
+        """Parse subagent output into validated records.
+
+        Default behavior reuses the processor's LLM output parser so current
+        processors can become middleware without a rewrite.
+        """
+        return self.parse_llm_output(raw_output)
+
     def preprocess(self, raw_data: list[dict]) -> list[T]:
         """
         预处理（第一工程层）：

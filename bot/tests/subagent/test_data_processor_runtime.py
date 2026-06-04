@@ -64,6 +64,33 @@ def test_preprocess_keeps_role_and_core_source_fields(tmp_path: Path) -> None:
     assert processed[0].mode == "freechat"
 
 
+def test_processor_middleware_input_and_output_defaults(tmp_path: Path) -> None:
+    input_path = tmp_path / "thread.jsonl"
+    _write_thread(input_path)
+
+    processor = VocabProcessor()
+    processed = processor.preprocess(processor.read(input_path))
+    subagent_input = processor.prepare_subagent_input(
+        processed,
+        mode="freechat",
+        execution_mode="agentic",
+        tools=["thread_query", "artifact_read"],
+        context={"trigger_id": "freechat_vocab", "ignored": {"nested": True}},
+    )
+    parsed = processor.parse_subagent_output(
+        "very much\ta lot\tcollocation\t日常口语里更自然"
+    )
+
+    assert "processor: vocab" in subagent_input
+    assert "mode: freechat" in subagent_input
+    assert "execution_mode: agentic" in subagent_input
+    assert "tools: thread_query, artifact_read" in subagent_input
+    assert '"trigger_id": "freechat_vocab"' in subagent_input
+    assert "用户说: I like basketball very much." in subagent_input
+    assert len(parsed) == 1
+    assert parsed[0].improved == "a lot"
+
+
 def test_vocab_processor_sync_process_all_writes_outputs(tmp_path: Path) -> None:
     input_path = tmp_path / "thread.jsonl"
     output_path = tmp_path / "vocab.jsonl"

@@ -44,6 +44,9 @@ class CounterTarget:
 
     subagent: str = ""
     processor: str = ""  # Processor name (e.g., "vocab", "polisher")
+    execution_mode: Literal["api", "agentic"] = "api"
+    agentic: bool = False
+    tools: list[str] = field(default_factory=list)
     prompt_file: str = ""
     silent: bool = True
     task_template: str = ""

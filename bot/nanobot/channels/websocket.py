@@ -654,17 +654,22 @@ class WebSocketChannel(BaseChannel):
         """Route an inbound HTTP request to a handler or to the WS upgrade path."""
         got, query = _parse_request_path(request.path)
 
-        # 1. Token issue endpoint (legacy, optional, gated by configured secret).
+        # 1. Health endpoint co-located with the websocket server. This avoids
+        # binding a second server to the same gateway port.
+        if got == "/health":
+            return _http_json_response({"status": "ok"})
+
+        # 2. Token issue endpoint (legacy, optional, gated by configured secret).
         if self.config.token_issue_path:
             issue_expected = _normalize_config_path(self.config.token_issue_path)
             if got == issue_expected:
                 return self._handle_token_issue_http(connection, request)
 
-        # 2. Bootstrap (`/webui/bootstrap`): mint WS/API tokens + shared session metadata.
+        # 3. Bootstrap (`/webui/bootstrap`): mint WS/API tokens + shared session metadata.
         if got == "/webui/bootstrap":
             return self._handle_bootstrap(connection, request)
 
-        # 3. REST handlers co-located with this channel (sessions, settings, …).
+        # 4. REST handlers co-located with this channel (sessions, settings, …).
         if got == "/api/sessions":
             return self._handle_sessions_list(request)
 
@@ -797,7 +802,7 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_media_fetch(m.group(1), m.group(2))
 
-        # 4. WebSocket upgrade (the channel's primary purpose). Only run the
+        # 5. WebSocket upgrade (the channel's primary purpose). Only run the
         # handshake gate on requests that actually ask to upgrade; otherwise
         # a bare ``GET /`` from the browser would be rejected as an
         # unauthorized WS handshake instead of serving the SPA's index.html.
@@ -810,7 +815,7 @@ class WebSocketChannel(BaseChannel):
                 return connection.respond(403, "Forbidden")
             return self._authorize_websocket_handshake(connection, query)
 
-        # 5. Static SPA serving (only if a build directory was wired in).
+        # 6. Static SPA serving (only if a build directory was wired in).
         if self._static_dist_path is not None:
             response = self._serve_static(got)
             if response is not None:
@@ -2470,6 +2475,9 @@ class WebSocketChannel(BaseChannel):
                     "enabled": item.get("enabled", True),
                     "condition": condition,
                     "subagent": target.get("subagent") if isinstance(target, dict) else None,
+                    "execution_mode": target.get("execution_mode") if isinstance(target, dict) else None,
+                    "agentic": target.get("agentic") if isinstance(target, dict) else None,
+                    "tools": target.get("tools") if isinstance(target.get("tools"), list) else [],
                     "processor": target.get("processor") if isinstance(target, dict) else None,
                     "model": target.get("model") if isinstance(target, dict) else None,
                     "input_path": target.get("input_path") if isinstance(target, dict) else None,
@@ -3209,6 +3217,7 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_goal_status")
                 or msg.metadata.get("_goal_state_sync")
                 or msg.metadata.get("_subagent_status")
+                or msg.metadata.get("_processor_status")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
@@ -3225,6 +3234,24 @@ class WebSocketChannel(BaseChannel):
                 label=msg.metadata.get("label", ""),
                 phase=msg.metadata.get("phase", ""),
                 error=msg.metadata.get("error"),
+            )
+            return
+        if msg.metadata.get("_processor_status"):
+            await self.send_processor_status(
+                msg.chat_id,
+                task_id=msg.metadata.get("task_id", ""),
+                trigger_id=msg.metadata.get("trigger_id", ""),
+                processor=msg.metadata.get("processor", ""),
+                subagent=msg.metadata.get("subagent"),
+                execution_mode=msg.metadata.get("execution_mode"),
+                agentic=msg.metadata.get("agentic"),
+                tools=msg.metadata.get("tools"),
+                label=msg.metadata.get("label", ""),
+                phase=msg.metadata.get("phase", ""),
+                error=msg.metadata.get("error"),
+                input_rows=msg.metadata.get("input_rows"),
+                output_rows=msg.metadata.get("output_rows"),
+                model=msg.metadata.get("model"),
             )
             return
         if msg.metadata.get("_goal_status"):
@@ -3475,6 +3502,54 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" subagent_status ")
+
+    async def send_processor_status(
+        self,
+        chat_id: str,
+        *,
+        task_id: str,
+        trigger_id: str,
+        processor: str,
+        label: str,
+        phase: str,
+        subagent: Any = None,
+        execution_mode: Any = None,
+        agentic: Any = None,
+        tools: Any = None,
+        error: str | None = None,
+        input_rows: Any = None,
+        output_rows: Any = None,
+        model: Any = None,
+    ) -> None:
+        """Notify clients that a processor started, completed, skipped, or failed."""
+        body: dict[str, Any] = {
+            "event": "processor_status",
+            "chat_id": chat_id,
+            "task_id": task_id,
+            "trigger_id": trigger_id,
+            "processor": processor,
+            "subagent": subagent,
+            "execution_mode": execution_mode,
+            "agentic": agentic,
+            "tools": tools if isinstance(tools, list) else [],
+            "label": label,
+            "phase": phase,
+        }
+        if error:
+            body["error"] = error
+        if input_rows is not None:
+            body["input_rows"] = input_rows
+        if output_rows is not None:
+            body["output_rows"] = output_rows
+        if model:
+            body["model"] = model
+
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" processor_status ")
 
     async def send_runtime_model_updated(
         self,

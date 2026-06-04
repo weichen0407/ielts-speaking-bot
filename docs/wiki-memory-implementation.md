@@ -9,13 +9,263 @@
 Wiki Memory 是一个面向 LLM 的持久化知识库系统，用于：
 - **结构化存储**：以 Markdown + YAML Frontmatter 格式保存知识页面
 - **全文检索**：基于 SQLite FTS5 实现全文搜索
-- **知识图谱**：可视化页面之间的链接、标签、主题关系
-- **增量更新**：通过 WikiPatch 机制从 LLM 输出增量写入知识
+- **知识图谱**：可视化 domain、topic、entity、concept、relation 等用户知识关系
+- **增量更新**：从 thread 增量 ingest，也支持 WikiPatch 机制从 LLM 输出增量写入知识
 - **来源追踪**：每条知识附带来源（会话 ID、消息 ID 等），支持可信度管理
 
 ---
 
-## 2. 架构总览
+## 2. 当前运行全流程（代码视角）
+
+当前 LLM Wiki 有两条入口：
+
+1. **自动同步入口**：用户完成一轮对话后，`AgentLoop` 通过 turn counter 判断是否触发 wiki sync。
+2. **显式读写入口**：WebUI/API 或 agent tool 直接搜索、读取、应用 patch、获取图谱。
+
+自动同步入口代码位置：
+
+- `bot/nanobot/agent/loop.py`
+  - `_maybe_spawn_periodic_subagents()`：每轮对话完成后计数。
+  - `_should_sync_wiki()`：读取 `NANOBOT_WIKI_SYNC_INTERVAL` 判断是否触发。
+  - `_sync_wiki_for_session()`：后台调用 wiki sync。
+- `bot/nanobot/agent/wiki_sync.py`
+  - `sync_session_to_wiki()`：执行 `ingest -> analyze/extract -> crystallize -> lint -> log`。
+
+```mermaid
+flowchart TD
+  A["用户完成一轮对话"] --> B["AgentLoop 增加 turn_count"]
+  B --> C{"NANOBOT_WIKI_SYNC_INTERVAL 命中?"}
+  C -->|否| Z["不触发 Wiki Sync"]
+  C -->|是| D["后台 sync_session_to_wiki"]
+  D --> E["ensure_wiki_layout"]
+  E --> F["WikiIngestor 读取 thread 增量"]
+  F --> G["保存 raw/thread 原始证据"]
+  G --> H["本地 deterministic analyze"]
+  H --> I{"NANOBOT_WIKI_LLM_EXTRACTOR=1?"}
+  I -->|否| J["source / synthesis / question / decision / gap"]
+  I -->|是| K["WikiLLMExtractor taxonomy-guided 抽取"]
+  K --> L["entity / concept / relation / topic"]
+  J --> M["WikiCrystallizer 转 WikiPatch"]
+  L --> M
+  M --> N["WikiStore 写 Markdown + sources.json + log.jsonl"]
+  N --> O["WikiIndex 更新 SQLite FTS"]
+  O --> P["WikiLinter 结构/语义检查"]
+  P --> Q["sync_log.jsonl 记录本次运行"]
+  Q --> R["WebUI/API 读取搜索、页面、图谱"]
+```
+
+### 2.1 触发频率
+
+`NANOBOT_WIKI_SYNC_INTERVAL` 控制触发频率：
+
+| 配置 | 行为 |
+|------|------|
+| 未设置或 `1` | 每轮用户对话结束后触发一次 |
+| `2` | 每 2 轮触发一次 |
+| `3` | 每 3 轮触发一次 |
+| `0` 或负数 | 关闭自动 wiki sync |
+
+这个触发逻辑已经和 subagent trigger 解耦。也就是说：subagent 是否被调用，不影响 wiki sync 是否触发。
+
+### 2.2 Ingest：读取增量 thread
+
+`WikiIngestor.ingest_thread_delta()` 负责读取 thread 增量，并保存 raw evidence。
+
+当前代码读取路径：
+
+```python
+workspace / "data" / "thread.jsonl"
+```
+
+然后按 session 维护 cursor：
+
+```text
+persona/wiki/state/ingest_cursor.json
+```
+
+成功读取到新消息后，会写入：
+
+```text
+persona/wiki/raw/thread/{timestamp}.jsonl
+```
+
+注意：当前仓库实际存在的 thread 文件是：
+
+```text
+persona/events/thread.jsonl
+persona/sessions/{session_id}/thread.jsonl
+```
+
+而不是 `data/thread.jsonl`。因此最近 `persona/wiki/state/sync_log.jsonl` 里出现了多次：
+
+```json
+{"messages": 0, "candidates": 0, "applied": 0}
+```
+
+这说明 wiki sync 确实触发了，但没有读到真实对话增量。后续需要把 ingest 源统一到 `persona/events/thread.jsonl`，或恢复/桥接 `data/thread.jsonl`。
+
+### 2.3 Deterministic Analyze：默认本地抽取
+
+默认不开 LLM extractor 时，`WikiIngestor.analyze()` 会做稳定的本地规则抽取：
+
+| 候选类型 | 触发条件 | 用途 |
+|----------|----------|------|
+| `source` | batch 内有任意文本 | 保存一批原始对话信号 |
+| `question` | 包含 `?`，或以 why/how/what/when/where 开头 | 保存用户提出的问题 |
+| `decision` | 包含 decide、decision、决定、按照、采用 | 保存决策类信息 |
+| `gap` | 包含 gap、missing、不足、缺口、不确定 | 保存知识缺口 |
+| `synthesis` | batch 内有用户文本 | 汇总最近用户信号 |
+
+这个阶段不会主动把 `basketball / Paris / Arsenal` 拆成 entity 或 relation。它的设计目标是低成本、稳定、不会因为 LLM JSON 输出不稳定而污染 wiki。
+
+### 2.4 Taxonomy-Guided LLM Extractor：可选 LLM 抽取
+
+开启方式：
+
+```bash
+NANOBOT_WIKI_LLM_EXTRACTOR=1
+```
+
+开启后，`WikiLLMExtractor` 会把一批 `IngestMessage` 发给当前 provider，并要求模型输出 JSONL。模型必须使用 `config/wiki_taxonomy.yaml` 中预定义的 domain/topic/subtype。
+
+例如用户说：
+
+```text
+I like basketball. I enjoy traveling.
+I want to go to Paris to watch football, and my favorite team is Arsenal.
+```
+
+理想 LLM 输出类似：
+
+```jsonl
+{"domain":"sports","topic":"basketball","subtype":"preference","wiki_type":"concept","title":"Basketball Interest","content":"User likes basketball.","entities":["basketball"],"relations":[{"subject":"user","predicate":"likes","object":"basketball"}],"source_refs":["thread:s1:m2"],"confidence":"high"}
+{"domain":"sports","topic":"football","subtype":"favorite_team","wiki_type":"entity","title":"Arsenal Supporter Profile","content":"User's favorite football club is Arsenal.","entities":["Arsenal"],"relations":[{"subject":"user","predicate":"supports","object":"Arsenal"}],"source_refs":["thread:s1:m2"],"confidence":"high"}
+{"domain":"travel","topic":"city_trip","subtype":"travel_goal","wiki_type":"concept","title":"Paris Football Travel Goal","content":"User wants to travel to Paris and watch football there.","entities":["Paris","football"],"relations":[{"subject":"user","predicate":"wants_to_visit","object":"Paris"}],"source_refs":["thread:s1:m2"],"confidence":"medium"}
+```
+
+解析后会生成带有 taxonomy 标签的 `WikiCandidate`：
+
+```text
+domain:sports
+topic:football
+subtype:favorite_team
+entity:Arsenal
+llm-extracted
+```
+
+如果模型输出的 taxonomy 不合法，会被归到 fallback：
+
+```text
+other/uncategorized/unknown
+```
+
+同时写入 topic review queue：
+
+```text
+persona/wiki/state/topic_review_queue.jsonl
+```
+
+这为后续“多次谈到某类内容后，是否新增大类/小类主题”提供了工程入口。
+
+### 2.5 Crystallize：候选知识结晶
+
+`WikiCrystallizer` 把 `WikiCandidate` 转为 `WikiPatch`。
+
+它会先用 `WikiQueryEngine` 查询现有页面：
+
+- 如果已有相似页面且 score 足够高，合并到旧页面。
+- 如果没有相似页面，新建 slug。
+
+例子：
+
+```text
+entity/arsenal-supporter-profile-xxxx
+concept/paris-football-travel-goal-xxxx
+synthesis/recent-user-signals-xxxx
+```
+
+默认 patch 操作是 `merge_section`，也就是往对应 section 合并 bullet，并通过 `.sources.json` 做事实去重和来源累积。
+
+### 2.6 Store：Markdown + sources sidecar + log
+
+`WikiStore.apply_patch()` 负责真正落盘：
+
+```text
+persona/wiki/wiki/{type}/{slug}.md
+persona/wiki/wiki/{type}/{slug}.sources.json
+persona/wiki/log.jsonl
+```
+
+Markdown 页包含 frontmatter：
+
+```yaml
+---
+slug: entity/arsenal-supporter-profile
+title: Arsenal Supporter Profile
+type: entity
+mode: freechat
+tags:
+  - domain:sports
+  - topic:football
+  - subtype:favorite_team
+  - entity:Arsenal
+topics:
+  - sports/football
+sources:
+  - thread:s1:m2
+confidence: high
+---
+```
+
+`.sources.json` 保存每条 fact 的来源、确认次数、first_seen、last_seen。相同事实再次出现时，不重复写入正文 bullet，而是增加 confirmations 并合并 sources。
+
+### 2.7 Index、Query、Graph
+
+写页成功后，`WikiIndex.index_page()` 会把页面按 section 切成 chunk，写入 SQLite FTS：
+
+```text
+persona/wiki/index/wiki.sqlite
+```
+
+`WikiQueryEngine` 会组合：
+
+- SQLite FTS 搜索
+- Markdown/title/tags/topics 扫描
+- link 邻居扩展
+
+`build_wiki_graph()` 则把 wiki 投影成面向用户的知识图谱，核心节点包括：
+
+- `domain`
+- `topic`
+- `page`
+- `entity`
+- `concept`
+
+关系包括：
+
+- `has_domain`
+- `has_topic`
+- `contains_topic`
+- `mentions_entity`
+- `mentions_concept`
+- `relation:{predicate}`
+
+上面的 Arsenal 例子可视化后接近：
+
+```mermaid
+flowchart LR
+  P["Page: Arsenal Supporter Profile"] --> D["Domain: Sports"]
+  D --> T["Topic: Football"]
+  P --> A["Entity: Arsenal"]
+  U["Entity: User"] -->|"supports"| A
+  P2["Page: Paris Football Travel Goal"] --> T2["Topic: City Trip"]
+  P2 --> Paris["Entity: Paris"]
+  U -->|"wants_to_visit"| Paris
+```
+
+---
+
+## 3. 架构总览
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -51,9 +301,9 @@ Wiki Memory 是一个面向 LLM 的持久化知识库系统，用于：
 
 ---
 
-## 3. 核心模块（subagent/cross_session/wiki/processor/）
+## 4. 核心模块（subagent/cross_session/wiki/processor/）
 
-### 3.1 schema.py — 数据模型与校验
+### 4.1 schema.py — 数据模型与校验
 
 定义整个 Wiki 系统的 Pydantic 模型：
 
@@ -66,7 +316,18 @@ Wiki Memory 是一个面向 LLM 的持久化知识库系统，用于：
 | `WikiPageMeta` | 页面 Frontmatter 元数据 |
 | `WikiSearchResult` | 搜索结果（slug, title, type, mode, section, snippet, score, tags, topics） |
 
-**支持的页面类型**：`user_profile`, `user_preference`, `user_goal`, `communication_style`, `ielts_topic`, `ielts_question_bank`, `ielts_speaking_example`, `language_weakness`, `expression_bank`, `freechat_project`, `freechat_interest`, `benative_article_learning`, `benative_answer_pattern`, `timeline_month`
+**支持的页面类型**：`source`, `entity`, `concept`, `comparison`, `question`, `synthesis`, `decision`, `gap`, `meta`
+
+历史类型会被映射到新的 canonical 类型，例如：
+
+| 历史类型 | 新类型 |
+|----------|--------|
+| `user_profile` | `entity` |
+| `user_preference` | `concept` |
+| `ielts_question_bank` | `question` |
+| `language_weakness` | `concept` |
+| `freechat_project` | `entity` |
+| `comparsion` | `comparison` |
 
 **支持的模式**：`global`, `ielts`, `freechat`, `benative`, `language`
 
@@ -74,13 +335,16 @@ Wiki Memory 是一个面向 LLM 的持久化知识库系统，用于：
 
 ---
 
-### 3.2 wiki_store.py — Markdown 持久化存储
+### 4.2 wiki_store.py — Markdown 持久化存储
 
 `WikiStore` 是核心的文件系统存储层，负责读写 Markdown 页面。
 
 **目录结构**：
 ```
 persona/wiki/
+├── raw/
+│   ├── sources/               # 外部或手工 source evidence
+│   └── thread/                # ingest 保存的原始 thread batch
 ├── wiki/
 │   ├── {slug}.md              # 页面正文 + YAML Frontmatter
 │   ├── {slug}.sources.json    # 来源追踪侧边文件
@@ -88,6 +352,11 @@ persona/wiki/
 │       └── {slug}.md          # 支持子目录
 ├── index/
 │   └── wiki.sqlite            # SQLite FTS 索引
+├── state/
+│   ├── ingest_cursor.json     # thread 增量 cursor
+│   ├── sync_log.jsonl         # wiki sync 运行记录
+│   └── topic_review_queue.jsonl
+├── schema/
 └── log.jsonl                  # 所有补丁操作日志
 ```
 
@@ -115,7 +384,7 @@ persona/wiki/
 
 ---
 
-### 3.3 wiki_index.py — SQLite FTS5 索引
+### 4.3 wiki_index.py — SQLite FTS5 索引
 
 `WikiIndex` 负责构建和维护全文搜索索引。
 
@@ -143,7 +412,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ---
 
-### 3.4 wiki_search.py — FTS 全文搜索
+### 4.4 wiki_search.py — FTS 全文搜索
 
 `WikiSearch` 基于 `WikiIndex` 的 SQLite 数据库执行搜索。
 
@@ -158,27 +427,31 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ---
 
-### 3.5 wiki_graph.py — 知识图谱构建
+### 4.5 wiki_graph.py — 知识图谱构建
 
 `build_wiki_graph()` 从页面元数据构建图数据，供前端 `react-force-graph-2d` 渲染。
 
 **节点类型**（`kind`）：
+- `domain`：大领域，例如 sports、travel、study
+- `topic`：主题，例如 sports/football、travel/city_trip
 - `page`：页面节点（slug → title）
-- `tag`：标签节点（`tag:{name}`）
-- `topic`：主题节点（`topic:{name}`）
-- `mode`：模式节点（`mode:{name}`）
+- `entity`：实体，例如 Arsenal、Paris、user
+- `concept`：概念或 subtype，例如 favorite_team、travel_goal
 
 **边类型**（`kind`）：
 - `link`：页面 → 页面（Frontmatter `links` 字段）
-- `has_tag`：页面 → 标签
+- `has_domain`：页面 → domain
 - `has_topic`：页面 → 主题
-- `has_mode`：页面 → 模式
+- `contains_topic`：domain → topic
+- `mentions_entity`：页面 → entity
+- `mentions_concept`：页面 → concept
+- `relation:{predicate}`：entity → entity，例如 `relation:supports`
 
 支持按 `mode` / `topic` / `page_type` / `tags` 过滤图谱。
 
 ---
 
-### 3.6 wiki_retriever.py — LLM 上下文检索
+### 4.6 wiki_retriever.py — LLM 上下文检索
 
 `read_wiki_context(query, ...)` 用于在 LLM prompt 中注入相关知识。
 
@@ -190,7 +463,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ---
 
-### 3.7 wiki_processor.py — JSONL 补丁批处理
+### 4.7 wiki_processor.py — JSONL 补丁批处理
 
 `WikiProcessor` 解析 LLM 输出的 JSONL 并批量应用补丁。
 
@@ -204,11 +477,12 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ---
 
-### 3.8 wiki_updater.py — 游标式增量更新
+### 4.8 wiki_updater.py — 游标式增量更新
 
 `WikiUpdater` 是旧的 patch JSONL 导入器，保留用于测试或一次性迁移。
-当前主流程通过 `bot.nanobot.agent.wiki_sync` 从
-`persona/events/thread.jsonl` 增量 ingest，再 query/save/lint。
+当前主流程通过 `bot.nanobot.agent.wiki_sync` 从 thread 增量 ingest，再 query/save/lint。
+
+当前代码中，`WikiIngestor` 读取的是 `data/thread.jsonl`。项目清理后，真实运行数据主要在 `persona/events/thread.jsonl` 和 `persona/sessions/{session_id}/thread.jsonl`。因此这里是当前需要修复的路径一致性问题。
 
 **游标机制**：
 - 每个源文件维护一个行号游标，记录在 `updater_cursors.json`
@@ -223,11 +497,11 @@ DEFAULT_SOURCES = []
 
 ---
 
-## 4. 后端集成
+## 5. 后端集成
 
-### 4.1 WebSocket Channel API（bot/nanobot/channels/websocket.py）
+### 5.1 WebSocket Channel API（bot/nanobot/channels/websocket.py）
 
-在 `_dispatch_http()` 中注册了 5 个 Wiki HTTP 端点：
+在 `_dispatch_http()` 中注册了 Wiki HTTP 端点：
 
 | 端点 | 方法 | 处理器 | 说明 |
 |------|------|--------|------|
@@ -236,6 +510,8 @@ DEFAULT_SOURCES = []
 | `/api/wiki/graph` | GET | `_handle_wiki_graph` | 获取图谱数据 |
 | `/api/wiki/patch` | GET | `_handle_wiki_patch` | 应用补丁（URL-encoded JSON） |
 | `/api/wiki/rebuild-index` | GET | `_handle_wiki_rebuild_index` | 重建 FTS 索引 |
+| `/api/wiki/lint` | GET | `_handle_wiki_lint` | 运行结构和语义检查 |
+| `/api/wiki/sync-log` | GET | `_handle_wiki_sync_log` | 查看 wiki sync 运行记录 |
 
 **鉴权**：所有端点都通过 `_check_api_token(request)` 检查 Bearer Token。
 
@@ -243,9 +519,9 @@ DEFAULT_SOURCES = []
 
 ---
 
-### 4.2 Agent Tool（bot/nanobot/agent/tools/wiki.py）
+### 5.2 Agent Tool（bot/nanobot/agent/tools/wiki.py）
 
-`WikiTool` 注册为 agent 可调用的工具（`name="wiki_memory"`），支持 5 个 action：
+`WikiTool` 注册为 agent 可调用的工具（`name="wiki_memory"`），支持这些 action：
 
 | action | 说明 |
 |--------|------|
@@ -254,12 +530,13 @@ DEFAULT_SOURCES = []
 | `propose_patch` | 校验 patch 有效性，返回预览 |
 | `apply_patch` | 应用 patch（需要 `RequestContext`，即需要用户确认） |
 | `graph` | 获取知识图谱节点和边 |
+| `lint` | 运行 wiki lint |
 
 ---
 
-## 5. 前端实现（bot/webui/src/）
+## 6. 前端实现（bot/webui/src/）
 
-### 5.1 组件结构
+### 6.1 组件结构
 
 | 组件 | 文件 | 说明 |
 |------|------|------|
@@ -267,7 +544,7 @@ DEFAULT_SOURCES = []
 | `WikiMemoryFloatingButton` | `components/WikiMemoryPanel.tsx` | 右下角浮动按钮（打开/关闭面板） |
 | `WikiGraphView` | `components/WikiGraphView.tsx` | 2D 力导向知识图谱（`react-force-graph-2d`） |
 
-### 5.2 API 客户端（lib/api.ts）
+### 6.2 API 客户端（lib/api.ts）
 
 ```typescript
 fetchWikiSearch(token, { q, mode, topic, type, tags, limit })
@@ -277,7 +554,7 @@ applyWikiPatch(token, patch)
 rebuildWikiIndex(token)
 ```
 
-### 5.3 UI 交互流程
+### 6.3 UI 交互流程
 
 1. 用户点击 Sidebar 的 "Wiki Memory" 或右下角浮动按钮
 2. `WikiMemoryPanel` 打开，默认显示 **Search** tab
@@ -289,9 +566,9 @@ rebuildWikiIndex(token)
 
 ---
 
-## 6. 数据流示例
+## 7. 数据流示例
 
-### 6.1 Legacy patch JSONL 导入（显式迁移）
+### 7.1 Legacy patch JSONL 导入（显式迁移）
 
 ```
 explicit_patch_source.jsonl
@@ -314,7 +591,7 @@ WikiUpdater.scan_source() ──游标──► WikiProcessor.process_jsonl()
             persona/wiki/index/wiki.sqlite
 ```
 
-### 6.2 用户搜索知识
+### 7.2 用户搜索知识
 
 ```
 用户输入关键词 ──► WikiMemoryPanel.doSearch()
@@ -335,7 +612,7 @@ WikiUpdater.scan_source() ──游标──► WikiProcessor.process_jsonl()
               返回 WikiSearchResult[]
 ```
 
-### 6.3 LLM 读取知识（作为上下文）
+### 7.3 LLM 读取知识（作为上下文）
 
 ```
 Agent Loop ──► WikiTool(action="search")
@@ -353,26 +630,36 @@ Agent Loop ──► WikiTool(action="search")
 
 ---
 
-## 7. 文件清单
+## 8. 文件清单
 
 ### 核心处理器（subagent/cross_session/wiki/processor/）
 
-| 文件 | 行数 | 核心职责 |
-|------|------|----------|
-| `schema.py` | 208 | Pydantic 模型、slug/类型校验 |
-| `wiki_store.py` | 573 | Markdown 读写、补丁应用、来源追踪 |
-| `wiki_index.py` | 283 | SQLite FTS5 索引管理 |
-| `wiki_search.py` | 148 | FTS 搜索 + BM25 排序 |
-| `wiki_graph.py` | 150 | 知识图谱数据构建 |
-| `wiki_retriever.py` | 76 | LLM 上下文检索 |
-| `wiki_processor.py` | 85 | JSONL 补丁批处理 |
-| `wiki_updater.py` | 187 | 游标式增量更新 |
+| 文件 | 核心职责 |
+|------|----------|
+| `schema.py` | Pydantic 模型、slug/类型校验、历史类型映射 |
+| `wiki_layout.py` | raw/wiki/index/state/schema 目录布局 |
+| `wiki_ingest.py` | 从 thread 增量读取消息、保存 raw evidence、生成本地 candidates |
+| `wiki_llm_extractor.py` | taxonomy-guided LLM 抽取 entity/concept/relation |
+| `wiki_taxonomy.py` | 加载和校验 `config/wiki_taxonomy.yaml` |
+| `wiki_topic_review.py` | 维护 fallback/new topic review queue |
+| `wiki_crystallizer.py` | 将 candidates 转换为 WikiPatch 并写入 |
+| `wiki_store.py` | Markdown 读写、补丁应用、来源追踪、事实去重 |
+| `wiki_index.py` | SQLite FTS5 索引管理 |
+| `wiki_search.py` | FTS 搜索 + BM25 排序 |
+| `wiki_query.py` | FTS、Markdown scan、link expansion 的混合查询 |
+| `wiki_graph.py` | 用户知识图谱数据构建 |
+| `wiki_lint.py` | 结构和语义 lint |
+| `wiki_retriever.py` | LLM 上下文检索 |
+| `wiki_processor.py` | JSONL 补丁批处理 |
+| `wiki_updater.py` | 旧 patch source 游标式增量更新 |
 
 ### 后端集成
 
 | 文件 | 职责 |
 |------|------|
-| `bot/nanobot/channels/websocket.py` | 5 个 Wiki HTTP API 端点 |
+| `bot/nanobot/agent/wiki_sync.py` | 自动 wiki sync 主流程 |
+| `bot/nanobot/agent/loop.py` | turn-count 触发 wiki sync |
+| `bot/nanobot/channels/websocket.py` | Wiki HTTP API 端点 |
 | `bot/nanobot/agent/tools/wiki.py` | Agent 可调用的 WikiTool |
 | `bot/nanobot/__init__.py` | 确保项目根目录在 `sys.path` 中（使 subagent 可导入） |
 
@@ -388,9 +675,9 @@ Agent Loop ──► WikiTool(action="search")
 
 ---
 
-## 8. 配置与初始化
+## 9. 配置与初始化
 
-### 8.1 初始化空 Wiki
+### 9.1 初始化空 Wiki
 
 Wiki 是惰性创建的——第一次调用 `WikiStore` 或 `WikiIndex` 时会自动创建目录：
 ```
@@ -399,21 +686,21 @@ persona/wiki/index/
 persona/wiki/log.jsonl
 ```
 
-### 8.2 重建索引
+### 9.2 重建索引
 
 当 FTS 索引损坏或需要全量重建时：
 - 前端点击面板顶部的 "Rebuild Index" 按钮
 - 后端调用 `WikiIndex.rebuild()`
 - 遍历所有 `wiki/**/*.md`，重新分块并写入 `chunks_fts`
 
-### 8.3 从外部源导入
+### 9.3 从外部源导入
 
 运行 `WikiUpdater.scan_all(sources=[...])` 可扫描显式传入的 patch JSONL
 源。常规 wiki sync 不再依赖默认 `subagent/*/data` 目录。
 
 ---
 
-## 9. 关键设计决策
+## 10. 关键设计决策
 
 1. **Markdown + YAML Frontmatter**：人类可读，便于手动编辑和版本控制
 2. **sources.json 侧边文件**：将来源追踪与正文分离，保持 Markdown 纯净

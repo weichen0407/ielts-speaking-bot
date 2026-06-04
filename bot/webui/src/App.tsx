@@ -336,10 +336,10 @@ function Shell({
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [subagentToasts, setSubagentToasts] = useState<
-    Array<{ taskId: string; label: string; phase: string }>
+  const [backgroundTaskToasts, setBackgroundTaskToasts] = useState<
+    Array<{ taskId: string; label: string; phase: string; kind: "subagent" | "processor"; detail?: string }>
   >([]);
-  const subagentTimers = useRef<Map<string, number>>(new Map());
+  const backgroundTaskTimers = useRef<Map<string, number>>(new Map());
 
   // Global notes
   const globalNotes = useGlobalNotes();
@@ -505,19 +505,48 @@ function Shell({
 
   useEffect(() => {
     return client.onSubagentStatus((ev) => {
-      setSubagentToasts((prev) => {
+      setBackgroundTaskToasts((prev) => {
         const others = prev.filter((t) => t.taskId !== ev.task_id);
         if (ev.phase === "started") {
-          return [...others, { taskId: ev.task_id, label: ev.label, phase: "started" }];
+          return [...others, { taskId: ev.task_id, label: ev.label, phase: "started", kind: "subagent" }];
         }
         // done or error: update then schedule removal
-        const updated = [...others, { taskId: ev.task_id, label: ev.label, phase: ev.phase }];
+        const updated = [...others, { taskId: ev.task_id, label: ev.label, phase: ev.phase, kind: "subagent" as const }];
         const timer = window.setTimeout(() => {
-          setSubagentToasts((p) => p.filter((t) => t.taskId !== ev.task_id));
+          setBackgroundTaskToasts((p) => p.filter((t) => t.taskId !== ev.task_id));
         }, 3_000);
-        const existing = subagentTimers.current.get(ev.task_id);
+        const existing = backgroundTaskTimers.current.get(ev.task_id);
         if (existing) clearTimeout(existing);
-        subagentTimers.current.set(ev.task_id, timer);
+        backgroundTaskTimers.current.set(ev.task_id, timer);
+        return updated;
+      });
+    });
+  }, [client]);
+
+  useEffect(() => {
+    return client.onProcessorStatus((ev) => {
+      const detail =
+        typeof ev.input_rows === "number" || typeof ev.output_rows === "number"
+          ? `${ev.input_rows ?? 0} in / ${ev.output_rows ?? 0} out`
+          : undefined;
+      setBackgroundTaskToasts((prev) => {
+        const others = prev.filter((t) => t.taskId !== ev.task_id);
+        if (ev.phase === "started") {
+          return [
+            ...others,
+            { taskId: ev.task_id, label: ev.label || ev.processor, phase: "started", kind: "processor", detail },
+          ];
+        }
+        const updated = [
+          ...others,
+          { taskId: ev.task_id, label: ev.label || ev.processor, phase: ev.phase, kind: "processor" as const, detail },
+        ];
+        const timer = window.setTimeout(() => {
+          setBackgroundTaskToasts((p) => p.filter((t) => t.taskId !== ev.task_id));
+        }, 3_000);
+        const existing = backgroundTaskTimers.current.get(ev.task_id);
+        if (existing) clearTimeout(existing);
+        backgroundTaskTimers.current.set(ev.task_id, timer);
         return updated;
       });
     });
@@ -727,9 +756,9 @@ function Shell({
             {restartToast}
           </div>
         ) : null}
-        {subagentToasts.length > 0 ? (
+        {backgroundTaskToasts.length > 0 ? (
           <div className="fixed right-4 top-4 z-50 flex flex-col gap-2">
-            {subagentToasts.map((t) => (
+            {backgroundTaskToasts.map((t) => (
               <div
                 key={t.taskId}
                 role="status"
@@ -741,11 +770,16 @@ function Shell({
                       : "border-green-200 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200"
                 }`}
               >
-                {t.phase === "started"
-                  ? `${t.label} subagent running...`
-                  : t.phase === "error"
-                    ? `${t.label} subagent failed`
-                    : `${t.label} subagent completed`}
+                <div>
+                  {t.phase === "started"
+                    ? `${t.label} ${t.kind} running...`
+                    : t.phase === "error"
+                      ? `${t.label} ${t.kind} failed`
+                      : t.phase === "skipped"
+                        ? `${t.label} ${t.kind} skipped`
+                        : `${t.label} ${t.kind} completed`}
+                </div>
+                {t.detail ? <div className="text-xs opacity-75">{t.detail}</div> : null}
               </div>
             ))}
           </div>

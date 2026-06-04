@@ -139,4 +139,5 @@ See also:
 
 - `architecture.md`
 - `docs/runtime-data-map.md`
+- `docs/processor-subagent-runtime.md`
 - `docs/wiki-memory-implementation.md`

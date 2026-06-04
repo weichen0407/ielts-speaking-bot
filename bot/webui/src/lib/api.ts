@@ -132,6 +132,9 @@ export interface AdminTrigger {
   enabled: boolean;
   condition?: Record<string, unknown>;
   subagent?: string | null;
+  execution_mode?: string | null;
+  agentic?: boolean | null;
+  tools?: string[];
   processor?: string | null;
   model?: string | null;
   input_path?: string | null;
@@ -168,6 +171,7 @@ export interface AdminSubagentRun {
   timestamp: string;
   task_id: string;
   label: string;
+  subagent?: string | null;
   phase: string;
   model?: string | null;
   stop_reason?: string | null;
@@ -186,12 +190,20 @@ export interface AdminSubagentRun {
     error?: string;
   }>;
   announce_result?: boolean;
+  execution_mode?: string | null;
+  tools?: string[];
+  input_rows?: number;
+  output_rows?: number;
+  duration_ms?: number;
 }
 
 export interface AdminProcessorRun {
   timestamp: string;
   trigger_id: string;
   processor: string;
+  subagent?: string | null;
+  execution_mode?: string | null;
+  tools?: string[];
   mode?: string | null;
   session_key?: string | null;
   session_uuid?: string | null;
@@ -290,11 +302,15 @@ export interface AdminCapabilities {
     context_dir?: string;
     trigger_file?: string;
     cron_file?: string;
+    subagents?: string[];
   }>;
   subagents?: Record<string, {
     scope?: string;
     prompt?: string;
     trigger_ids?: string[];
+    execution_modes?: string[];
+    default_execution_mode?: string;
+    tools?: Record<string, string[]>;
     writes?: string[];
   }>;
   processors?: Record<string, {
@@ -307,6 +323,11 @@ export interface AdminCapabilities {
   observability?: Record<string, {
     path?: string;
     rotation?: string;
+  }>;
+  tools?: Record<string, {
+    status?: string;
+    scope?: string;
+    description?: string;
   }>;
 }
 

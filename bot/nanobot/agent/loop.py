@@ -7,6 +7,7 @@ import dataclasses
 import inspect
 import os
 import time
+import uuid
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -273,6 +274,7 @@ class AgentLoop:
         from subagent._shared.registry import discover_processors
         from nanobot.utils.processor_monitor import (
             append_processor_run,
+            append_processor_subagent_run,
             line_count,
             materialize_processor_delta,
             output_delta_records,
@@ -286,12 +288,20 @@ class AgentLoop:
         started_at = time.monotonic()
         delta_bundle = None
         model = target.model or self.model
+        usage_override: dict[str, Any] | None = None
         source_paths = (
             [root / p for p in target.input_paths]
             if target.input_paths
             else [root / target.input_path]
         )
         try:
+            self._publish_processor_status(
+                msg,
+                session,
+                trigger,
+                phase="started",
+                model=model,
+            )
             processors = discover_processors()
             processor_cls = processors.get(target.processor)
             if not processor_cls:
@@ -299,6 +309,14 @@ class AgentLoop:
                     "Processor [{}] not found in registry, available: {}",
                     target.processor,
                     list(processors.keys()),
+                )
+                self._publish_processor_status(
+                    msg,
+                    session,
+                    trigger,
+                    phase="error",
+                    error="processor_not_found",
+                    model=model,
                 )
                 return
 
@@ -332,6 +350,9 @@ class AgentLoop:
                     root,
                     trigger_id=trigger.id,
                     processor=target.processor,
+                    subagent=target.subagent or None,
+                    execution_mode=target.execution_mode,
+                    tools=list(target.tools or []),
                     mode=session.metadata.get("mode"),
                     session_key=session.key,
                     session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
@@ -357,10 +378,44 @@ class AgentLoop:
                         "inputs": input_records,
                     },
                 )
+                self._publish_processor_status(
+                    msg,
+                    session,
+                    trigger,
+                    phase="skipped",
+                    input_rows=0,
+                    output_rows=0,
+                    model=model,
+                )
                 return
 
+            if target.subagent and target.execution_mode == "api":
+                usage_override = await self._run_processor_api_subagent(
+                    processor=processor,
+                    delta_bundle=delta_bundle,
+                    output_path=output_path,
+                    batch_size=batch_size,
+                    model=model,
+                    session=session,
+                    msg=msg,
+                    trigger=trigger,
+                    root=root,
+                    append_processor_subagent_run=append_processor_subagent_run,
+                )
+            elif target.subagent and target.execution_mode == "agentic":
+                usage_override = await self._run_processor_agentic_subagent(
+                    processor=processor,
+                    delta_bundle=delta_bundle,
+                    output_path=output_path,
+                    model=model,
+                    session=session,
+                    msg=msg,
+                    trigger=trigger,
+                    root=root,
+                    append_processor_subagent_run=append_processor_subagent_run,
+                )
             # Determine input paths (single or multiple)
-            if target.input_paths:
+            elif target.input_paths:
                 # Multiple input files (Level 3 processors)
                 logger.info(
                     "Executing processor [{}] with inputs={}, output={}, batch_size={}",
@@ -431,11 +486,18 @@ class AgentLoop:
                 update_processor_cursor(root, trigger.id, delta_bundle.processor_cursor_after)
 
             self.counter_engine.record_trigger(session.metadata, trigger.id)
-            usage = processor.get_usage() if hasattr(processor, "get_usage") else {}
+            usage = (
+                usage_override
+                if usage_override is not None
+                else processor.get_usage() if hasattr(processor, "get_usage") else {}
+            )
             append_processor_run(
                 root,
                 trigger_id=trigger.id,
                 processor=target.processor,
+                subagent=target.subagent or None,
+                execution_mode=target.execution_mode,
+                tools=list(target.tools or []),
                 mode=session.metadata.get("mode"),
                 session_key=session.key,
                 session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
@@ -451,6 +513,15 @@ class AgentLoop:
                 duration_ms=int((time.monotonic() - started_at) * 1000),
                 usage=usage,
                 output_preview=output_delta_records(output_path, start_line=output_before),
+            )
+            self._publish_processor_status(
+                msg,
+                session,
+                trigger,
+                phase="done",
+                input_rows=input_rows,
+                output_rows=output_rows,
+                model=model,
             )
             self._log_counter_trigger_decision(
                 session,
@@ -479,6 +550,9 @@ class AgentLoop:
                 root,
                 trigger_id=trigger.id,
                 processor=target.processor,
+                subagent=target.subagent or None,
+                execution_mode=target.execution_mode,
+                tools=list(target.tools or []),
                 mode=session.metadata.get("mode"),
                 session_key=session.key,
                 session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
@@ -501,10 +575,268 @@ class AgentLoop:
                 reason="processor_error",
                 details={"error": str(e), "processor": target.processor},
             )
+            self._publish_processor_status(
+                msg,
+                session,
+                trigger,
+                phase="error",
+                error=str(e),
+                input_rows=delta_bundle.input_rows if delta_bundle else 0,
+                output_rows=max(line_count(output_path) - output_before, 0),
+                model=model,
+            )
             logger.warning("Failed to execute processor [{}]: {}", target.processor, e)
         finally:
             if delta_bundle is not None:
                 delta_bundle.cleanup()
+
+    async def _run_processor_api_subagent(
+        self,
+        *,
+        processor: Any,
+        delta_bundle: Any,
+        output_path: Path,
+        batch_size: int,
+        model: str | None,
+        session: Session,
+        msg: InboundMessage,
+        trigger: CounterTrigger,
+        root: Path,
+        append_processor_subagent_run: Callable[..., None],
+    ) -> dict[str, Any]:
+        """Run a processor-mediated subagent in lightweight API mode."""
+        target = trigger.target
+        subagent = target.subagent or target.processor
+        task_id = f"api-{uuid.uuid4().hex[:8]}"
+        origin = {"channel": msg.channel, "chat_id": msg.chat_id, "session_key": session.key}
+        started_at = time.monotonic()
+        usage_total: dict[str, int] = {}
+        raw_preview = ""
+        output_rows = 0
+        input_rows = delta_bundle.input_rows if delta_bundle is not None else 0
+        tools = list(target.tools or [])
+
+        self._on_subagent_status_change(task_id, subagent, "started", None, origin)
+
+        try:
+            all_data: list[dict[str, Any]] = []
+            for run_path in delta_bundle.run_paths:
+                all_data.extend(processor.read(run_path))
+
+            system_prompt = (
+                f"You are the {subagent} subagent running in API mode.\n"
+                "You do not have tool access in API mode.\n"
+                "Follow the processor contract exactly and return only the required structured output.\n\n"
+                f"{processor.get_system_prompt()}"
+            )
+
+            for start in range(0, len(all_data), batch_size):
+                batch = all_data[start : start + batch_size]
+                processed = processor.preprocess(batch)
+                if not processed:
+                    continue
+                user_prompt = processor.prepare_subagent_input(
+                    processed,
+                    mode=session.metadata.get("mode"),
+                    execution_mode=target.execution_mode,
+                    tools=tools,
+                    context={
+                        "trigger_id": trigger.id,
+                        "subagent": subagent,
+                        "session_key": session.key,
+                        "session_uuid": session.session_uuid or session.metadata.get("session_uuid"),
+                    },
+                )
+                response = await self.provider.chat_with_retry(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    tools=None,
+                    model=model,
+                    max_tokens=2048,
+                    temperature=0.2,
+                    retry_mode=self.provider_retry_mode,
+                )
+                if response.finish_reason == "error":
+                    raise RuntimeError(response.content or "processor-mediated subagent API call failed")
+                for key, value in (response.usage or {}).items():
+                    try:
+                        usage_total[key] = usage_total.get(key, 0) + int(value)
+                    except (TypeError, ValueError):
+                        continue
+                raw_output = response.content or ""
+                if raw_output and not raw_preview:
+                    raw_preview = raw_output[:2000]
+                parsed = processor.parse_subagent_output(raw_output)
+                if parsed:
+                    output_rows += len(parsed)
+                    processor.serialize(parsed, output_path, "both")
+
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            append_processor_subagent_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                subagent=subagent,
+                execution_mode=target.execution_mode,
+                task_id=task_id,
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="completed",
+                model=model,
+                tools=tools,
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=duration_ms,
+                usage=usage_total,
+                result_preview=raw_preview,
+            )
+            self._on_subagent_status_change(task_id, subagent, "done", None, origin)
+            return usage_total
+        except Exception as exc:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            append_processor_subagent_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                subagent=subagent,
+                execution_mode=target.execution_mode,
+                task_id=task_id,
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="error",
+                model=model,
+                tools=tools,
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=duration_ms,
+                usage=usage_total,
+                result_preview=raw_preview,
+                error=str(exc),
+            )
+            self._on_subagent_status_change(task_id, subagent, "error", str(exc), origin)
+            raise
+
+    async def _run_processor_agentic_subagent(
+        self,
+        *,
+        processor: Any,
+        delta_bundle: Any,
+        output_path: Path,
+        model: str | None,
+        session: Session,
+        msg: InboundMessage,
+        trigger: CounterTrigger,
+        root: Path,
+        append_processor_subagent_run: Callable[..., None],
+    ) -> dict[str, Any]:
+        """Run a processor-mediated subagent through the tool-capable agent runtime."""
+        target = trigger.target
+        subagent = target.subagent or target.processor
+        started_at = time.monotonic()
+        input_rows = delta_bundle.input_rows if delta_bundle is not None else 0
+        output_rows = 0
+        tools = list(target.tools or [])
+        raw_preview = ""
+
+        try:
+            all_data: list[dict[str, Any]] = []
+            for run_path in delta_bundle.run_paths:
+                all_data.extend(processor.read(run_path))
+            processed = processor.preprocess(all_data)
+            subagent_input = processor.prepare_subagent_input(
+                processed,
+                mode=session.metadata.get("mode"),
+                execution_mode=target.execution_mode,
+                tools=tools,
+                context={
+                    "trigger_id": trigger.id,
+                    "subagent": subagent,
+                    "session_key": session.key,
+                    "session_uuid": session.session_uuid or session.metadata.get("session_uuid"),
+                },
+            )
+            tool_manifest = "\n".join(f"- {name}" for name in tools) if tools else "(none)"
+            extra_prompt = (
+                f"# Processor-Mediated {subagent} Subagent\n\n"
+                f"Execution mode: agentic\n"
+                f"Allowed tool names from task config:\n{tool_manifest}\n\n"
+                "Use tools only when they are useful for this task. Return only the structured output required by the processor.\n\n"
+                f"Processor output contract:\n{processor.get_system_prompt()}"
+            )
+            task = (
+                f"Analyze the compact processor input for `{subagent}`.\n"
+                "Do not write files. The processor will validate and persist the final artifact.\n"
+                "Return only the required structured output.\n\n"
+                "## Processor Input\n"
+                f"{subagent_input}"
+            )
+            task_id = await self.subagents.spawn(
+                task=task,
+                label=subagent,
+                origin_channel=msg.channel,
+                origin_chat_id=msg.chat_id,
+                session_key=session.key,
+                origin_message_id=msg.metadata.get("message_id") if msg.metadata else None,
+                extra_system_prompt=extra_prompt,
+                announce_result=False,
+                model=model,
+            )
+            status = await self.subagents.wait_for_subagent(task_id)
+            if status.error:
+                raise RuntimeError(status.error)
+            raw_output = status.result or ""
+            raw_preview = raw_output[:2000]
+            parsed = processor.parse_subagent_output(raw_output)
+            if parsed:
+                output_rows = len(parsed)
+                processor.serialize(parsed, output_path, "both")
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            append_processor_subagent_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                subagent=subagent,
+                execution_mode=target.execution_mode,
+                task_id=task_id,
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="completed",
+                model=model,
+                tools=tools,
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=duration_ms,
+                usage=status.usage,
+                result_preview=raw_preview,
+            )
+            return dict(status.usage or {})
+        except Exception as exc:
+            duration_ms = int((time.monotonic() - started_at) * 1000)
+            append_processor_subagent_run(
+                root,
+                trigger_id=trigger.id,
+                processor=target.processor,
+                subagent=subagent,
+                execution_mode=target.execution_mode,
+                task_id=f"agentic-{trigger.id}",
+                mode=session.metadata.get("mode"),
+                session_key=session.key,
+                session_uuid=session.session_uuid or session.metadata.get("session_uuid"),
+                status="error",
+                model=model,
+                tools=tools,
+                input_rows=input_rows,
+                output_rows=output_rows,
+                duration_ms=duration_ms,
+                result_preview=raw_preview,
+                error=str(exc),
+            )
+            raise
 
     def _log_counter_trigger_decision(
         self,
@@ -895,6 +1227,54 @@ class AgentLoop:
                         "error": error,
                         "session_key": session_key,
                     },
+                )
+            )
+        )
+
+    def _publish_processor_status(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        trigger: CounterTrigger,
+        *,
+        phase: str,
+        error: str | None = None,
+        input_rows: int | None = None,
+        output_rows: int | None = None,
+        model: str | None = None,
+    ) -> None:
+        """Broadcast processor lifecycle events so WebUI can show background toasts."""
+        target = trigger.target
+        task_id = f"processor:{trigger.id}:{session.session_uuid or session.key}"
+        metadata: dict[str, Any] = {
+            "_processor_status": True,
+            "task_id": task_id,
+            "trigger_id": trigger.id,
+            "processor": target.processor,
+            "subagent": target.subagent,
+            "execution_mode": target.execution_mode,
+            "agentic": bool(target.agentic),
+            "tools": list(target.tools or []),
+            "label": target.processor or trigger.id,
+            "phase": phase,
+            "error": error,
+            "session_key": session.key,
+            "session_uuid": session.session_uuid or session.metadata.get("session_uuid"),
+            "mode": session.metadata.get("mode"),
+            "model": model,
+        }
+        if input_rows is not None:
+            metadata["input_rows"] = int(input_rows)
+        if output_rows is not None:
+            metadata["output_rows"] = int(output_rows)
+
+        asyncio.create_task(
+            self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata=metadata,
                 )
             )
         )

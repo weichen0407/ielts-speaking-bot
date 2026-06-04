@@ -2,17 +2,21 @@
   "version": 1,
   "triggers": [
     {
-      "id": "freechat_vocab_processor",
-      "name": "Freechat Vocab Processor",
+      "id": "freechat_vocab",
+      "name": "Freechat Vocab",
       "enabled": true,
       "condition": {
         "kind": "file_line_count",
-        "count": 2,
+        "count": 1,
         "scope": "global",
         "path": "persona/events/thread.jsonl"
       },
       "target": {
         "processor": "vocab",
+        "subagent": "vocab",
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
         "input_path": "persona/events/thread.jsonl",
         "output_path": "persona/processor/freechat/vocab.jsonl",
         "batch_size": 20,
@@ -24,18 +28,22 @@
       }
     },
     {
-      "id": "freechat_polisher_processor",
-      "name": "Freechat Polisher Processor",
+      "id": "freechat_polisher",
+      "name": "Freechat Polisher",
       "enabled": true,
       "condition": {
         "kind": "file_line_count",
-        "count": 2,
+        "count": 1,
         "scope": "global",
         "path": "persona/events/thread.jsonl"
       },
       "target": {
         "processor": "polisher",
-        "depends_on": "freechat_vocab_processor",
+        "subagent": "polisher",
+        "execution_mode": "api",
+        "agentic": false,
+        "tools": [],
+        "depends_on": "freechat_vocab",
         "input_path": "persona/events/thread.jsonl",
         "output_path": "persona/processor/freechat/polisher.jsonl",
         "batch_size": 20,
@@ -58,7 +66,7 @@
       },
       "target": {
         "processor": "notes",
-        "depends_on": "freechat_polisher_processor",
+        "depends_on": "freechat_polisher",
         "input_path": "persona/events/thread.jsonl",
         "output_path": "persona/processor/freechat/notes.jsonl",
         "batch_size": 20,
