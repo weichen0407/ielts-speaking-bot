@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from nanobot.bus.events import InboundMessage
-from nanobot.command.builtin import cmd_benative
-from nanobot.command.router import CommandContext
+from nanobot.command.builtin import cmd_benative, register_builtin_commands
+from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.session.manager import Session
 
 
@@ -92,3 +92,27 @@ async def test_benative_select_counts_pairs_from_persona_benative(tmp_path: Path
     )
     assert progress["article_id"] == "a1"
     assert progress["total_sentences"] == 2
+
+
+@pytest.mark.asyncio
+async def test_benative_select_registered_as_prefix_command(tmp_path: Path) -> None:
+    session = Session(key="websocket:c1", session_uuid="s1")
+    pairs_dir = tmp_path / "persona" / "benative" / "pairs"
+    pairs_dir.mkdir(parents=True)
+    (pairs_dir / "arsenal_matchday_001.jsonl").write_text(
+        '{"en":"One","zh":"一","sentence_index":0}\n',
+        encoding="utf-8",
+    )
+    router = CommandRouter()
+    register_builtin_commands(router)
+    ctx = _context(tmp_path, session, "")
+    ctx.raw = "/benative select arsenal_matchday_001"
+    ctx.msg.content = ctx.raw
+
+    assert router.is_dispatchable_command(ctx.raw)
+    response = await router.dispatch(ctx)
+
+    assert response is not None
+    assert "0/1 sentences" in response.content
+    assert session.metadata["mode"] == "benative"
+    assert session.metadata["benative_article_id"] == "arsenal_matchday_001"

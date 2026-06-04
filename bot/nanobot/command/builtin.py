@@ -807,9 +807,9 @@ Type `/benative progress` to see your current progress.""",
                 if pairs_file.exists():
                     sentence_count = sum(1 for _ in pairs_file.read_text(encoding="utf-8").strip().split("\n") if _.strip())
                 article_list.append({
-                    "id": article_data.get("id", article_file.stem),
+                    "id": article_data.get("id") or article_data.get("article_id") or article_file.stem,
                     "title": article_data.get("title", "Untitled"),
-                    "source": article_data.get("source", "Unknown"),
+                    "source": article_data.get("source") or article_data.get("source_type") or "Unknown",
                     "topic": article_data.get("topic", "general"),
                     "sentence_count": sentence_count,
                 })
@@ -1268,6 +1268,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/ielts_exam", cmd_ielts_exam)
     router.exact("/ielts_score", cmd_ielts_score)
     router.exact("/benative", cmd_benative)
+    router.prefix("/benative ", cmd_benative)
     router.exact("/status", cmd_status)
     router.exact("/model", cmd_model)
     router.prefix("/model ", cmd_model)
