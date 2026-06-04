@@ -14,7 +14,7 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
-from nanobot.agent.tools.context import ToolContext
+from nanobot.agent.tools.context import ContextAware, RequestContext, ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
 from nanobot.agent.tools.registry import ToolRegistry
@@ -129,6 +129,7 @@ class SubagentManager:
         self,
         workspace: Path | None = None,
         tools_config: ToolsConfig | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> ToolRegistry:
         """Build an isolated subagent tool registry via ToolLoader."""
         root = self.workspace if workspace is None else workspace
@@ -140,6 +141,8 @@ class SubagentManager:
             file_state_store=FileStates(),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
+        if allowed_tools is not None:
+            registry = registry.filtered(allowed_tools)
         return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:
@@ -158,6 +161,7 @@ class SubagentManager:
         extra_system_prompt: str | None = None,
         announce_result: bool = True,
         model: str | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background. Returns task_id."""
         task_id = str(uuid.uuid4())[:8]
@@ -182,7 +186,18 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id, extra_system_prompt, announce_result, resolved_model)
+            self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                status,
+                origin_message_id,
+                extra_system_prompt,
+                announce_result,
+                resolved_model,
+                allowed_tools,
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -215,6 +230,7 @@ class SubagentManager:
         extra_system_prompt: str | None = None,
         announce_result: bool = True,
         model: str | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -226,7 +242,17 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
-            tools = self._build_tools()
+            tools = self._build_tools(allowed_tools=allowed_tools)
+            for name in tools.tool_names:
+                tool = tools.get(name)
+                if tool and isinstance(tool, ContextAware):
+                    tool.set_context(
+                        RequestContext(
+                            channel=origin.get("channel", ""),
+                            chat_id=origin.get("chat_id", ""),
+                            session_key=origin.get("session_key"),
+                        )
+                    )
             system_prompt = self._build_subagent_prompt(extra_system_prompt=extra_system_prompt)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},

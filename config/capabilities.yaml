@@ -126,19 +126,19 @@ processors:
 
 tools:
   thread_query:
-    status: planned
+    status: active
     scope: read_only
     description: Read recent or historical conversation turns from approved thread logs.
   artifact_read:
-    status: planned
+    status: active
     scope: read_only
     description: Read processor artifacts such as vocab.jsonl and polisher.jsonl.
   user_profile:
-    status: planned
+    status: active
     scope: read_only
     description: Read stable user profile, memory, habits, and recurring learning patterns.
   wiki_query:
-    status: planned
+    status: active
     scope: read_only
     description: Query local LLM Wiki pages, graph, entities, concepts, and gaps.
 

@@ -56,6 +56,52 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_subagent_allowed_tools_filters_runtime_registry(tmp_path):
+    """Agentic subagents should only receive the configured tool allowlist."""
+    from nanobot.agent.subagent import SubagentManager, SubagentStatus
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    async def fake_run(spec):
+        assert spec.tools.tool_names == ["grep"]
+        assert spec.tools.get("grep") is not None
+        assert spec.tools.get("read_file") is None
+        assert spec.tools.get("exec") is None
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    status = SubagentStatus(
+        task_id="sub-1", label="label", task_description="do task", started_at=time.monotonic()
+    )
+    await mgr._run_subagent(
+        "sub-1",
+        "do task",
+        "label",
+        {"channel": "test", "chat_id": "c1"},
+        status,
+        allowed_tools=["grep"],
+    )
+
+    mgr.runner.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_subagent_uses_configured_max_iterations(tmp_path):
     """Subagents should honor the configured tool-iteration limit."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus

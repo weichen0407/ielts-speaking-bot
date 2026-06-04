@@ -332,7 +332,7 @@ webui toast shows processor + subagent/api task status
 
 Status: done.
 
-For phase 1, agentic mode should use the existing Nanobot subagent runtime, but with a restricted prompt and tool manifest.
+For phase 1, agentic mode should use the existing Nanobot subagent runtime, with both a restricted prompt and a hard runtime tool allowlist.
 
 Runtime:
 
@@ -340,6 +340,7 @@ Runtime:
 processor prepares compact input
 runtime loads subagent prompt
 runtime adds tool manifest and compact input
+runtime filters ToolRegistry to the configured tool list
 runtime spawn subagent
 runtime waits for result
 processor parses result
@@ -360,6 +361,22 @@ read persona/memory/MEMORY.md or future user profile file
 
 wiki_query:
 query local LLM Wiki index
+```
+
+Current implementation:
+
+```text
+bot/nanobot/agent/tools/subagent_context.py
+  thread_query
+  artifact_read
+  user_profile
+  wiki_query
+
+bot/nanobot/agent/tools/registry.py
+  ToolRegistry.filtered()
+
+bot/nanobot/agent/subagent.py
+  spawn(..., allowed_tools=[...])
 ```
 
 Acceptance:

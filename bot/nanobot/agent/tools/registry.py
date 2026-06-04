@@ -70,6 +70,21 @@ class ToolRegistry:
         self._cached_definitions = builtins + mcp_tools
         return self._cached_definitions
 
+    def filtered(self, names: list[str] | set[str] | tuple[str, ...]) -> "ToolRegistry":
+        """Return a registry containing only the named tools in configured order.
+
+        The new registry references the same tool instances. This is intended
+        for scoped agent/subagent runs where the runtime must expose only an
+        allowlisted subset of already-constructed tools.
+        """
+        allowed = set(names)
+        next_registry = ToolRegistry()
+        for name in names:
+            tool = self._tools.get(name)
+            if tool is not None and name in allowed:
+                next_registry.register(tool)
+        return next_registry
+
     def prepare_call(
         self,
         name: str,

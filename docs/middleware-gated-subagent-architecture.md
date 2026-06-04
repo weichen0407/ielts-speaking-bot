@@ -148,7 +148,7 @@ This makes it more like a real learning agent rather than a stateless LLM API.
 
 The tool layer should be abstracted away from individual processors and subagents.
 
-Tools should be registered in one place and exposed to subagents through a controlled manifest.
+Tools should be registered in one place and exposed to subagents through a controlled manifest and a hard runtime allowlist.
 
 Possible tool groups:
 
@@ -176,6 +176,11 @@ read approved project files or persona files
 ```
 
 Tool access should be scoped per subagent.
+
+In the current implementation, `SubagentManager.spawn(..., allowed_tools=[...])`
+filters the actual `ToolRegistry` before the agent loop starts. This means the
+configured tool list is not merely prompt text; tools outside the allowlist are
+not exposed to the model at all.
 
 For example:
 

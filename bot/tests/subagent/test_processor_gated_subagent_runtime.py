@@ -157,6 +157,7 @@ async def test_processor_gated_subagent_agentic_mode_uses_subagent_runtime(
     spawn_kwargs = loop.subagents.spawn.mock_calls[0].kwargs
     assert spawn_kwargs["label"] == "vocab"
     assert spawn_kwargs["model"] == "deepseek-v4-flash"
+    assert spawn_kwargs["allowed_tools"] == ["thread_query", "artifact_read"]
     assert "Allowed tool names" in spawn_kwargs["extra_system_prompt"]
     assert "thread_query" in spawn_kwargs["extra_system_prompt"]
     assert "Do not write files" in spawn_kwargs["task"]

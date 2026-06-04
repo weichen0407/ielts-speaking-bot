@@ -784,6 +784,7 @@ class AgentLoop:
                 extra_system_prompt=extra_prompt,
                 announce_result=False,
                 model=model,
+                allowed_tools=tools,
             )
             status = await self.subagents.wait_for_subagent(task_id)
             if status.error:

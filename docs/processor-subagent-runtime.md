@@ -759,6 +759,31 @@ processor 这次处理了哪些增量，产出了什么？
 - 如果需要非常稳定的输出格式，不要让 LLM 直接写 JSON，优先 processor parse。
 - 如果需要复杂 agentic 行为，允许 subagent 自己规划工具调用。
 
+当前 freechat 的 agentic subagent 已经有硬工具边界：
+
+```text
+trigger.target.tools
+-> AgentLoop._run_processor_agentic_subagent()
+-> SubagentManager.spawn(allowed_tools=[...])
+-> ToolRegistry.filtered()
+-> AgentRunner only sees allowlisted tools
+```
+
+第一批只读工具在：
+
+```text
+bot/nanobot/agent/tools/subagent_context.py
+```
+
+包括：
+
+| Tool | 用途 |
+|------|------|
+| `thread_query` | 读取 `persona/events/thread.jsonl` 中最近对话 |
+| `artifact_read` | 读取 `persona/processor/**` 和 `monitor/**` 的 artifact/log |
+| `user_profile` | 读取 `persona/USER.md` 和 `persona/memory/MEMORY.md` |
+| `wiki_query` | 查询本地 LLM Wiki |
+
 ---
 
 ## 9. 用一个真实对话串起来
@@ -865,4 +890,3 @@ subagent_runs.jsonl     -> subagent 结果和 artifact
 6. Subagent 结果会写入 `monitor/subagent_runs.jsonl`，是否回注主 agent 取决于 `announce_result`。
 7. 调用频次主要改 `mode/{mode}/trigger/triggers.json` 中的 `condition.count`。
 8. `config/capabilities.yaml` 主要用于全局能力索引，不是运行时频次的实际来源。
-
