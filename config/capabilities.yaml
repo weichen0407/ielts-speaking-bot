@@ -25,12 +25,13 @@ modes:
     context_dir: mode/benative/context
     trigger_file: mode/benative/trigger/triggers.json
     cron_file: mode/benative/trigger/cron/cron.yaml
+    subagents: [benative_article, vocab, polisher, benative_review]
 
 subagents:
   vocab:
     scope: single_session
     prompt: subagent/single_session/vocab/context/vocab_subagent.md
-    trigger_ids: [freechat_vocab]
+    trigger_ids: [freechat_vocab, benative_vocab]
     execution_modes: [api, agentic]
     default_execution_mode: api
     tools:
@@ -42,7 +43,7 @@ subagents:
   polisher:
     scope: single_session
     prompt: subagent/single_session/polisher/context/polisher_subagent.md
-    trigger_ids: [freechat_polisher]
+    trigger_ids: [freechat_polisher, benative_polisher]
     execution_modes: [api, agentic]
     default_execution_mode: api
     tools:
@@ -51,6 +52,20 @@ subagents:
     writes:
       - persona/memory/MEMORY.md
       - persona/sessions/{session_uuid}/notes/polisher.md
+  benative_article:
+    scope: cross_session
+    prompt: subagent/cross_session/benative_article/context/benative_article_subagent.md
+    trigger_ids: [benative_article]
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [user_profile, wiki_query, thread_query, artifact_read]
+    writes:
+      - persona/benative/articles/{article_id}.json
+      - persona/benative/pairs/{article_id}.jsonl
+      - persona/benative/entities/{article_id}.jsonl
+      - persona/processor/benative/article.jsonl
   ielts_feedback:
     scope: single_session
     prompt: subagent/single_session/ielts_feedback/context/ielts_feedback_subagent.md
@@ -61,7 +76,13 @@ subagents:
     scope: single_session
     prompt: subagent/single_session/benative_review/context/benative_review_subagent.md
     trigger_ids: [benative_review]
+    execution_modes: [api, agentic]
+    default_execution_mode: api
+    tools:
+      api: []
+      agentic: [user_profile, wiki_query, thread_query, artifact_read]
     writes:
+      - persona/processor/benative/review.jsonl
       - persona/sessions/{session_uuid}/notes/benative_review.md
   memory_cron:
     scope: cross_session
@@ -75,21 +96,6 @@ subagents:
     trigger_ids: [daily_consolidator]
     writes:
       - subagent/cross_session/daily_consolidator/data/daily/daily_{date}.md
-  benative_article_fetcher:
-    scope: cross_session
-    prompt: subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md
-    trigger_ids: [benative_article_fetcher]
-    writes:
-      - persona/benative/articles/{article_id}.json
-      - persona/benative/.cursor_benative_articles.json
-  benative_translator:
-    scope: cross_session
-    prompt: subagent/cross_session/benative_translator/context/benative_translator_subagent.md
-    trigger_ids: [benative_translator]
-    writes:
-      - persona/benative/pairs/{article_id}.jsonl
-      - persona/benative/.cursor_benative_translator.json
-
 processors:
   wiki:
     path: subagent/cross_session/wiki/processor
@@ -99,10 +105,25 @@ processors:
     path: subagent/single_session/vocab/processor
     status: active
     output: persona/processor/freechat/vocab.jsonl
+    mode_outputs:
+      freechat: persona/processor/freechat/vocab.jsonl
+      benative: persona/processor/benative/vocab.jsonl
   polisher:
     path: subagent/single_session/polisher/processor
     status: active
     output: persona/processor/freechat/polisher.jsonl
+    mode_outputs:
+      freechat: persona/processor/freechat/polisher.jsonl
+      benative: persona/processor/benative/polisher.jsonl
+  benative_article:
+    path: subagent/cross_session/benative_article/processor
+    status: active
+    output: persona/processor/benative/article.jsonl
+    runtime_root: persona/benative
+  benative_review:
+    path: subagent/single_session/benative_review/processor
+    status: active
+    output: persona/processor/benative/review.jsonl
   progress_tracker:
     path: subagent/cross_session/progress_tracker/processor
     status: active
@@ -158,5 +179,11 @@ deprecated:
     progress_tracker:
       replacement: processors.progress_tracker
       reason: superseded by deterministic processor pipeline and processor cursor logs
+    benative_article_fetcher:
+      replacement: subagents.benative_article
+      reason: superseded by processor-mediated article preparation capability
+    benative_translator:
+      replacement: subagents.benative_article
+      reason: translation is now part of the Be Native article preparation capability
   wiki_sync:
     path: persona/wiki/state/sync_log.jsonl

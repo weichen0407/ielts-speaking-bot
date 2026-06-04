@@ -538,6 +538,8 @@ benative_review
 
 ### Step 6. Register Capabilities
 
+Status: done.
+
 Update:
 
 ```text
