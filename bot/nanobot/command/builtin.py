@@ -67,6 +67,12 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "star",
     ),
     BuiltinCommandSpec(
+        "/benative",
+        "Be Native",
+        "Practice Chinese-to-English reconstruction with article sentence pairs.",
+        "languages",
+    ),
+    BuiltinCommandSpec(
         "/stop",
         "Stop current task",
         "Cancel the active agent turn for this chat.",

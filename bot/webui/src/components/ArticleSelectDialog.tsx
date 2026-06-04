@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -45,6 +46,12 @@ export function ArticleSelectDialog({
           <DialogTitle className="text-lg font-semibold">
             {t("benative.selectArticle", "Select an Article to Practice")}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t(
+              "benative.hint",
+              "Practice translating Chinese to English sentence by sentence",
+            )}
+          </DialogDescription>
           <button
             onClick={() => onOpenChange(false)}
             className="rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100"
@@ -72,7 +79,10 @@ export function ArticleSelectDialog({
               <BookOpen className="mb-3 h-10 w-10 opacity-50" />
               <p>{t("benative.noArticles", "No articles available")}</p>
               <p className="mt-1 text-xs">
-                {t("benative.articlesFetched", "Articles are fetched daily at 12:00")}
+                {t(
+                  "benative.articlesFetched",
+                  "Add sources and let the Be Native Article processor generate sentence pairs.",
+                )}
               </p>
             </div>
           )}

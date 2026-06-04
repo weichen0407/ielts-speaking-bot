@@ -343,6 +343,33 @@ describe("App layout", () => {
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
   });
 
+  it("opens the Be Native article picker from the sidebar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/benative/articles")) {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => "application/json" },
+            json: async () => ({ articles: [] }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Be Native" }));
+
+    await waitFor(() => expect(createChatSpy).toHaveBeenCalled());
+    expect(await screen.findByText("Select an article to practice")).toBeInTheDocument();
+    expect(screen.getByText("No practice articles yet")).toBeInTheDocument();
+  });
+
   it("returns from settings to the blank start page when no session was active", async () => {
     mockSessions = [
       {

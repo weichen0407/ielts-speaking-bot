@@ -474,6 +474,20 @@ function Shell({
     setMobileSidebarOpen(false);
   }, []);
 
+  const onOpenBeNative = useCallback(async () => {
+    try {
+      if (!activeSession?.chatId) {
+        const chatId = await createChat();
+        setActiveKey(`websocket:${chatId}`);
+      }
+      setView("chat");
+      setBenativeArticleSelectOpen(true);
+      setMobileSidebarOpen(false);
+    } catch (e) {
+      console.error("Failed to open Be Native", e);
+    }
+  }, [activeSession?.chatId, createChat]);
+
   const onBackToChat = useCallback(() => {
     setView("chat");
     setMobileSidebarOpen(false);
@@ -643,6 +657,7 @@ function Shell({
     onOpenSettings,
     onOpenNotesBook,
     onOpenIeltsExam,
+    onOpenBeNative,
     onOpenWikiMemory: wikiMemory.open,
     onOpenMonitor,
   };

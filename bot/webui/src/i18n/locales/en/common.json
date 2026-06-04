@@ -46,6 +46,7 @@
     "home": "Home",
     "newChat": "New chat",
     "freeChat": "Free chat",
+    "beNative": "Be Native",
     "notesBook": "Notes Book",
     "searchAria": "Search chats",
     "searchPlaceholder": "Search chats",
@@ -442,6 +443,14 @@
   },
   "common": {
     "dismiss": "Dismiss"
+  },
+  "benative": {
+    "selectArticle": "Select an article to practice",
+    "noArticles": "No practice articles yet",
+    "articlesFetched": "Let the Be Native Article processor turn sources into sentence pairs first.",
+    "sentences": "sentences",
+    "sentenceProgress": "Sentence",
+    "hint": "Read Chinese sentence by sentence and reconstruct it in natural English"
   },
   "errors": {
     "messageTooBig": {

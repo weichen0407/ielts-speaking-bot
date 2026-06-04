@@ -34,6 +34,7 @@
     "home": "首页",
     "newChat": "新建对话",
     "freeChat": "自由对话",
+    "beNative": "Be Native",
     "notesBook": "笔记本",
     "searchAria": "搜索会话",
     "searchPlaceholder": "搜索会话",
@@ -399,6 +400,14 @@
   },
   "common": {
     "dismiss": "关闭"
+  },
+  "benative": {
+    "selectArticle": "选择练习文章",
+    "noArticles": "还没有可练习的文章",
+    "articlesFetched": "请先让 Be Native Article processor 把 sources 处理成句子对。",
+    "sentences": "句",
+    "sentenceProgress": "句子",
+    "hint": "逐句看中文，用自然英文重构表达"
   },
   "errors": {
     "messageTooBig": {

@@ -146,6 +146,13 @@ def test_model_command_in_help_and_palette() -> None:
     assert "/model [preset]" in build_help_text()
 
 
+def test_benative_command_in_help_and_palette() -> None:
+    palette = builtin_command_palette()
+
+    assert any(item["command"] == "/benative" and item["title"] == "Be Native" for item in palette)
+    assert "/benative" in build_help_text()
+
+
 @pytest.mark.asyncio
 async def test_goal_command_shows_usage_without_args(tmp_path) -> None:
     loop = _make_loop(tmp_path)
