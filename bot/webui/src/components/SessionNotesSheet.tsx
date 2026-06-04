@@ -32,13 +32,25 @@ export function SessionNotesSheet({
     open,
   );
   const [activeTab, setActiveTab] = React.useState<Tab>("vocab");
+  const isBenative = notes.mode === "benative";
+  const availableTabs = React.useMemo<Tab[]>(
+    () => (isBenative ? ["review"] : ["vocab", "polisher"]),
+    [isBenative],
+  );
+  const hasAnyNotes = Boolean(notes.vocab || notes.polisher || notes.review);
 
-  // Reset to vocab tab when sheet opens or session changes
+  // Reset to the mode-appropriate tab when sheet opens or session changes.
   React.useEffect(() => {
     if (open) {
-      setActiveTab("vocab");
+      setActiveTab(isBenative ? "review" : "vocab");
     }
-  }, [open, sessionKey]);
+  }, [open, sessionKey, isBenative]);
+
+  React.useEffect(() => {
+    if (!availableTabs.includes(activeTab)) {
+      setActiveTab(availableTabs[0]);
+    }
+  }, [activeTab, availableTabs]);
 
   const renderContent = () => {
     if (loading && !notes.vocab && !notes.polisher && !notes.review) {
@@ -92,43 +104,30 @@ export function SessionNotesSheet({
           <SheetTitle className="text-base font-semibold" id="session-notes-title">
             {sessionTitle || t("notes.title", "Session Notes")}
           </SheetTitle>
-          {loading && notes.vocab && (
+          {loading && hasAnyNotes && (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           )}
         </SheetHeader>
 
         <div className="flex gap-1 border-b border-border/50">
-          <button
-            onClick={() => setActiveTab("vocab")}
-            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "vocab"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <BookOpen className="h-4 w-4" />
-            {t("notes.vocabulary", "Vocabulary")}
-          </button>
-          <button
-            onClick={() => setActiveTab("polisher")}
-            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "polisher"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t("notes.grammar", "Grammar")}
-          </button>
-          <button
-            onClick={() => setActiveTab("review")}
-            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
-              activeTab === "review"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t("notes.review", "Review")}
-          </button>
+          {availableTabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+                activeTab === tab
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {tab === "vocab" ? <BookOpen className="h-4 w-4" /> : null}
+              {tab === "vocab"
+                ? t("notes.vocabulary", "Vocabulary")
+                : tab === "polisher"
+                  ? t("notes.grammar", "Grammar")
+                  : t("notes.review", "Review")}
+            </button>
+          ))}
         </div>
 
         <div className="mt-4 flex-1 overflow-y-auto pr-2">

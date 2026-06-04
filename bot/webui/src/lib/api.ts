@@ -112,6 +112,7 @@ export interface SessionNotes {
   vocab: string;
   polisher: string;
   review?: string;
+  mode?: string;
 }
 
 export async function fetchSessionNotes(

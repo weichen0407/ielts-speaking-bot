@@ -37,7 +37,7 @@ def test_freechat_registers_middleware_gated_subagents() -> None:
         assert tools[name]["scope"] == "read_only"
 
 
-def test_benative_registers_four_middleware_capabilities() -> None:
+def test_benative_registers_article_and_review_capabilities() -> None:
     root = Path(__file__).resolve().parents[3]
 
     capabilities = load_capabilities(root)
@@ -45,16 +45,14 @@ def test_benative_registers_four_middleware_capabilities() -> None:
     benative = capabilities["modes"]["benative"]
     assert benative["subagents"] == [
         "benative_article",
-        "vocab",
-        "polisher",
         "benative_review",
     ]
 
     vocab = capabilities["subagents"]["vocab"]
-    assert "benative_vocab" in vocab["trigger_ids"]
+    assert "benative_vocab" not in vocab["trigger_ids"]
 
     polisher = capabilities["subagents"]["polisher"]
-    assert "benative_polisher" in polisher["trigger_ids"]
+    assert "benative_polisher" not in polisher["trigger_ids"]
 
     article = capabilities["subagents"]["benative_article"]
     assert article["scope"] == "cross_session"
@@ -79,8 +77,8 @@ def test_benative_registers_four_middleware_capabilities() -> None:
     processors = capabilities["processors"]
     assert processors["benative_article"]["output"] == "persona/processor/benative/article.jsonl"
     assert processors["benative_review"]["output"] == "persona/processor/benative/review.jsonl"
-    assert processors["vocab"]["mode_outputs"]["benative"] == "persona/processor/benative/vocab.jsonl"
-    assert processors["polisher"]["mode_outputs"]["benative"] == "persona/processor/benative/polisher.jsonl"
+    assert "benative" not in processors["vocab"]["mode_outputs"]
+    assert "benative" not in processors["polisher"]["mode_outputs"]
 
     deprecated = capabilities["deprecated"]["subagents"]
     assert deprecated["benative_article_fetcher"]["replacement"] == "subagents.benative_article"

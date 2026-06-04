@@ -30,7 +30,7 @@
     {
       "id": "benative_vocab",
       "name": "Be Native Vocab",
-      "enabled": true,
+      "enabled": false,
       "condition": {
         "kind": "file_line_count",
         "count": 1,
@@ -56,7 +56,7 @@
     {
       "id": "benative_polisher",
       "name": "Be Native Polisher",
-      "enabled": true,
+      "enabled": false,
       "condition": {
         "kind": "file_line_count",
         "count": 1,
@@ -96,7 +96,6 @@
         "execution_mode": "api",
         "agentic": false,
         "tools": [],
-        "depends_on": "benative_polisher",
         "input_path": "persona/benative/events/responses.jsonl",
         "output_path": "persona/processor/benative/review.jsonl",
         "batch_size": 20,

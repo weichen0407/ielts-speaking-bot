@@ -1472,6 +1472,7 @@ class WebSocketChannel(BaseChannel):
         notes = self._session_manager.get_session_notes(decoded_key)
         try:
             session = self._session_manager.get_or_create(decoded_key)
+            notes["mode"] = session.metadata.get("mode") or ""
             if session.metadata.get("mode") == "benative":
                 root = self._project_root()
                 processor_dir = root / "persona" / "processor" / "benative"

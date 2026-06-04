@@ -4,7 +4,7 @@ from pathlib import Path
 from nanobot.counter.types import CounterTrigger
 
 
-def test_benative_triggers_register_four_middleware_subagents() -> None:
+def test_benative_triggers_run_review_once_per_response() -> None:
     root = Path(__file__).resolve().parents[3]
     config = json.loads((root / "mode" / "benative" / "trigger" / "triggers.json").read_text())
 
@@ -23,15 +23,13 @@ def test_benative_triggers_register_four_middleware_subagents() -> None:
     assert by_id["benative_article"].target.subagent == "benative_article"
     assert by_id["benative_article"].target.input_path == "persona/benative/sources/index.jsonl"
 
-    assert by_id["benative_vocab"].target.processor == "vocab"
-    assert by_id["benative_vocab"].target.subagent == "vocab"
-    assert by_id["benative_vocab"].target.output_path == "persona/processor/benative/vocab.jsonl"
+    assert by_id["benative_vocab"].enabled is False
 
-    assert by_id["benative_polisher"].target.processor == "polisher"
-    assert by_id["benative_polisher"].target.depends_on == "benative_vocab"
+    assert by_id["benative_polisher"].enabled is False
 
     assert by_id["benative_review"].target.processor == "benative_review"
-    assert by_id["benative_review"].target.depends_on == "benative_polisher"
+    assert by_id["benative_review"].target.depends_on is None
+    assert by_id["benative_review"].condition.count == 1
 
     for trigger in triggers:
         assert trigger.condition.kind == "file_line_count"

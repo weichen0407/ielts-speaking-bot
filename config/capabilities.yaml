@@ -25,13 +25,13 @@ modes:
     context_dir: mode/benative/context
     trigger_file: mode/benative/trigger/triggers.json
     cron_file: mode/benative/trigger/cron/cron.yaml
-    subagents: [benative_article, vocab, polisher, benative_review]
+    subagents: [benative_article, benative_review]
 
 subagents:
   vocab:
     scope: single_session
     prompt: subagent/single_session/vocab/context/vocab_subagent.md
-    trigger_ids: [freechat_vocab, benative_vocab]
+    trigger_ids: [freechat_vocab]
     execution_modes: [api, agentic]
     default_execution_mode: api
     tools:
@@ -43,7 +43,7 @@ subagents:
   polisher:
     scope: single_session
     prompt: subagent/single_session/polisher/context/polisher_subagent.md
-    trigger_ids: [freechat_polisher, benative_polisher]
+    trigger_ids: [freechat_polisher]
     execution_modes: [api, agentic]
     default_execution_mode: api
     tools:
@@ -107,14 +107,12 @@ processors:
     output: persona/processor/freechat/vocab.jsonl
     mode_outputs:
       freechat: persona/processor/freechat/vocab.jsonl
-      benative: persona/processor/benative/vocab.jsonl
   polisher:
     path: subagent/single_session/polisher/processor
     status: active
     output: persona/processor/freechat/polisher.jsonl
     mode_outputs:
       freechat: persona/processor/freechat/polisher.jsonl
-      benative: persona/processor/benative/polisher.jsonl
   benative_article:
     path: subagent/cross_session/benative_article/processor
     status: active
