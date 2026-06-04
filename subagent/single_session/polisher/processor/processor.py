@@ -16,6 +16,18 @@ class PolisherProcessor(BaseDataProcessor[PolisherInput, PolisherOutput]):
     def get_output_schema(self) -> type[PolisherOutput]:
         return PolisherOutput
 
+    def _filter_fields(self, item: dict) -> dict:
+        """Adapt both thread events and Be Native response events."""
+        result = super()._filter_fields(item)
+        if "user_en" in item and "content" not in result:
+            result["content"] = item.get("user_en", "")
+            result["role"] = "user"
+        if "article_id" in item and "topic" not in result:
+            result["topic"] = item.get("article_id")
+        if "mode" not in result and "user_en" in item:
+            result["mode"] = "benative"
+        return result
+
     def get_system_prompt(self) -> str:
         return r"""You are the polisher subagent for freechat English learning.
 Your job is sentence-level improvement: grammar, sentence structure, word order, natural phrasing, fluency, coherence, and spoken-English clarity.

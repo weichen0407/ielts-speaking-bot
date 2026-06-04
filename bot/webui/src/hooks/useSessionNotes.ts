@@ -16,7 +16,7 @@ export function useSessionNotes(
   refresh: () => void;
 } {
   const { token } = useClient();
-  const [notes, setNotes] = useState<SessionNotes>({ vocab: "", polisher: "" });
+  const [notes, setNotes] = useState<SessionNotes>({ vocab: "", polisher: "", review: "" });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -40,7 +40,7 @@ export function useSessionNotes(
 
   useEffect(() => {
     if (!enabled || !sessionKey) {
-      setNotes({ vocab: "", polisher: "" });
+      setNotes({ vocab: "", polisher: "", review: "" });
       setError(null);
       return;
     }

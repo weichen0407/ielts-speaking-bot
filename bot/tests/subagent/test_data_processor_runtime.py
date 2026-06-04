@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.providers.base import LLMResponse
+from subagent.single_session.polisher.processor.processor import PolisherProcessor
 from subagent.single_session.vocab.processor.processor import VocabProcessor
 
 
@@ -89,6 +90,29 @@ def test_processor_middleware_input_and_output_defaults(tmp_path: Path) -> None:
     assert "用户说: I like basketball very much." in subagent_input
     assert len(parsed) == 1
     assert parsed[0].improved == "a lot"
+
+
+def test_vocab_and_polisher_accept_benative_response_events() -> None:
+    row = {
+        "session_uuid": "session-1",
+        "article_id": "paris_football_trip_001",
+        "sentence_index": 0,
+        "zh": "巴黎以博物馆和咖啡馆闻名。",
+        "standard_en": "Paris is famous for museums and cafes.",
+        "user_en": "paris is a famous for museum and cafe.",
+    }
+
+    vocab_processed = VocabProcessor().preprocess([row])
+    polisher_processed = PolisherProcessor().preprocess([row])
+
+    assert len(vocab_processed) == 1
+    assert vocab_processed[0].role == "user"
+    assert vocab_processed[0].content == "paris is a famous for museum and cafe."
+    assert vocab_processed[0].topic == "paris_football_trip_001"
+    assert vocab_processed[0].mode == "benative"
+    assert len(polisher_processed) == 1
+    assert polisher_processed[0].role == "user"
+    assert polisher_processed[0].content == "paris is a famous for museum and cafe."
 
 
 def test_vocab_processor_sync_process_all_writes_outputs(tmp_path: Path) -> None:

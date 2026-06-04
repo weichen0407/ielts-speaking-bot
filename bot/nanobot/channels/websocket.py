@@ -1470,6 +1470,23 @@ class WebSocketChannel(BaseChannel):
         if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         notes = self._session_manager.get_session_notes(decoded_key)
+        try:
+            session = self._session_manager.get_or_create(decoded_key)
+            if session.metadata.get("mode") == "benative":
+                root = self._project_root()
+                processor_dir = root / "persona" / "processor" / "benative"
+                for key_name, file_name in (
+                    ("vocab", "vocab.md"),
+                    ("polisher", "polisher.md"),
+                    ("review", "review.md"),
+                ):
+                    path = processor_dir / file_name
+                    if path.exists():
+                        notes[key_name] = path.read_text(encoding="utf-8")
+                    else:
+                        notes.setdefault(key_name, "")
+        except Exception as e:
+            logger.debug("failed to load benative processor notes: {}", e)
         # Return empty if no notes found (session might not exist or have no notes yet)
         return _http_json_response(notes)
 

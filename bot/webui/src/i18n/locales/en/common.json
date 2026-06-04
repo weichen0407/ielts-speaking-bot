@@ -184,8 +184,10 @@
     "title": "Session Notes",
     "vocabulary": "Vocabulary",
     "grammar": "Grammar",
+    "review": "Review",
     "emptyVocab": "No vocabulary notes yet",
     "emptyGrammar": "No grammar notes yet",
+    "emptyReview": "No review notes yet",
     "openNotes": "Open notes",
     "hint": "Use ==word== to highlight keywords",
     "close": "Close"

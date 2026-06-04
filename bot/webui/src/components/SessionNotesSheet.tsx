@@ -18,7 +18,7 @@ interface SessionNotesSheetProps {
   sessionTitle?: string;
 }
 
-type Tab = "vocab" | "polisher";
+type Tab = "vocab" | "polisher" | "review";
 
 export function SessionNotesSheet({
   open,
@@ -41,7 +41,7 @@ export function SessionNotesSheet({
   }, [open, sessionKey]);
 
   const renderContent = () => {
-    if (loading && !notes.vocab && !notes.polisher) {
+    if (loading && !notes.vocab && !notes.polisher && !notes.review) {
       return (
         <div className="flex flex-1 items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -57,7 +57,12 @@ export function SessionNotesSheet({
       );
     }
 
-    const content = activeTab === "vocab" ? notes.vocab : notes.polisher;
+    const content =
+      activeTab === "vocab"
+        ? notes.vocab
+        : activeTab === "polisher"
+          ? notes.polisher
+          : notes.review;
 
     if (!content || content.trim() === "") {
       return (
@@ -65,7 +70,9 @@ export function SessionNotesSheet({
           <BookOpen className="mr-2 h-4 w-4" />
           {activeTab === "vocab"
             ? t("notes.emptyVocab", "No vocabulary notes yet")
-            : t("notes.emptyGrammar", "No grammar notes yet")}
+            : activeTab === "polisher"
+              ? t("notes.emptyGrammar", "No grammar notes yet")
+              : t("notes.emptyReview", "No review notes yet")}
         </div>
       );
     }
@@ -111,6 +118,16 @@ export function SessionNotesSheet({
             }`}
           >
             {t("notes.grammar", "Grammar")}
+          </button>
+          <button
+            onClick={() => setActiveTab("review")}
+            className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              activeTab === "review"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t("notes.review", "Review")}
           </button>
         </div>
 

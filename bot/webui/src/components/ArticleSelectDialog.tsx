@@ -41,12 +41,16 @@ export function ArticleSelectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <DialogContent
+        aria-describedby="article-select-description"
+        aria-labelledby="article-select-title"
+        className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col"
+      >
         <DialogHeader className="flex-row items-center justify-between space-y-0">
-          <DialogTitle className="text-lg font-semibold">
+          <DialogTitle className="text-lg font-semibold" id="article-select-title">
             {t("benative.selectArticle", "Select an Article to Practice")}
           </DialogTitle>
-          <DialogDescription className="sr-only">
+          <DialogDescription className="sr-only" id="article-select-description">
             {t(
               "benative.hint",
               "Practice translating Chinese to English sentence by sentence",

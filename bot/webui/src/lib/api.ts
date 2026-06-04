@@ -111,6 +111,7 @@ export async function deleteSession(
 export interface SessionNotes {
   vocab: string;
   polisher: string;
+  review?: string;
 }
 
 export async function fetchSessionNotes(
