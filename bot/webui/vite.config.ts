@@ -4,7 +4,7 @@ import path from "node:path";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, ".."), "");
-  const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
+  const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:18790";
   const wsTarget = target.replace(/^http/, "ws");
 
   return {
