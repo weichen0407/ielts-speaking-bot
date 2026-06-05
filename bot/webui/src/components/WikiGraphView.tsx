@@ -17,9 +17,11 @@ import { fetchWikiGraph, type WikiGraphNode } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
 
-type GraphKind = WikiGraphNode["kind"];
+type GraphKind = WikiGraphNode["kind"] | "root";
+type GraphLayout = "overview" | "hierarchy";
 
-interface GraphNode extends WikiGraphNode, SimulationNodeDatum {
+interface GraphNode extends Omit<WikiGraphNode, "kind">, SimulationNodeDatum {
+  kind: GraphKind;
   degree: number;
 }
 
@@ -53,6 +55,7 @@ export interface WikiGraphViewProps {
 }
 
 const COLORS: Record<GraphKind, string> = {
+  root: "#111827",
   page: "#2563eb",
   domain: "#0f172a",
   topic: "#0f766e",
@@ -73,6 +76,7 @@ const TYPE_COLORS: Record<string, string> = {
 };
 
 function edgeColor(kind: string): string {
+  if (kind === "root") return "rgba(17,24,39,0.26)";
   if (kind === "link") return "rgba(71,85,105,0.36)";
   if (kind === "has_domain") return "rgba(15,23,42,0.28)";
   if (kind === "has_topic" || kind === "contains_topic") return "rgba(15,118,110,0.30)";
@@ -101,6 +105,75 @@ function topicAnchors(nodes: GraphNode[], width: number, height: number): Map<st
     });
   });
   return anchors;
+}
+
+function hierarchyLayer(node: GraphNode): number {
+  if (node.kind === "root") return 0;
+  if (node.kind === "domain") return 1;
+  if (node.kind === "topic") return 2;
+  if (node.kind === "entity" || node.kind === "concept") return 3;
+  return 4;
+}
+
+function hierarchyTargets(nodes: GraphNode[], width: number, height: number): Map<string, { x: number; y: number }> {
+  const byLayer = new Map<number, GraphNode[]>();
+  for (const node of nodes) {
+    const layer = hierarchyLayer(node);
+    const items = byLayer.get(layer) ?? [];
+    items.push(node);
+    byLayer.set(layer, items);
+  }
+
+  const targets = new Map<string, { x: number; y: number }>();
+  const maxLayer = Math.max(...Array.from(byLayer.keys()), 4);
+  const top = 54;
+  const bottom = 54;
+  const usableHeight = Math.max(180, height - top - bottom);
+
+  for (const [layer, layerNodes] of byLayer.entries()) {
+    const sorted = [...layerNodes].sort((a, b) => a.label.localeCompare(b.label));
+    const y = top + (usableHeight * layer) / Math.max(1, maxLayer);
+    sorted.forEach((node, index) => {
+      const x = (width * (index + 1)) / (sorted.length + 1);
+      targets.set(node.id, { x, y });
+    });
+  }
+
+  return targets;
+}
+
+function withHierarchyRoot(data: GraphData): GraphData {
+  if (data.nodes.length === 0 || data.nodes.some((node) => node.kind === "root")) return data;
+
+  const primaryChildren = data.nodes.filter((node) => node.kind === "domain");
+  const fallbackChildren = primaryChildren.length > 0
+    ? primaryChildren
+    : data.nodes.filter((node) => node.kind === "topic");
+  const rootTargets = fallbackChildren.length > 0
+    ? fallbackChildren
+    : data.nodes.filter((node) => node.kind === "page").slice(0, 8);
+
+  const rootNode: GraphNode = {
+    id: "__wiki_root__",
+    label: "All Wiki",
+    kind: "root",
+    degree: rootTargets.length,
+    size: 18,
+    tags: [],
+    topics: [],
+  };
+
+  return {
+    nodes: [rootNode, ...data.nodes],
+    links: [
+      ...rootTargets.map((node) => ({
+        source: rootNode.id,
+        target: node.id,
+        kind: "root",
+      })),
+      ...data.links,
+    ],
+  };
 }
 
 function topicAnchorForNode(
@@ -167,6 +240,7 @@ export function WikiGraphView({
 
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [dimensions, setDimensions] = useState({ width: 640, height: 420 });
+  const [layoutMode, setLayoutMode] = useState<GraphLayout>("hierarchy");
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -226,6 +300,7 @@ export function WikiGraphView({
   }, [highlightedNodes]);
 
   const getNodeRadius = useCallback((node: GraphNode): number => {
+    if (node.kind === "root") return 30;
     if (node.kind === "domain") return Math.min(40, 22 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 3);
     if (node.kind === "topic") return Math.min(34, 18 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 3);
     if (node.kind === "entity") return Math.min(22, 9 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 2.2);
@@ -333,20 +408,25 @@ export function WikiGraphView({
   }, [draw, selectedNode]);
 
   useEffect(() => {
-    graphRef.current = graphData;
+    const currentGraphData = layoutMode === "hierarchy" ? withHierarchyRoot(graphData) : graphData;
+    graphRef.current = currentGraphData;
     simulationRef.current?.stop();
 
-    if (graphData.nodes.length === 0) {
+    if (currentGraphData.nodes.length === 0) {
       draw();
       return;
     }
 
-    const topicPositions = topicAnchors(graphData.nodes, dimensions.width, dimensions.height);
-    const nodes = graphData.nodes.map((node, index) => ({
+    const topicPositions = topicAnchors(currentGraphData.nodes, dimensions.width, dimensions.height);
+    const layerPositions = layoutMode === "hierarchy"
+      ? hierarchyTargets(currentGraphData.nodes, dimensions.width, dimensions.height)
+      : new Map<string, { x: number; y: number }>();
+    const nodes = currentGraphData.nodes.map((node, index) => ({
       ...node,
-      ...initialNodePosition(node, index, topicPositions, dimensions.width, dimensions.height, graphData.links),
+      ...(layerPositions.get(node.id)
+        ?? initialNodePosition(node, index, topicPositions, dimensions.width, dimensions.height, currentGraphData.links)),
     }));
-    const links = graphData.links.map((link) => ({ ...link }));
+    const links = currentGraphData.links.map((link) => ({ ...link }));
     graphRef.current = { nodes, links };
 
     const simulation = forceSimulation<GraphNode>(nodes)
@@ -354,21 +434,40 @@ export function WikiGraphView({
         "link",
         forceLink<GraphNode, GraphLink>(links)
           .id((node) => node.id)
-          .distance((link) => link.kind === "has_domain" ? 132 : link.kind === "has_topic" || link.kind === "contains_topic" ? 118 : link.kind === "link" ? 92 : 72)
-          .strength((link) => link.kind === "has_domain" ? 0.22 : link.kind === "has_topic" || link.kind === "contains_topic" ? 0.2 : link.kind === "link" ? 0.16 : 0.14),
+          .distance((link) => {
+            if (layoutMode === "hierarchy") return link.kind === "root" ? 120 : 82;
+            return link.kind === "has_domain" ? 132 : link.kind === "has_topic" || link.kind === "contains_topic" ? 118 : link.kind === "link" ? 92 : 72;
+          })
+          .strength((link) => {
+            if (layoutMode === "hierarchy") return link.kind === "root" ? 0.26 : 0.12;
+            return link.kind === "has_domain" ? 0.22 : link.kind === "has_topic" || link.kind === "contains_topic" ? 0.2 : link.kind === "link" ? 0.16 : 0.14;
+          }),
       )
-      .force("charge", forceManyBody<GraphNode>().strength((node) => node.kind === "domain" ? -430 : node.kind === "topic" ? -360 : node.kind === "page" ? -80 : -55))
+      .force("charge", forceManyBody<GraphNode>().strength((node) => {
+        if (layoutMode === "hierarchy") return node.kind === "root" ? -180 : node.kind === "domain" || node.kind === "topic" ? -120 : -55;
+        return node.kind === "domain" ? -430 : node.kind === "topic" ? -360 : node.kind === "page" ? -80 : -55;
+      }))
       .force("x", forceX<GraphNode>((node) => {
+        const target = layerPositions.get(node.id);
+        if (target) return target.x;
         if (node.kind === "domain" || node.kind === "topic") return topicPositions.get(node.id)?.x ?? dimensions.width / 2;
-        const anchor = topicAnchorForNode(node, graphData.links, topicPositions);
+        const anchor = topicAnchorForNode(node, currentGraphData.links, topicPositions);
         return anchor?.x ?? dimensions.width / 2;
-      }).strength((node) => node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055))
+      }).strength((node) => {
+        if (layoutMode === "hierarchy") return node.kind === "root" ? 0.65 : 0.34;
+        return node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055;
+      }))
       .force("y", forceY<GraphNode>((node) => {
+        const target = layerPositions.get(node.id);
+        if (target) return target.y;
         if (node.kind === "domain" || node.kind === "topic") return topicPositions.get(node.id)?.y ?? dimensions.height / 2;
-        const anchor = topicAnchorForNode(node, graphData.links, topicPositions);
+        const anchor = topicAnchorForNode(node, currentGraphData.links, topicPositions);
         return anchor?.y ?? dimensions.height / 2;
-      }).strength((node) => node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055))
-      .force("collide", forceCollide<GraphNode>().radius((node) => getNodeRadius(node) + (node.kind === "domain" ? 34 : node.kind === "topic" ? 30 : 12)))
+      }).strength((node) => {
+        if (layoutMode === "hierarchy") return node.kind === "root" ? 0.8 : 0.54;
+        return node.kind === "domain" ? 0.24 : node.kind === "topic" ? 0.18 : 0.055;
+      }))
+      .force("collide", forceCollide<GraphNode>().radius((node) => getNodeRadius(node) + (layoutMode === "hierarchy" ? 18 : node.kind === "domain" ? 34 : node.kind === "topic" ? 30 : 12)))
       .alpha(0.55)
       .alphaDecay(0.055)
       .velocityDecay(0.58)
@@ -381,7 +480,7 @@ export function WikiGraphView({
     return () => {
       simulation.stop();
     };
-  }, [dimensions.height, dimensions.width, draw, getNodeRadius, graphData]);
+  }, [dimensions.height, dimensions.width, draw, getNodeRadius, graphData, layoutMode]);
 
   useEffect(() => {
     draw();
@@ -418,7 +517,7 @@ export function WikiGraphView({
   const handleNodeActivate = useCallback((node: GraphNode) => {
     selectedNodeRef.current = node;
     setSelectedNode(node);
-    if (node.kind === "page") {
+    if (node.kind === "page" && node.id !== "__wiki_root__") {
       onPageClick?.(node.id);
       return;
     }
@@ -552,13 +651,14 @@ export function WikiGraphView({
   }, [draw]);
 
   const legend = useMemo(() => [
+    ...(layoutMode === "hierarchy" ? [["all", COLORS.root]] : []),
     ["domain", COLORS.domain],
     ["topic cluster", COLORS.topic],
     ["entity", COLORS.entity],
     ["concept", COLORS.concept],
     ["decision page", TYPE_COLORS.decision],
     ["gap page", TYPE_COLORS.gap],
-  ], []);
+  ], [layoutMode]);
 
   return (
     <div ref={containerRef} className={cn("relative min-h-[280px] overflow-hidden rounded-md bg-slate-50", className)}>
@@ -579,6 +679,25 @@ export function WikiGraphView({
           <Button variant="outline" size="icon" className="h-7 w-7 bg-background/90" onClick={resetView} title="Reset">
             <RotateCcw className="h-3 w-3" />
           </Button>
+        </div>
+      ) : null}
+
+      {interactive ? (
+        <div className="absolute left-2 top-2 z-10 flex rounded-md border bg-background/90 p-1 shadow-sm">
+          {([
+            ["hierarchy", "层级"],
+            ["overview", "总览"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              variant={layoutMode === value ? "secondary" : "ghost"}
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => setLayoutMode(value)}
+            >
+              {label}
+            </Button>
+          ))}
         </div>
       ) : null}
 
