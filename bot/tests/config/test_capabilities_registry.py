@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from nanobot.config.capabilities import load_capabilities
+from nanobot.config.capabilities import load_capabilities, wiki_mode_allowed, wiki_sync_allowed_modes
 
 
 def test_freechat_registers_middleware_gated_subagents() -> None:
@@ -35,6 +35,19 @@ def test_freechat_registers_middleware_gated_subagents() -> None:
     tools = capabilities["tools"]
     for name in ["thread_query", "artifact_read", "user_profile", "wiki_query"]:
         assert tools[name]["scope"] == "read_only"
+
+
+def test_wiki_sync_defaults_to_freechat_only() -> None:
+    root = Path(__file__).resolve().parents[3]
+
+    capabilities = load_capabilities(root)
+
+    sync = capabilities["processors"]["wiki"]["sync"]
+    assert sync["source"] == "persona/events/thread.jsonl"
+    assert sync["allowed_modes"] == ["freechat"]
+    assert wiki_sync_allowed_modes(root) == {"freechat"}
+    assert wiki_mode_allowed("freechat", root) is True
+    assert wiki_mode_allowed("benative", root) is False
 
 
 def test_benative_registers_article_and_review_capabilities() -> None:

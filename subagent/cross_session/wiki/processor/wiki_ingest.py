@@ -96,7 +96,7 @@ class WikiIngestor:
     ) -> WikiIngestBatch:
         """Read new thread events, persist them under raw/thread, and return a batch."""
 
-        thread_path = self._thread_path()
+        thread_path = self.workspace / "persona" / "events" / "thread.jsonl"
         cursor = self._read_cursor()
         if session_id:
             per_session = cursor.get("thread_line_by_session")
@@ -227,13 +227,6 @@ class WikiIngestor:
             )
 
         return WikiIngestAnalysis(batch=batch, candidates=_dedupe_candidates(candidates))
-
-    def _thread_path(self) -> Path:
-        """Return the current unified thread log path, with legacy fallback."""
-        current = self.workspace / "persona" / "events" / "thread.jsonl"
-        if current.exists():
-            return current
-        return self.workspace / "data" / "thread.jsonl"
 
     def _message_from_event(self, line_no: int, event: dict[str, Any]) -> IngestMessage | None:
         role = event.get("role")

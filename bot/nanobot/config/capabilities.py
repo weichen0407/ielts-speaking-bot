@@ -7,6 +7,7 @@ places.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,46 @@ def load_capabilities(root: Path | str | None = None) -> dict[str, Any]:
         return {}
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     return data if isinstance(data, dict) else {}
+
+
+def wiki_sync_allowed_modes(root: Path | str | None = None) -> set[str]:
+    """Return modes allowed to feed LLM Wiki memory.
+
+    ``NANOBOT_WIKI_SYNC_MODES`` is an operational override. The project default
+    lives in ``config/capabilities.yaml`` under
+    ``processors.wiki.sync.allowed_modes``. An empty set means all modes.
+    """
+    env_value = os.environ.get("NANOBOT_WIKI_SYNC_MODES")
+    if env_value is not None:
+        return _parse_mode_set(env_value, default={"freechat"})
+
+    capabilities = load_capabilities(root)
+    processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
+    wiki = processors.get("wiki") if isinstance(processors.get("wiki"), dict) else {}
+    sync = wiki.get("sync") if isinstance(wiki.get("sync"), dict) else {}
+    raw = sync.get("allowed_modes")
+    return _parse_mode_set(raw, default={"freechat"})
+
+
+def wiki_mode_allowed(mode: str | None, root: Path | str | None = None) -> bool:
+    allowed = wiki_sync_allowed_modes(root)
+    if not allowed:
+        return True
+    return (mode or "freechat").lower() in allowed
+
+
+def _parse_mode_set(raw: Any, *, default: set[str]) -> set[str]:
+    if isinstance(raw, str):
+        items = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    elif isinstance(raw, list):
+        items = [str(item).strip().lower() for item in raw if str(item).strip()]
+    else:
+        items = []
+    if not items:
+        return set(default)
+    if "all" in items or "*" in items:
+        return set()
+    return set(items)
 
 
 def _resolve_existing(root: Path, raw: str | None) -> Path | None:

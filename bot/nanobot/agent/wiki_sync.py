@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from nanobot.config.capabilities import wiki_sync_allowed_modes
+
 
 async def sync_session_to_wiki(
     session_key: str,
@@ -52,7 +54,7 @@ async def sync_session_to_wiki(
         "llm_extractor_enabled": False,
         "llm_candidates": 0,
         "topic_review_items": 0,
-        "allowed_modes": sorted(_allowed_modes()),
+        "allowed_modes": sorted(wiki_sync_allowed_modes(workspace)),
     }
 
     try:
@@ -61,7 +63,7 @@ async def sync_session_to_wiki(
             session_id=session_key,
             limit=40,
             advance_cursor=True,
-            allowed_modes=_allowed_modes(),
+            allowed_modes=wiki_sync_allowed_modes(workspace),
         )
         analysis = ingestor.analyze(batch)
         if _should_run_llm_extractor(provider, batch.messages):
@@ -139,16 +141,6 @@ def _should_run_llm_extractor(provider: Any | None, messages: list[Any]) -> bool
     flag = os.environ.get("NANOBOT_WIKI_LLM_EXTRACTOR", "").strip().lower()
     enabled = flag in {"1", "true", "yes", "on"}
     return bool(enabled and provider is not None and messages)
-
-
-def _allowed_modes() -> set[str]:
-    raw = os.environ.get("NANOBOT_WIKI_SYNC_MODES", "freechat").strip()
-    allowed = {item.strip().lower() for item in raw.split(",") if item.strip()}
-    if not allowed:
-        return {"freechat"}
-    if "all" in allowed or "*" in allowed:
-        return set()
-    return allowed
 
 
 def _merge_candidates(*groups):

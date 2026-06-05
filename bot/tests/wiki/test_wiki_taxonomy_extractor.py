@@ -160,18 +160,18 @@ def test_topic_review_queue_merges_repeated_suggestions(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_wiki_sync_optionally_runs_taxonomy_extractor(tmp_path: Path, monkeypatch) -> None:
     session_uuid = "travel-football-session"
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
+    data_dir = tmp_path / "persona" / "events"
+    data_dir.mkdir(parents=True)
     events = [
         {
             "id": "m1",
-            "source": {"session_uuid": session_uuid, "message_index": 1},
+            "source": {"mode": "freechat", "session_uuid": session_uuid, "message_index": 1},
             "role": "user",
             "content": {"type": "text", "text": "I really like basketball."},
         },
         {
             "id": "m2",
-            "source": {"session_uuid": session_uuid, "message_index": 2},
+            "source": {"mode": "freechat", "session_uuid": session_uuid, "message_index": 2},
             "role": "user",
             "content": {"type": "text", "text": "My favorite club is Arsenal."},
         },

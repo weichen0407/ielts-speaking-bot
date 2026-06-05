@@ -32,6 +32,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.config.capabilities import wiki_mode_allowed
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.counter.engine import CounterEngine
 from nanobot.counter.types import CounterTrigger
@@ -67,17 +68,6 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
-
-
-def _wiki_mode_allowed(mode: str | None) -> bool:
-    """Return whether this conversation mode should feed long-term wiki memory."""
-    raw = os.environ.get("NANOBOT_WIKI_SYNC_MODES", "freechat").strip()
-    allowed = {item.strip().lower() for item in raw.split(",") if item.strip()}
-    if not allowed:
-        allowed = {"freechat"}
-    if "all" in allowed or "*" in allowed:
-        return True
-    return (mode or "freechat").lower() in allowed
 
 
 class TurnState(Enum):
@@ -2239,7 +2229,7 @@ class AgentLoop:
             return False
         if not isinstance(turn_count, int):
             return False
-        if not _wiki_mode_allowed(mode):
+        if not wiki_mode_allowed(mode, self.counter_engine.workspace):
             return False
         return turn_count > 0 and turn_count % interval == 0
 

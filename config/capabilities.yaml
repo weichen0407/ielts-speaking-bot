@@ -101,6 +101,12 @@ processors:
     path: subagent/cross_session/wiki/processor
     status: active
     runtime_root: persona/wiki
+    sync:
+      source: persona/events/thread.jsonl
+      allowed_modes: [freechat]
+      interval_env: NANOBOT_WIKI_SYNC_INTERVAL
+      modes_env: NANOBOT_WIKI_SYNC_MODES
+      llm_extractor_env: NANOBOT_WIKI_LLM_EXTRACTOR
   vocab:
     path: subagent/single_session/vocab/processor
     status: active
