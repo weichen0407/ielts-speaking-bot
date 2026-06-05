@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from nanobot.config.capabilities import load_capabilities, wiki_mode_allowed, wiki_sync_allowed_modes
+from nanobot.config.capabilities import (
+    load_capabilities,
+    wiki_mode_allowed,
+    wiki_sync_allowed_modes,
+    wiki_sync_allowed_roles,
+    wiki_sync_interval,
+)
 
 
 def test_freechat_registers_middleware_gated_subagents() -> None:
@@ -44,8 +50,12 @@ def test_wiki_sync_defaults_to_freechat_only() -> None:
 
     sync = capabilities["processors"]["wiki"]["sync"]
     assert sync["source"] == "persona/events/thread.jsonl"
+    assert sync["interval"] == 1
     assert sync["allowed_modes"] == ["freechat"]
+    assert sync["allowed_roles"] == ["user"]
+    assert wiki_sync_interval(root) == 1
     assert wiki_sync_allowed_modes(root) == {"freechat"}
+    assert wiki_sync_allowed_roles(root) == {"user"}
     assert wiki_mode_allowed("freechat", root) is True
     assert wiki_mode_allowed("benative", root) is False
 

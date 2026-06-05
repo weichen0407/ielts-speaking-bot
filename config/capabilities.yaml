@@ -103,7 +103,9 @@ processors:
     runtime_root: persona/wiki
     sync:
       source: persona/events/thread.jsonl
+      interval: 1
       allowed_modes: [freechat]
+      allowed_roles: [user]
       interval_env: NANOBOT_WIKI_SYNC_INTERVAL
       modes_env: NANOBOT_WIKI_SYNC_MODES
       llm_extractor_env: NANOBOT_WIKI_LLM_EXTRACTOR

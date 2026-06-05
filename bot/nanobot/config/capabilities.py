@@ -54,11 +54,28 @@ def wiki_sync_allowed_modes(root: Path | str | None = None) -> set[str]:
         return _parse_mode_set(env_value, default={"freechat"})
 
     capabilities = load_capabilities(root)
-    processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
-    wiki = processors.get("wiki") if isinstance(processors.get("wiki"), dict) else {}
-    sync = wiki.get("sync") if isinstance(wiki.get("sync"), dict) else {}
+    sync = _wiki_sync_config(capabilities)
     raw = sync.get("allowed_modes")
     return _parse_mode_set(raw, default={"freechat"})
+
+
+def wiki_sync_allowed_roles(root: Path | str | None = None) -> set[str]:
+    """Return message roles allowed to feed LLM Wiki memory."""
+    capabilities = load_capabilities(root)
+    sync = _wiki_sync_config(capabilities)
+    raw = sync.get("allowed_roles")
+    return _parse_mode_set(raw, default={"user"})
+
+
+def wiki_sync_interval(root: Path | str | None = None) -> int:
+    """Return the wiki sync turn interval, with env override."""
+    capabilities = load_capabilities(root)
+    sync = _wiki_sync_config(capabilities)
+    default = _parse_positive_int(sync.get("interval"), 1)
+    try:
+        return int(os.environ.get("NANOBOT_WIKI_SYNC_INTERVAL", str(default)))
+    except ValueError:
+        return default
 
 
 def wiki_mode_allowed(mode: str | None, root: Path | str | None = None) -> bool:
@@ -66,6 +83,13 @@ def wiki_mode_allowed(mode: str | None, root: Path | str | None = None) -> bool:
     if not allowed:
         return True
     return (mode or "freechat").lower() in allowed
+
+
+def _wiki_sync_config(capabilities: dict[str, Any]) -> dict[str, Any]:
+    processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
+    wiki = processors.get("wiki") if isinstance(processors.get("wiki"), dict) else {}
+    sync = wiki.get("sync") if isinstance(wiki.get("sync"), dict) else {}
+    return sync
 
 
 def _parse_mode_set(raw: Any, *, default: set[str]) -> set[str]:
@@ -80,6 +104,14 @@ def _parse_mode_set(raw: Any, *, default: set[str]) -> set[str]:
     if "all" in items or "*" in items:
         return set()
     return set(items)
+
+
+def _parse_positive_int(raw: Any, default: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
 
 
 def _resolve_existing(root: Path, raw: str | None) -> Path | None:

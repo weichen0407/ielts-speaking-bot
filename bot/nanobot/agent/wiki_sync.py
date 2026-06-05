@@ -11,7 +11,7 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.config.capabilities import wiki_sync_allowed_modes
+from nanobot.config.capabilities import wiki_sync_allowed_modes, wiki_sync_allowed_roles
 
 
 async def sync_session_to_wiki(
@@ -55,6 +55,7 @@ async def sync_session_to_wiki(
         "llm_candidates": 0,
         "topic_review_items": 0,
         "allowed_modes": sorted(wiki_sync_allowed_modes(workspace)),
+        "allowed_roles": sorted(wiki_sync_allowed_roles(workspace)),
     }
 
     try:
@@ -64,6 +65,7 @@ async def sync_session_to_wiki(
             limit=40,
             advance_cursor=True,
             allowed_modes=wiki_sync_allowed_modes(workspace),
+            allowed_roles=wiki_sync_allowed_roles(workspace),
         )
         analysis = ingestor.analyze(batch)
         if _should_run_llm_extractor(provider, batch.messages):

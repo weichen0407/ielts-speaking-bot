@@ -32,7 +32,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.capabilities import wiki_mode_allowed
+from nanobot.config.capabilities import wiki_mode_allowed, wiki_sync_interval
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.counter.engine import CounterEngine
 from nanobot.counter.types import CounterTrigger
@@ -2231,10 +2231,7 @@ class AgentLoop:
 
     def _should_sync_wiki(self, turn_count: int, mode: str | None = None) -> bool:
         """Return whether wiki sync should run after this completed user turn."""
-        try:
-            interval = int(os.environ.get("NANOBOT_WIKI_SYNC_INTERVAL", "1"))
-        except ValueError:
-            interval = 1
+        interval = wiki_sync_interval(self.counter_engine.workspace)
         if interval <= 0:
             return False
         if not isinstance(turn_count, int):

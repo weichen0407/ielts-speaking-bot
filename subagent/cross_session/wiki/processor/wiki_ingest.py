@@ -93,6 +93,7 @@ class WikiIngestor:
         limit: int = 20,
         advance_cursor: bool = False,
         allowed_modes: set[str] | None = None,
+        allowed_roles: set[str] | None = None,
     ) -> WikiIngestBatch:
         """Read new thread events, persist them under raw/thread, and return a batch."""
 
@@ -127,6 +128,8 @@ class WikiIngestor:
                 if session_id and message.session_id != session_id:
                     continue
                 if not _mode_allowed(message.raw, allowed_modes):
+                    continue
+                if not _role_allowed(message.role, allowed_roles):
                     continue
                 messages.append(message)
 
@@ -306,3 +309,9 @@ def _mode_allowed(event: dict[str, Any], allowed_modes: set[str] | None) -> bool
     metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
     mode = source.get("mode") or metadata.get("mode") or "freechat"
     return str(mode).lower() in allowed_modes
+
+
+def _role_allowed(role: str, allowed_roles: set[str] | None) -> bool:
+    if not allowed_roles:
+        return True
+    return str(role).lower() in allowed_roles

@@ -46,9 +46,10 @@ async def test_wiki_sync_reads_global_thread_context(tmp_path: Path) -> None:
     )
 
     assert result["status"] == "ok"
-    assert result["messages"] == 2
+    assert result["messages"] == 1
     assert result["candidates"] >= 1
     assert result["applied"] >= 1
+    assert result["allowed_roles"] == ["user"]
     assert provider.called is False
     assert (tmp_path / "persona" / "wiki" / "state" / "sync_log.jsonl").exists()
 
