@@ -118,6 +118,62 @@ If the answer is already excellent, use issue_type excellent and still provide a
             lines.append("")
         return "\n".join(lines)
 
+    def attach_input_context(
+        self,
+        parsed_data: list[BenativeReviewOutput],
+        processed_data: list[BenativeReviewInput],
+    ) -> list[BenativeReviewOutput]:
+        """Fill session_uuid when a model returned the legacy row format."""
+        if not parsed_data:
+            return parsed_data
+        session_by_sentence = {
+            (item.article_id, item.sentence_index): item.session_uuid
+            for item in processed_data
+        }
+        enriched: list[BenativeReviewOutput] = []
+        for item in parsed_data:
+            if item.session_uuid and item.session_uuid != "unknown":
+                enriched.append(item)
+                continue
+            session_uuid = session_by_sentence.get((item.article_id, item.sentence_index))
+            if not session_uuid:
+                enriched.append(item)
+                continue
+            data = item.model_dump()
+            data["session_uuid"] = session_uuid
+            enriched.append(BenativeReviewOutput(**data))
+        return enriched
+
+    def fallback_outputs(self, processed_data: list[BenativeReviewInput]) -> list[BenativeReviewOutput]:
+        """Guarantee one persisted review row per Be Native answer.
+
+        This fallback is used only when the review subagent returns empty or
+        non-parseable output. It keeps the session notes complete while making
+        the limitation explicit in the feedback.
+        """
+        rows: list[BenativeReviewOutput] = []
+        for item in processed_data:
+            exact = item.user_en.strip().casefold() == item.standard_en.strip().casefold()
+            rows.append(
+                BenativeReviewOutput(
+                    session_uuid=item.session_uuid,
+                    article_id=item.article_id,
+                    sentence_index=item.sentence_index,
+                    accuracy_score=95 if exact else 60,
+                    naturalness_score=90 if exact else 55,
+                    issue_type="excellent" if exact else "other",
+                    user_en=item.user_en,
+                    standard_en=item.standard_en,
+                    suggested_en=item.standard_en,
+                    feedback=(
+                        "表达已经非常接近标准句，可以注意大小写和标点。"
+                        if exact
+                        else "本轮 AI review 没有返回可解析结果，先保留标准表达作为参考；可以对比语序、用词和遗漏信息。"
+                    ),
+                )
+            )
+        return rows
+
     def serialize(
         self,
         data: list[BenativeReviewOutput],

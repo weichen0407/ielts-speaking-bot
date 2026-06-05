@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -128,3 +129,33 @@ def test_benative_mode_does_not_schedule_wiki_sync(tmp_path: Path, monkeypatch) 
 
     assert loop._should_sync_wiki(1, "freechat") is True
     assert loop._should_sync_wiki(1, "benative") is False
+
+
+@pytest.mark.asyncio
+async def test_periodic_subagents_are_scheduled_without_blocking(tmp_path: Path, monkeypatch) -> None:
+    loop = _make_loop(tmp_path)
+    session = loop.sessions.get_or_create("websocket:s1")
+    session.metadata["mode"] = "benative"
+    trigger = SimpleNamespace(id="benative_review")
+    scheduled = []
+    awaited = False
+
+    async def fake_spawn(*_args, **_kwargs):
+        nonlocal awaited
+        awaited = True
+
+    def fake_schedule(coro):
+        scheduled.append(coro)
+        coro.close()
+
+    monkeypatch.setattr(loop.counter_engine, "check_triggers", lambda _metadata: [trigger])
+    monkeypatch.setattr(loop, "_spawn_counter_subagent", fake_spawn)
+    monkeypatch.setattr(loop, "_schedule_background", fake_schedule)
+
+    await loop._maybe_spawn_periodic_subagents(
+        session,
+        InboundMessage(channel="websocket", sender_id="user", chat_id="s1", content="answer"),
+    )
+
+    assert len(scheduled) == 1
+    assert awaited is False

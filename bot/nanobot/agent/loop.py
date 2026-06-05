@@ -671,6 +671,10 @@ class AgentLoop:
                 if raw_output and not raw_preview:
                     raw_preview = raw_output[:2000]
                 parsed = processor.parse_subagent_output(raw_output)
+                if hasattr(processor, "attach_input_context"):
+                    parsed = processor.attach_input_context(parsed, processed)
+                if not parsed and hasattr(processor, "fallback_outputs"):
+                    parsed = processor.fallback_outputs(processed)
                 if parsed:
                     output_rows += len(parsed)
                     processor.serialize(parsed, output_path, "both")
@@ -794,6 +798,10 @@ class AgentLoop:
             raw_output = status.result or ""
             raw_preview = raw_output[:2000]
             parsed = processor.parse_subagent_output(raw_output)
+            if hasattr(processor, "attach_input_context"):
+                parsed = processor.attach_input_context(parsed, processed)
+            if not parsed and hasattr(processor, "fallback_outputs"):
+                parsed = processor.fallback_outputs(processed)
             if parsed:
                 output_rows = len(parsed)
                 processor.serialize(parsed, output_path, "both")
@@ -2217,7 +2225,9 @@ class AgentLoop:
             return
 
         for trigger in triggers:
-            await self._spawn_counter_subagent(session, msg, trigger, session_dir)
+            self._schedule_background(
+                self._spawn_counter_subagent(session, msg, trigger, session_dir)
+            )
 
     def _should_sync_wiki(self, turn_count: int, mode: str | None = None) -> bool:
         """Return whether wiki sync should run after this completed user turn."""

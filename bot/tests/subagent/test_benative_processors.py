@@ -82,23 +82,79 @@ def test_benative_review_processor_parses_review_rows() -> None:
 
 def test_benative_review_processor_writes_session_notes(tmp_path: Path) -> None:
     processor = BenativeReviewProcessor()
-    parsed = processor.parse_llm_output(
+    first = processor.parse_llm_output(
         "session-001\tarticle_001\t0\t82\t78\tgrammar\t"
         "Family can build strong relationship when they spend time together.\t"
         "Families often build stronger relationships by spending time together.\t"
         "Families can build stronger relationships when they spend time together.\t"
         "relationship 应该用复数，stronger relationships 更自然。"
     )
+    second = processor.parse_llm_output(
+        "session-001\tarticle_001\t1\t88\t84\tcollocation\t"
+        "I want watch a football game in Paris.\t"
+        "I want to watch a football match in Paris.\t"
+        "I want to watch a football match in Paris.\t"
+        "want 后面需要接 to do。"
+    )
     output_path = tmp_path / "persona" / "processor" / "benative" / "review.jsonl"
 
-    processor.serialize(parsed, output_path, "both")
+    processor.serialize(first, output_path, "both")
+    processor.serialize(second, output_path, "both")
 
     session_notes = tmp_path / "persona" / "benative" / "sessions" / "session-001" / "notes"
     assert output_path.exists()
     assert (session_notes / "review.jsonl").exists()
     review_md = (session_notes / "review.md").read_text(encoding="utf-8")
     assert "article_001:0" in review_md
+    assert "article_001:1" in review_md
     assert "relationship 应该用复数" in review_md
+    assert "want 后面需要接 to do" in review_md
+
+
+def test_benative_review_processor_enriches_legacy_rows_with_session_uuid() -> None:
+    processor = BenativeReviewProcessor()
+    parsed = processor.parse_llm_output(
+        "article_001\t1\t88\t84\tcollocation\t"
+        "I want watch a football game in Paris.\t"
+        "I want to watch a football match in Paris.\t"
+        "I want to watch a football match in Paris.\t"
+        "want 后面需要接 to do。"
+    )
+    processed = processor.preprocess([
+        {
+            "session_uuid": "session-001",
+            "article_id": "article_001",
+            "sentence_index": 1,
+            "zh": "我想去巴黎看一场足球比赛。",
+            "standard_en": "I want to watch a football match in Paris.",
+            "user_en": "I want watch a football game in Paris.",
+        }
+    ])
+
+    enriched = processor.attach_input_context(parsed, processed)
+
+    assert enriched[0].session_uuid == "session-001"
+
+
+def test_benative_review_processor_fallback_outputs_keep_notes_complete() -> None:
+    processor = BenativeReviewProcessor()
+    processed = processor.preprocess([
+        {
+            "session_uuid": "session-001",
+            "article_id": "article_001",
+            "sentence_index": 2,
+            "zh": "最好的旅行会结合观光和个人兴趣。",
+            "standard_en": "The best trips combine sightseeing with personal interests.",
+            "user_en": "The best travel combines sightseeing and personal hobbies.",
+        }
+    ])
+
+    fallback = processor.fallback_outputs(processed)
+
+    assert len(fallback) == 1
+    assert fallback[0].session_uuid == "session-001"
+    assert fallback[0].sentence_index == 2
+    assert fallback[0].suggested_en == "The best trips combine sightseeing with personal interests."
 
 
 def test_benative_processors_are_discoverable() -> None:
