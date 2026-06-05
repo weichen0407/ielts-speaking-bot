@@ -40,46 +40,6 @@
         "last_fired": null,
         "last_checked": null
       }
-    },
-    {
-      "id": "benative_article_fetcher",
-      "name": "Benative Article Fetcher",
-      "enabled": true,
-      "condition": {
-        "kind": "cron",
-        "count": "0 12 * * *",
-        "scope": "global"
-      },
-      "target": {
-        "subagent": "benative_article_fetcher",
-        "prompt_file": "subagent/cross_session/benative_article_fetcher/context/benative_article_fetcher_subagent.md",
-        "model": "deepseek-v4-flash",
-        "task_template": "Fetch news articles for benative mode practice.\n\nArticles directory: {workspace}/persona/benative/articles/\nCursor file: {workspace}/persona/benative/.cursor_benative_articles.json\nWrite article JSON files and update cursor."
-      },
-      "cursor": {
-        "last_fired": null,
-        "last_checked": null
-      }
-    },
-    {
-      "id": "benative_translator",
-      "name": "Benative Translator",
-      "enabled": true,
-      "condition": {
-        "kind": "cron",
-        "count": "0 13 * * *",
-        "scope": "global"
-      },
-      "target": {
-        "subagent": "benative_translator",
-        "prompt_file": "subagent/cross_session/benative_translator/context/benative_translator_subagent.md",
-        "model": "deepseek-v4-flash",
-        "task_template": "Translate untranslated benative articles.\n\nArticles directory: {workspace}/persona/benative/articles/\nPairs directory: {workspace}/persona/benative/pairs/\nCursor file: {workspace}/persona/benative/.cursor_benative_translator.json"
-      },
-      "cursor": {
-        "last_fired": null,
-        "last_checked": null
-      }
     }
   ]
 }

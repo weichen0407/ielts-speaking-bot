@@ -12,6 +12,7 @@ runtime_roots:
 modes:
   default:
     trigger_file: mode/default/trigger/triggers.json
+    subagents: [memory_cron, daily_consolidator]
   freechat:
     context_dir: mode/freechat/context
     trigger_file: mode/freechat/trigger/triggers.json
@@ -21,6 +22,7 @@ modes:
     context_dir: mode/ielts/context
     trigger_file: mode/ielts/trigger/triggers.json
     cron_file: mode/ielts/trigger/cron/cron.yaml
+    subagents: [ielts_feedback]
   benative:
     context_dir: mode/benative/context
     trigger_file: mode/benative/trigger/triggers.json

@@ -7,6 +7,7 @@ from nanobot.config.capabilities import (
     wiki_sync_allowed_roles,
     wiki_sync_interval,
 )
+from scripts.validate_subagent_config import validate_config
 
 
 def test_freechat_registers_middleware_gated_subagents() -> None:
@@ -106,3 +107,14 @@ def test_benative_registers_article_and_review_capabilities() -> None:
     deprecated = capabilities["deprecated"]["subagents"]
     assert deprecated["benative_article_fetcher"]["replacement"] == "subagents.benative_article"
     assert deprecated["benative_translator"]["replacement"] == "subagents.benative_article"
+
+
+def test_capability_registry_matches_trigger_targets() -> None:
+    root = Path(__file__).resolve().parents[3]
+
+    result = validate_config(root)
+
+    assert result["ok"] is True
+    assert result["errors"] == []
+    assert "vocab" in result["registered_subagents"]
+    assert "thread_query" in result["registered_tools"]

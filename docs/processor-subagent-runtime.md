@@ -16,7 +16,7 @@
 | 配置文件 | 作用 |
 |----------|------|
 | `mode/{mode}/trigger/triggers.json` | 真正控制 trigger、调用频次、processor/subagent target |
-| `config/capabilities.yaml` | 能力注册表，用于查看有哪些 mode、subagent、processor、monitor 输出 |
+| `config/capabilities.yaml` | 能力注册表，用于查看有哪些 mode、subagent、processor、tool、monitor 输出 |
 
 虽然有 `capabilities.yaml`，但 **调用频次不是在 yaml 中配置**，而是在各 mode 的 `triggers.json` 里配置。
 
@@ -34,6 +34,21 @@ mode/benative/trigger/triggers.json
 ```text
 config/capabilities.yaml
 ```
+
+注册一致性校验：
+
+```text
+uv run python scripts/validate_subagent_config.py
+```
+
+这个脚本会检查：
+
+- `mode.{name}.subagents` 中声明的 subagent 是否存在；
+- `triggers.json` 里的 `target.subagent` / `target.processor` 是否已注册；
+- trigger 使用的 `execution_mode` 是否被对应 subagent 允许；
+- trigger 暴露的 `tools` 是否存在，且属于该 subagent 在该 execution mode 下的 allowlist；
+- `depends_on` 是否引用已声明的 trigger；
+- prompt 路径和 processor 路径是否存在。
 
 ---
 
@@ -889,4 +904,5 @@ subagent_runs.jsonl     -> subagent 结果和 artifact
 5. Processor 增量机制有两层 cursor：原始 thread cursor 与 artifact processor cursor。
 6. Subagent 结果会写入 `monitor/subagent_runs.jsonl`，是否回注主 agent 取决于 `announce_result`。
 7. 调用频次主要改 `mode/{mode}/trigger/triggers.json` 中的 `condition.count`。
-8. `config/capabilities.yaml` 主要用于全局能力索引，不是运行时频次的实际来源。
+8. `config/capabilities.yaml` 是全局能力索引和 registry control plane；调用频次仍然主要改 `mode/{mode}/trigger/triggers.json`。
+9. `scripts/validate_subagent_config.py` 用于防止 mode / trigger / subagent / processor / tool allowlist 配置漂移。

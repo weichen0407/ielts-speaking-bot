@@ -1,5 +1,22 @@
 # Update Log
 
+## 2026-06-05 - Capability Registry 一致性校验
+
+- 将 `config/capabilities.yaml` 从单纯能力索引进一步收束为 agent control plane：
+  - `mode.default.subagents` 显式登记 `memory_cron`、`daily_consolidator`。
+  - `mode.ielts.subagents` 显式登记 `ielts_feedback`。
+- 清理 `mode/default/trigger/triggers.json` 中已废弃的 `benative_article_fetcher` 和 `benative_translator` cron trigger。
+- 增强 `scripts/validate_subagent_config.py`：
+  - 校验 trigger 引用的 subagent / processor 是否已注册。
+  - 校验 enabled trigger 使用的 subagent 是否属于当前 mode。
+  - 校验 `execution_mode` 是否被 subagent 允许。
+  - 校验 trigger tools 是否存在且属于该 subagent / execution mode 的 allowlist。
+  - 校验 `depends_on`、prompt 路径、processor 路径。
+- 增加测试覆盖，确保 registry 与 trigger target 不再静默漂移。
+- 更新简历和面试 summary，将该机制表述为多 Agent 系统的 registry validation / control plane 设计。
+
+---
+
 ## 2026-06-05 - Wiki Graph 层级与聚焦视图
 
 - WebUI Wiki Graph 从单一全局力导向图扩展为两种视角：

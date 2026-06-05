@@ -24,31 +24,58 @@ def _load_config(path: Path) -> dict[str, Any]:
     return {}
 
 
-def _trigger_files() -> list[Path]:
-    return trigger_files(ROOT)
+def _trigger_files(root: Path = ROOT) -> list[Path]:
+    return trigger_files(root)
 
 
-def _prompt_path(raw: str | None) -> Path | None:
+def _prompt_path(root: Path, raw: str | None) -> Path | None:
     if not raw:
         return None
-    candidate = ROOT / raw
+    candidate = root / raw
     if candidate.exists():
         return candidate
-    matches = sorted(ROOT.glob(f"subagent/**/context/{Path(raw).name}"))
+    matches = sorted(root.glob(f"subagent/**/context/{Path(raw).name}"))
     return matches[0] if matches else candidate
 
 
-def main() -> None:
+def _mode_for_trigger_file(root: Path, capabilities: dict[str, Any]) -> dict[Path, str]:
+    modes = capabilities.get("modes") if isinstance(capabilities.get("modes"), dict) else {}
+    result: dict[Path, str] = {}
+    for mode_name, mode_config in modes.items():
+        if not isinstance(mode_config, dict):
+            continue
+        for key in ("trigger_file", "cron_file"):
+            raw = mode_config.get(key)
+            if not raw:
+                continue
+            path = root / str(raw)
+            result[path.resolve()] = str(mode_name)
+    return result
+
+
+def _as_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    return []
+
+
+def validate_config(root: Path = ROOT) -> dict[str, Any]:
     errors: list[str] = []
     trigger_count = 0
     subagents: set[str] = set()
     trigger_ids: set[str] = set()
-    capabilities = load_capabilities(ROOT)
+    capabilities = load_capabilities(root)
+    modes = capabilities.get("modes") if isinstance(capabilities.get("modes"), dict) else {}
     registered_subagents = capabilities.get("subagents") if isinstance(capabilities.get("subagents"), dict) else {}
     registered_processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
+    registered_tools = capabilities.get("tools") if isinstance(capabilities.get("tools"), dict) else {}
+    file_to_mode = _mode_for_trigger_file(root, capabilities)
 
-    for file_path in _trigger_files():
-        rel = file_path.relative_to(ROOT)
+    for file_path in _trigger_files(root):
+        rel = file_path.relative_to(root)
+        mode_name = file_to_mode.get(file_path.resolve())
+        mode_config = modes.get(mode_name) if mode_name and isinstance(modes.get(mode_name), dict) else {}
+        mode_subagents = set(_as_list(mode_config.get("subagents") if isinstance(mode_config, dict) else []))
         try:
             config = _load_config(file_path)
         except Exception as exc:
@@ -66,15 +93,39 @@ def main() -> None:
             trigger_count += 1
             trigger_id = item.get("id") or "<missing-id>"
             trigger_ids.add(str(trigger_id))
+            enabled = bool(item.get("enabled", True))
             target = item.get("target") if isinstance(item.get("target"), dict) else {}
             subagent = str(target.get("subagent") or "")
+            processor = str(target.get("processor") or "")
+            execution_mode = str(target.get("execution_mode") or "api")
+            tools = _as_list(target.get("tools"))
+            if not subagent and not processor:
+                errors.append(f"{rel}:{trigger_id}: target must declare subagent or processor")
             if subagent:
                 subagents.add(subagent)
                 if subagent not in registered_subagents:
                     errors.append(f"{rel}:{trigger_id}: subagent missing from config/capabilities.yaml: {subagent}")
+                elif enabled and mode_subagents and subagent not in mode_subagents:
+                    errors.append(f"{rel}:{trigger_id}: enabled subagent {subagent} is not registered under modes.{mode_name}.subagents")
+                subagent_config = registered_subagents.get(subagent) if isinstance(registered_subagents.get(subagent), dict) else {}
+                execution_modes = _as_list(subagent_config.get("execution_modes")) or ["api"]
+                if execution_mode not in execution_modes:
+                    errors.append(f"{rel}:{trigger_id}: execution_mode {execution_mode} not allowed for subagent {subagent}; allowed={execution_modes}")
+                tool_config = subagent_config.get("tools") if isinstance(subagent_config.get("tools"), dict) else {}
+                allowed_tools = set(_as_list(tool_config.get(execution_mode)))
+                for tool in tools:
+                    if tool not in registered_tools:
+                        errors.append(f"{rel}:{trigger_id}: tool missing from config/capabilities.yaml tools: {tool}")
+                    if tool not in allowed_tools:
+                        errors.append(f"{rel}:{trigger_id}: tool {tool} is not allowlisted for subagent {subagent} execution_mode={execution_mode}")
+            if processor and processor not in registered_processors:
+                errors.append(f"{rel}:{trigger_id}: processor missing from config/capabilities.yaml: {processor}")
+            depends_on = target.get("depends_on")
+            if depends_on and str(depends_on) not in trigger_ids:
+                errors.append(f"{rel}:{trigger_id}: depends_on references unknown earlier trigger id: {depends_on}")
             prompt_file = target.get("prompt_file")
             if prompt_file:
-                prompt_path = _prompt_path(str(prompt_file))
+                prompt_path = _prompt_path(root, str(prompt_file))
                 if prompt_path is None or not prompt_path.exists():
                     errors.append(f"{rel}:{trigger_id}: prompt not found: {prompt_file}")
             condition = item.get("condition") if isinstance(item.get("condition"), dict) else {}
@@ -86,16 +137,25 @@ def main() -> None:
                 if count < 1:
                     errors.append(f"{rel}:{trigger_id}: count must be >= 1")
 
-    processor_files = sorted(ROOT.glob("subagent/**/processor/processor.py"))
-    context_files = sorted(ROOT.glob("subagent/**/*_subagent.md"))
+    processor_files = sorted(root.glob("subagent/**/processor/processor.py"))
+    context_files = sorted(root.glob("subagent/**/*_subagent.md"))
 
     for name, item in registered_subagents.items():
         if not isinstance(item, dict):
             errors.append(f"config/capabilities.yaml: subagent {name} must be an object")
             continue
-        prompt = _prompt_path(str(item.get("prompt") or ""))
+        prompt = _prompt_path(root, str(item.get("prompt") or ""))
         if prompt is None or not prompt.exists():
             errors.append(f"config/capabilities.yaml: subagent {name} prompt not found: {item.get('prompt')}")
+        execution_modes = _as_list(item.get("execution_modes"))
+        default_execution_mode = item.get("default_execution_mode")
+        if execution_modes and default_execution_mode and str(default_execution_mode) not in execution_modes:
+            errors.append(f"config/capabilities.yaml: subagent {name} default_execution_mode not in execution_modes")
+        tool_config = item.get("tools") if isinstance(item.get("tools"), dict) else {}
+        for mode_name, mode_tools in tool_config.items():
+            for tool in _as_list(mode_tools):
+                if tool not in registered_tools:
+                    errors.append(f"config/capabilities.yaml: subagent {name} tools.{mode_name} references unknown tool: {tool}")
         for trigger_id in item.get("trigger_ids") or []:
             if str(trigger_id) not in trigger_ids:
                 errors.append(f"config/capabilities.yaml: subagent {name} references unknown trigger id: {trigger_id}")
@@ -105,23 +165,26 @@ def main() -> None:
             errors.append(f"config/capabilities.yaml: processor {name} must be an object")
             continue
         raw_path = item.get("path")
-        if raw_path and not (ROOT / str(raw_path)).exists():
+        if raw_path and not (root / str(raw_path)).exists():
             errors.append(f"config/capabilities.yaml: processor {name} path not found: {raw_path}")
 
-    print(json.dumps(
-        {
-            "ok": not errors,
-            "trigger_files": [str(p.relative_to(ROOT)) for p in _trigger_files()],
-            "trigger_count": trigger_count,
-            "subagents": sorted(subagents),
-            "registered_subagents": sorted(registered_subagents),
-            "context_prompt_count": len(context_files),
-            "processor_count": len(processor_files),
-            "errors": errors,
-        },
-        ensure_ascii=False,
-        indent=2,
-    ))
+    return {
+        "ok": not errors,
+        "trigger_files": [str(p.relative_to(root)) for p in _trigger_files(root)],
+        "trigger_count": trigger_count,
+        "subagents": sorted(subagents),
+        "registered_subagents": sorted(registered_subagents),
+        "registered_tools": sorted(registered_tools),
+        "context_prompt_count": len(context_files),
+        "processor_count": len(processor_files),
+        "errors": errors,
+    }
+
+
+def main() -> None:
+    result = validate_config(ROOT)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    errors = result["errors"]
     if errors:
         raise SystemExit(1)
 
