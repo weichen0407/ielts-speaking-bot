@@ -161,10 +161,12 @@ export function WikiGraphView({
   const draggingRef = useRef<GraphNode | null>(null);
   const panningRef = useRef<{ x: number; y: number; transform: Transform } | null>(null);
   const pointerDownRef = useRef<{ x: number; y: number; node: GraphNode | null } | null>(null);
+  const hoveredNodeRef = useRef<GraphNode | null>(null);
+  const selectedNodeRef = useRef<GraphNode | null>(null);
+  const canvasSizeRef = useRef<{ width: number; height: number; ratio: number }>({ width: 0, height: 0, ratio: 0 });
 
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [dimensions, setDimensions] = useState({ width: 640, height: 420 });
-  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,18 +240,26 @@ export function WikiGraphView({
     if (!ctx) return;
 
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(dimensions.width * ratio);
-    canvas.height = Math.floor(dimensions.height * ratio);
-    canvas.style.width = `${dimensions.width}px`;
-    canvas.style.height = `${dimensions.height}px`;
+    const nextCanvasWidth = Math.floor(dimensions.width * ratio);
+    const nextCanvasHeight = Math.floor(dimensions.height * ratio);
+    const currentSize = canvasSizeRef.current;
+    if (currentSize.width !== nextCanvasWidth || currentSize.height !== nextCanvasHeight || currentSize.ratio !== ratio) {
+      canvas.width = nextCanvasWidth;
+      canvas.height = nextCanvasHeight;
+      canvas.style.width = `${dimensions.width}px`;
+      canvas.style.height = `${dimensions.height}px`;
+      canvasSizeRef.current = { width: nextCanvasWidth, height: nextCanvasHeight, ratio };
+    }
 
     ctx.save();
     ctx.scale(ratio, ratio);
     ctx.clearRect(0, 0, dimensions.width, dimensions.height);
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(0, 0, dimensions.width, dimensions.height);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, dimensions.width, dimensions.height);
 
     const t = transformRef.current;
+    const hoveredNode = hoveredNodeRef.current;
+    const selectedNode = selectedNodeRef.current;
     ctx.translate(t.x, t.y);
     ctx.scale(t.k, t.k);
 
@@ -315,7 +325,12 @@ export function WikiGraphView({
     }
 
     ctx.restore();
-  }, [dimensions.height, dimensions.width, getNodeColor, getNodeRadius, highlightedNodes, hoveredNode, selectedNode]);
+  }, [dimensions.height, dimensions.width, getNodeColor, getNodeRadius, highlightedNodes]);
+
+  useEffect(() => {
+    selectedNodeRef.current = selectedNode;
+    draw();
+  }, [draw, selectedNode]);
 
   useEffect(() => {
     graphRef.current = graphData;
@@ -394,7 +409,14 @@ export function WikiGraphView({
     return null;
   }, [getNodeRadius, pointToGraph]);
 
+  const setCanvasCursor = useCallback((cursor: string) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.style.cursor = cursor;
+  }, []);
+
   const handleNodeActivate = useCallback((node: GraphNode) => {
+    selectedNodeRef.current = node;
     setSelectedNode(node);
     if (node.kind === "page") {
       onPageClick?.(node.id);
@@ -413,6 +435,7 @@ export function WikiGraphView({
     const node = findNode(event.clientX, event.clientY);
     pointerDownRef.current = { x: event.clientX, y: event.clientY, node };
     if (!node) {
+      setCanvasCursor("grabbing");
       panningRef.current = {
         x: event.clientX,
         y: event.clientY,
@@ -423,8 +446,9 @@ export function WikiGraphView({
     draggingRef.current = node;
     node.fx = node.x;
     node.fy = node.y;
+    setCanvasCursor("grabbing");
     simulationRef.current?.alphaTarget(0.04).restart();
-  }, [findNode, interactive]);
+  }, [findNode, interactive, setCanvasCursor]);
 
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive) return;
@@ -446,8 +470,13 @@ export function WikiGraphView({
       draw();
       return;
     }
-    setHoveredNode(findNode(event.clientX, event.clientY));
-  }, [draw, findNode, interactive, pointToGraph]);
+    const nextHovered = findNode(event.clientX, event.clientY);
+    if (hoveredNodeRef.current?.id !== nextHovered?.id) {
+      hoveredNodeRef.current = nextHovered;
+      setCanvasCursor(nextHovered ? "pointer" : "grab");
+      draw();
+    }
+  }, [draw, findNode, interactive, pointToGraph, setCanvasCursor]);
 
   const handleMouseUp = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive) return;
@@ -459,6 +488,9 @@ export function WikiGraphView({
       simulationRef.current?.alphaTarget(0);
     }
     panningRef.current = null;
+    const nextHovered = findNode(event.clientX, event.clientY);
+    hoveredNodeRef.current = nextHovered;
+    setCanvasCursor(nextHovered ? "pointer" : "grab");
     const down = pointerDownRef.current;
     pointerDownRef.current = null;
     const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 999;
@@ -466,7 +498,17 @@ export function WikiGraphView({
     if (down?.node && clicked?.id === down.node.id && moved < 5) {
       handleNodeActivate(clicked);
     }
-  }, [findNode, handleNodeActivate, interactive]);
+    draw();
+  }, [draw, findNode, handleNodeActivate, interactive, setCanvasCursor]);
+
+  const handleMouseLeave = useCallback(() => {
+    hoveredNodeRef.current = null;
+    draggingRef.current = null;
+    panningRef.current = null;
+    pointerDownRef.current = null;
+    setCanvasCursor("grab");
+    draw();
+  }, [draw, setCanvasCursor]);
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLCanvasElement>) => {
     if (!interactive) return;
@@ -542,14 +584,10 @@ export function WikiGraphView({
 
       <canvas
         ref={canvasRef}
-        className={cn("block h-full w-full", hoveredNode ? "cursor-pointer" : "cursor-grab")}
+        className={cn("block h-full w-full", interactive && "cursor-grab")}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => {
-          setHoveredNode(null);
-          draggingRef.current = null;
-          panningRef.current = null;
-        }}
+        onMouseLeave={handleMouseLeave}
         onMouseUp={handleMouseUp}
         onWheel={handleWheel}
       />
