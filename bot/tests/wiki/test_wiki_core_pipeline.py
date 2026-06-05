@@ -11,21 +11,21 @@ from subagent.cross_session.wiki.processor.wiki_query import WikiQueryEngine
 
 def test_ingest_crystallize_query_and_lint(tmp_path: Path):
     workspace = tmp_path
-    data_dir = workspace / "data"
-    data_dir.mkdir()
+    data_dir = workspace / "persona" / "events"
+    data_dir.mkdir(parents=True)
     thread_path = data_dir / "thread.jsonl"
     events = [
         {
             "id": "m1",
             "timestamp": "2026-05-30T10:00:00+08:00",
-            "source": {"session_uuid": "s1", "message_index": 1},
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 1},
             "role": "user",
             "content": {"type": "text", "text": "I want to decide the wiki schema first."},
         },
         {
             "id": "m2",
             "timestamp": "2026-05-30T10:01:00+08:00",
-            "source": {"session_uuid": "s1", "message_index": 2},
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 2},
             "role": "user",
             "content": {"type": "text", "text": "What gaps remain in the wiki memory design?"},
         },

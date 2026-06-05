@@ -69,6 +69,17 @@ if TYPE_CHECKING:
 UNIFIED_SESSION_KEY = "unified:default"
 
 
+def _wiki_mode_allowed(mode: str | None) -> bool:
+    """Return whether this conversation mode should feed long-term wiki memory."""
+    raw = os.environ.get("NANOBOT_WIKI_SYNC_MODES", "freechat").strip()
+    allowed = {item.strip().lower() for item in raw.split(",") if item.strip()}
+    if not allowed:
+        allowed = {"freechat"}
+    if "all" in allowed or "*" in allowed:
+        return True
+    return (mode or "freechat").lower() in allowed
+
+
 class TurnState(Enum):
     RESTORE = auto()
     COMPACT = auto()
@@ -2205,7 +2216,7 @@ class AgentLoop:
         session_dir = str(self.sessions._get_session_dir(session.key))
         turn_count = self.counter_engine.get_turn_count(session.metadata)
 
-        if self._should_sync_wiki(turn_count):
+        if self._should_sync_wiki(turn_count, session.metadata.get("mode")):
             self._schedule_background(
                 self._sync_wiki_for_session(session, session_dir)
             )
@@ -2218,7 +2229,7 @@ class AgentLoop:
         for trigger in triggers:
             await self._spawn_counter_subagent(session, msg, trigger, session_dir)
 
-    def _should_sync_wiki(self, turn_count: int) -> bool:
+    def _should_sync_wiki(self, turn_count: int, mode: str | None = None) -> bool:
         """Return whether wiki sync should run after this completed user turn."""
         try:
             interval = int(os.environ.get("NANOBOT_WIKI_SYNC_INTERVAL", "1"))
@@ -2227,6 +2238,8 @@ class AgentLoop:
         if interval <= 0:
             return False
         if not isinstance(turn_count, int):
+            return False
+        if not _wiki_mode_allowed(mode):
             return False
         return turn_count > 0 and turn_count % interval == 0
 

@@ -92,10 +92,11 @@ class WikiIngestor:
         session_id: str | None = None,
         limit: int = 20,
         advance_cursor: bool = False,
+        allowed_modes: set[str] | None = None,
     ) -> WikiIngestBatch:
         """Read new thread events, persist them under raw/thread, and return a batch."""
 
-        thread_path = self.workspace / "data" / "thread.jsonl"
+        thread_path = self._thread_path()
         cursor = self._read_cursor()
         if session_id:
             per_session = cursor.get("thread_line_by_session")
@@ -124,6 +125,8 @@ class WikiIngestor:
                 if message is None:
                     continue
                 if session_id and message.session_id != session_id:
+                    continue
+                if not _mode_allowed(message.raw, allowed_modes):
                     continue
                 messages.append(message)
 
@@ -225,6 +228,13 @@ class WikiIngestor:
 
         return WikiIngestAnalysis(batch=batch, candidates=_dedupe_candidates(candidates))
 
+    def _thread_path(self) -> Path:
+        """Return the current unified thread log path, with legacy fallback."""
+        current = self.workspace / "persona" / "events" / "thread.jsonl"
+        if current.exists():
+            return current
+        return self.workspace / "data" / "thread.jsonl"
+
     def _message_from_event(self, line_no: int, event: dict[str, Any]) -> IngestMessage | None:
         role = event.get("role")
         if role not in {"user", "assistant", "subagent"}:
@@ -294,3 +304,12 @@ def _dedupe_candidates(candidates: list[WikiCandidate]) -> list[WikiCandidate]:
         seen.add(key)
         deduped.append(candidate)
     return deduped
+
+
+def _mode_allowed(event: dict[str, Any], allowed_modes: set[str] | None) -> bool:
+    if not allowed_modes:
+        return True
+    source = event.get("source") if isinstance(event.get("source"), dict) else {}
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    mode = source.get("mode") or metadata.get("mode") or "freechat"
+    return str(mode).lower() in allowed_modes

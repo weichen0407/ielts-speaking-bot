@@ -119,3 +119,12 @@ async def test_benative_answer_completes_article_without_llm(tmp_path: Path) -> 
 
     progress = json.loads(progress_file.read_text(encoding="utf-8"))
     assert progress["current_sentence"] == 2
+
+
+def test_benative_mode_does_not_schedule_wiki_sync(tmp_path: Path, monkeypatch) -> None:
+    loop = _make_loop(tmp_path)
+    monkeypatch.delenv("NANOBOT_WIKI_SYNC_MODES", raising=False)
+    monkeypatch.setenv("NANOBOT_WIKI_SYNC_INTERVAL", "1")
+
+    assert loop._should_sync_wiki(1, "freechat") is True
+    assert loop._should_sync_wiki(1, "benative") is False

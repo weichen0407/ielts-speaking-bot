@@ -26,8 +26,6 @@ async def sync_session_to_wiki(
     taxonomy-guided LLM extractor before crystallization.
     """
 
-    del session_dir
-
     workspace = Path(workspace)
     _ensure_repo_importable(workspace)
 
@@ -54,6 +52,7 @@ async def sync_session_to_wiki(
         "llm_extractor_enabled": False,
         "llm_candidates": 0,
         "topic_review_items": 0,
+        "allowed_modes": sorted(_allowed_modes()),
     }
 
     try:
@@ -62,6 +61,7 @@ async def sync_session_to_wiki(
             session_id=session_key,
             limit=40,
             advance_cursor=True,
+            allowed_modes=_allowed_modes(),
         )
         analysis = ingestor.analyze(batch)
         if _should_run_llm_extractor(provider, batch.messages):
@@ -86,7 +86,7 @@ async def sync_session_to_wiki(
                 logger.warning("Wiki LLM extractor failed for session {}: {}", session_key, e)
         result = WikiCrystallizer(wiki_root=wiki_root).save_analysis(
             analysis,
-            mode=_mode_from_session_dir(workspace, session_key),
+            mode=_mode_from_session(workspace, session_key, session_dir),
         )
         findings = WikiLinter(wiki_root=wiki_root).lint()
 
@@ -141,6 +141,16 @@ def _should_run_llm_extractor(provider: Any | None, messages: list[Any]) -> bool
     return bool(enabled and provider is not None and messages)
 
 
+def _allowed_modes() -> set[str]:
+    raw = os.environ.get("NANOBOT_WIKI_SYNC_MODES", "freechat").strip()
+    allowed = {item.strip().lower() for item in raw.split(",") if item.strip()}
+    if not allowed:
+        return {"freechat"}
+    if "all" in allowed or "*" in allowed:
+        return set()
+    return allowed
+
+
 def _merge_candidates(*groups):
     seen: set[tuple[str, str]] = set()
     merged = []
@@ -154,13 +164,22 @@ def _merge_candidates(*groups):
     return merged
 
 
-def _mode_from_session_dir(workspace: Path, session_key: str) -> str:
-    metadata_path = workspace / "persona" / "sessions" / session_key / "metadata.json"
-    if not metadata_path.exists():
+def _mode_from_session(workspace: Path, session_key: str, session_dir: str | None) -> str:
+    thread_path = (
+        Path(session_dir) / "thread.jsonl"
+        if session_dir
+        else workspace / "persona" / "sessions" / session_key / "thread.jsonl"
+    )
+    if not thread_path.exists():
+        thread_path = workspace / "persona" / "sessions" / session_key / "thread.jsonl"
+    if not thread_path.exists():
         return "global"
     try:
-        data = json.loads(metadata_path.read_text(encoding="utf-8"))
+        with thread_path.open("r", encoding="utf-8") as fh:
+            first = fh.readline()
+        data = json.loads(first) if first.strip() else {}
     except json.JSONDecodeError:
         return "global"
-    mode = data.get("mode")
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    mode = metadata.get("mode")
     return mode if mode in {"global", "ielts", "freechat", "benative", "language"} else "global"
