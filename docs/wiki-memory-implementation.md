@@ -89,20 +89,14 @@ persona/wiki/state/ingest_cursor.json
 persona/wiki/raw/thread/{timestamp}.jsonl
 ```
 
-注意：当前仓库实际存在的 thread 文件是：
+当前 canonical thread 来源是：
 
 ```text
 persona/events/thread.jsonl
 persona/sessions/{session_id}/thread.jsonl
 ```
 
-而不是 `data/thread.jsonl`。因此最近 `persona/wiki/state/sync_log.jsonl` 里出现了多次：
-
-```json
-{"messages": 0, "candidates": 0, "applied": 0}
-```
-
-这说明 wiki sync 确实触发了，但没有读到真实对话增量。后续需要把 ingest 源统一到 `persona/events/thread.jsonl`，或恢复/桥接 `data/thread.jsonl`。
+其中自动 wiki sync 默认读取 `persona/events/thread.jsonl`，并通过 `config/capabilities.yaml -> processors.wiki.sync.allowed_modes / allowed_roles` 控制哪些内容可以进入长期记忆。当前默认只允许 `freechat` 的 `user` turns，避免 Be Native 文章模仿、系统命令或 assistant 回复污染用户真实画像。
 
 ### 2.3 Deterministic Analyze：默认本地抽取
 
@@ -233,7 +227,7 @@ persona/wiki/index/wiki.sqlite
 - Markdown/title/tags/topics 扫描
 - link 邻居扩展
 
-`build_wiki_graph()` 则把 wiki 投影成面向用户的知识图谱，核心节点包括：
+`build_wiki_graph()` 则把 wiki 投影成面向用户的知识图谱。后端只返回稳定的 graph data，前端再根据用户选择投影成“总览图”“层级图”或“聚焦子图”。核心节点包括：
 
 - `domain`
 - `topic`
@@ -263,6 +257,8 @@ flowchart LR
   U -->|"wants_to_visit"| Paris
 ```
 
+前端可以进一步把 `sports/football` 或 `entity:Arsenal` 设为当前起点，只展示两跳内的局部子图，用于回答“这个 topic 下沉淀了哪些事实、表达素材和页面”。
+
 ---
 
 ## 3. 架构总览
@@ -272,7 +268,7 @@ flowchart LR
 │                              前端 (React / WebUI)                            │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐             │
 │  │ WikiMemoryPanel │  │ WikiGraphView   │  │ Sidebar Button  │             │
-│  │  - 搜索/查看/补丁 │  │  - 2D 力导向图谱 │  │  - 打开面板      │             │
+│  │  - 搜索/查看/补丁 │  │  - 总览/层级/聚焦 │  │  - 打开面板      │             │
 │  └────────┬────────┘  └────────┬────────┘  └─────────────────┘             │
 └───────────┼────────────────────┼───────────────────────────────────────────┘
             │ HTTP (Bearer Token)│
@@ -429,7 +425,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 
 ### 4.5 wiki_graph.py — 知识图谱构建
 
-`build_wiki_graph()` 从页面元数据构建图数据，供前端 `react-force-graph-2d` 渲染。
+`build_wiki_graph()` 从页面元数据构建图数据，供前端 `WikiGraphView` 渲染。当前前端使用 `d3-force` + Canvas，而不是把 D3 simulation 状态交给 React state 管理。
 
 **节点类型**（`kind`）：
 - `domain`：大领域，例如 sports、travel、study
@@ -448,6 +444,16 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 - `relation:{predicate}`：entity → entity，例如 `relation:supports`
 
 支持按 `mode` / `topic` / `page_type` / `tags` 过滤图谱。
+
+前端在同一份 graph data 上提供三种阅读方式：
+
+| 视图 | 说明 |
+|------|------|
+| `层级` | 默认视图，按 `All Wiki -> domain -> topic -> entity/concept -> wiki page` 分层排列 |
+| `总览` | 保留全局力导向布局，用于观察整体连接关系 |
+| `聚焦子图` | 用户选中任意 topic、subtopic、entity、concept 或 page 后，可以把它设为当前起点，只看两跳内相关节点 |
+
+这使 Wiki Graph 不只是“全局关系图”，还可以作为 topic-level summary 的输入范围选择器：先聚焦某个 topic，再对该范围内的 pages、entities、relations 做总结。
 
 ---
 
@@ -482,7 +488,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(content, content='chunks', content_ro
 `WikiUpdater` 是旧的 patch JSONL 导入器，保留用于测试或一次性迁移。
 当前主流程通过 `bot.nanobot.agent.wiki_sync` 从 thread 增量 ingest，再 query/save/lint。
 
-当前代码中，`WikiIngestor` 读取的是 `data/thread.jsonl`。项目清理后，真实运行数据主要在 `persona/events/thread.jsonl` 和 `persona/sessions/{session_id}/thread.jsonl`。因此这里是当前需要修复的路径一致性问题。
+当前代码中，Wiki sync 的默认增量来源是 `persona/events/thread.jsonl`，由 `config/capabilities.yaml -> processors.wiki.sync.source` 统一配置。默认只允许 `freechat` 的 `user` turns 进入 LLM Wiki，避免 Be Native 等模仿练习被误当作用户真实偏好写入长期记忆。
 
 **游标机制**：
 - 每个源文件维护一个行号游标，记录在 `updater_cursors.json`
@@ -542,7 +548,7 @@ DEFAULT_SOURCES = []
 |------|------|------|
 | `WikiMemoryPanel` | `components/WikiMemoryPanel.tsx` | 主面板：搜索、页面查看、补丁编辑器 |
 | `WikiMemoryFloatingButton` | `components/WikiMemoryPanel.tsx` | 右下角浮动按钮（打开/关闭面板） |
-| `WikiGraphView` | `components/WikiGraphView.tsx` | 2D 力导向知识图谱（`react-force-graph-2d`） |
+| `WikiGraphView` | `components/WikiGraphView.tsx` | Canvas + `d3-force` 知识图谱，支持总览、层级和聚焦子图 |
 
 ### 6.2 API 客户端（lib/api.ts）
 
@@ -562,7 +568,9 @@ rebuildWikiIndex(token)
 4. 点击搜索结果进入 **Page** tab，调用 `/api/wiki/page?slug=...`
 5. 页面内容以 Markdown 原文展示，附带 meta 标签
 6. **Patch** tab 允许手动粘贴 WikiPatch JSON 并应用
-7. 面板顶部有 "Rebuild Index" 按钮，用于重建搜索索引
+7. **Graph** tab 支持在 `层级` 和 `总览` 间切换
+8. 用户可点击任意节点并选择 **聚焦**，将该节点作为局部起点查看两跳内子图
+9. 面板顶部有 "Rebuild Index" 按钮，用于重建搜索索引
 
 ---
 

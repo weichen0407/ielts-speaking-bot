@@ -1,5 +1,17 @@
 # Update Log
 
+## 2026-06-05 - Wiki Graph 层级与聚焦视图
+
+- WebUI Wiki Graph 从单一全局力导向图扩展为两种视角：
+  - `层级`：默认按 `All Wiki -> domain -> topic -> entity/concept -> wiki page` 展示。
+  - `总览`：保留全局力导向布局，用于观察整体关系。
+- 增加聚焦子图能力：点击任意 topic、subtopic、entity、concept 或 page 后，可将其作为当前起点，只查看两跳内相关节点。
+- 修复 graph hover 抖动：hover / selected 高亮改用 refs 管理，避免 mousemove 触发 React state 变化后重启 D3 simulation。
+- 更新简历与面试 summary 文档，补充分层可聚焦知识图谱、topic-level summary 输入范围等叙事。
+- 更新 `docs/wiki-memory-implementation.md`，同步当前 `d3-force` + Canvas 实现、graph 视图能力、以及 Wiki sync 默认读取 `persona/events/thread.jsonl` 且仅接收 `freechat` user turns 的规则。
+
+---
+
 ## 2026-05-31 - Runtime 数据目录收束
 
 - 将用户运行数据的 canonical root 收束到 `persona/`：
