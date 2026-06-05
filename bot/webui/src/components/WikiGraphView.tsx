@@ -107,7 +107,12 @@ function topicAnchors(nodes: GraphNode[], width: number, height: number): Map<st
   return anchors;
 }
 
-function hierarchyLayer(node: GraphNode): number {
+function endpointId(value: string | GraphNode): string {
+  return typeof value === "string" ? value : value.id;
+}
+
+function hierarchyLayer(node: GraphNode, focusNodeId?: string | null): number {
+  if (focusNodeId && node.id === focusNodeId) return 0;
   if (node.kind === "root") return 0;
   if (node.kind === "domain") return 1;
   if (node.kind === "topic") return 2;
@@ -115,10 +120,15 @@ function hierarchyLayer(node: GraphNode): number {
   return 4;
 }
 
-function hierarchyTargets(nodes: GraphNode[], width: number, height: number): Map<string, { x: number; y: number }> {
+function hierarchyTargets(
+  nodes: GraphNode[],
+  width: number,
+  height: number,
+  focusNodeId?: string | null,
+): Map<string, { x: number; y: number }> {
   const byLayer = new Map<number, GraphNode[]>();
   for (const node of nodes) {
-    const layer = hierarchyLayer(node);
+    const layer = hierarchyLayer(node, focusNodeId);
     const items = byLayer.get(layer) ?? [];
     items.push(node);
     byLayer.set(layer, items);
@@ -140,6 +150,48 @@ function hierarchyTargets(nodes: GraphNode[], width: number, height: number): Ma
   }
 
   return targets;
+}
+
+function isHierarchyMembershipEdge(kind: string): boolean {
+  return [
+    "root",
+    "contains_topic",
+    "has_domain",
+    "has_topic",
+    "has_subtype",
+    "topic_entity",
+    "mentions_entity",
+    "mentions_concept",
+    "link",
+  ].includes(kind) || kind.startsWith("relation:");
+}
+
+function focusGraphData(data: GraphData, focusNodeId: string): GraphData {
+  if (!data.nodes.some((node) => node.id === focusNodeId)) return data;
+
+  const included = new Set<string>([focusNodeId]);
+  const queue: Array<{ id: string; depth: number }> = [{ id: focusNodeId, depth: 0 }];
+  const maxDepth = 2;
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || current.depth >= maxDepth) continue;
+
+    for (const link of data.links) {
+      if (!isHierarchyMembershipEdge(link.kind)) continue;
+      const source = endpointId(link.source);
+      const target = endpointId(link.target);
+      const connected = source === current.id ? target : target === current.id ? source : null;
+      if (!connected || included.has(connected)) continue;
+      included.add(connected);
+      queue.push({ id: connected, depth: current.depth + 1 });
+    }
+  }
+
+  return {
+    nodes: data.nodes.filter((node) => included.has(node.id)),
+    links: data.links.filter((link) => included.has(endpointId(link.source)) && included.has(endpointId(link.target))),
+  };
 }
 
 function withHierarchyRoot(data: GraphData): GraphData {
@@ -242,6 +294,7 @@ export function WikiGraphView({
   const [dimensions, setDimensions] = useState({ width: 640, height: 420 });
   const [layoutMode, setLayoutMode] = useState<GraphLayout>("hierarchy");
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [focusedNode, setFocusedNode] = useState<GraphNode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -292,6 +345,13 @@ export function WikiGraphView({
   useEffect(() => {
     loadGraph();
   }, [loadGraph]);
+
+  useEffect(() => {
+    if (!focusedNode) return;
+    if (!graphData.nodes.some((node) => node.id === focusedNode.id)) {
+      setFocusedNode(null);
+    }
+  }, [focusedNode, graphData.nodes]);
 
   const getNodeColor = useCallback((node: GraphNode): string => {
     if (highlightedNodes?.has(node.id)) return "#f59e0b";
@@ -408,7 +468,8 @@ export function WikiGraphView({
   }, [draw, selectedNode]);
 
   useEffect(() => {
-    const currentGraphData = layoutMode === "hierarchy" ? withHierarchyRoot(graphData) : graphData;
+    const scopedGraphData = focusedNode ? focusGraphData(graphData, focusedNode.id) : graphData;
+    const currentGraphData = layoutMode === "hierarchy" && !focusedNode ? withHierarchyRoot(scopedGraphData) : scopedGraphData;
     graphRef.current = currentGraphData;
     simulationRef.current?.stop();
 
@@ -419,7 +480,7 @@ export function WikiGraphView({
 
     const topicPositions = topicAnchors(currentGraphData.nodes, dimensions.width, dimensions.height);
     const layerPositions = layoutMode === "hierarchy"
-      ? hierarchyTargets(currentGraphData.nodes, dimensions.width, dimensions.height)
+      ? hierarchyTargets(currentGraphData.nodes, dimensions.width, dimensions.height, focusedNode?.id)
       : new Map<string, { x: number; y: number }>();
     const nodes = currentGraphData.nodes.map((node, index) => ({
       ...node,
@@ -480,7 +541,7 @@ export function WikiGraphView({
     return () => {
       simulation.stop();
     };
-  }, [dimensions.height, dimensions.width, draw, getNodeRadius, graphData, layoutMode]);
+  }, [dimensions.height, dimensions.width, draw, focusedNode, getNodeRadius, graphData, layoutMode]);
 
   useEffect(() => {
     draw();
@@ -521,13 +582,7 @@ export function WikiGraphView({
       onPageClick?.(node.id);
       return;
     }
-    const value = node.id.includes(":") ? node.id.slice(node.id.indexOf(":") + 1) : node.id;
-    if (node.kind === "topic") {
-      onFilterClick?.(node.kind, value);
-    } else {
-      setSelectedNode(node);
-    }
-  }, [onFilterClick, onPageClick]);
+  }, [onPageClick]);
 
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!interactive) return;
@@ -650,6 +705,27 @@ export function WikiGraphView({
     draw();
   }, [draw]);
 
+  const focusSelectedNode = useCallback(() => {
+    if (!selectedNode || selectedNode.kind === "root") return;
+    setFocusedNode(selectedNode);
+    transformRef.current = { x: 0, y: 0, k: 1 };
+  }, [selectedNode]);
+
+  const clearFocus = useCallback(() => {
+    setFocusedNode(null);
+    transformRef.current = { x: 0, y: 0, k: 1 };
+  }, []);
+
+  const filterSelectedNode = useCallback(() => {
+    if (!selectedNode || selectedNode.kind === "root") return;
+    const value = selectedNode.id.includes(":") ? selectedNode.id.slice(selectedNode.id.indexOf(":") + 1) : selectedNode.id;
+    if (selectedNode.kind === "domain" || selectedNode.kind === "topic") {
+      onFilterClick?.("topic", value);
+    } else if (selectedNode.type) {
+      onFilterClick?.("type", selectedNode.type);
+    }
+  }, [onFilterClick, selectedNode]);
+
   const legend = useMemo(() => [
     ...(layoutMode === "hierarchy" ? [["all", COLORS.root]] : []),
     ["domain", COLORS.domain],
@@ -701,6 +777,16 @@ export function WikiGraphView({
         </div>
       ) : null}
 
+      {focusedNode ? (
+        <div className="absolute left-2 top-12 z-10 flex max-w-[70%] items-center gap-2 rounded-md border bg-background/95 px-2 py-1.5 text-[11px] shadow-sm">
+          <span className="truncate text-muted-foreground">当前起点</span>
+          <span className="max-w-48 truncate font-medium">{focusedNode.label}</span>
+          <button className="text-primary hover:underline" onClick={clearFocus}>
+            清除
+          </button>
+        </div>
+      ) : null}
+
       <canvas
         ref={canvasRef}
         className={cn("block h-full w-full", interactive && "cursor-grab")}
@@ -741,6 +827,21 @@ export function WikiGraphView({
           {selectedNode.type ? <p className="mt-1 text-muted-foreground">type: {selectedNode.type}</p> : null}
           {selectedNode.mode ? <p className="text-muted-foreground">mode: {selectedNode.mode}</p> : null}
           {selectedNode.tags?.length ? <p className="mt-1 line-clamp-2 text-muted-foreground">tags: {selectedNode.tags.join(", ")}</p> : null}
+          {selectedNode.kind !== "root" ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <Button size="sm" variant="secondary" className="h-7 px-2 text-[11px]" onClick={focusSelectedNode}>
+                聚焦
+              </Button>
+              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={filterSelectedNode}>
+                筛选
+              </Button>
+              {focusedNode ? (
+                <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={clearFocus}>
+                  全部
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
