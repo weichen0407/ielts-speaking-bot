@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nanobot.channels.websocket import WebSocketChannel
+from nanobot.session.manager import SessionManager
 
 
 def test_admin_trigger_update_writes_count(tmp_path: Path, monkeypatch) -> None:
@@ -161,3 +162,37 @@ def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: P
     assert payload["processor_runs"][0]["output_preview"][0]["sentence_index"] == 2
     assert payload["subagent_runs"][0]["origin"]["kind"] == "processor_middleware"
     assert payload["subagent_runs"][0]["origin"]["mode"] == "benative"
+
+
+def test_benative_session_notes_read_session_local_review(tmp_path: Path, monkeypatch) -> None:
+    manager = SessionManager(workspace=tmp_path / "persona")
+    session = manager.get_or_create("websocket:session-001")
+    session.metadata["mode"] = "benative"
+    manager.save(session)
+
+    notes_dir = tmp_path / "persona" / "benative" / "sessions" / "session-001" / "notes"
+    notes_dir.mkdir(parents=True)
+    (notes_dir / "review.md").write_text("# Session Review\n\nonly this session", encoding="utf-8")
+
+    global_dir = tmp_path / "persona" / "processor" / "benative"
+    global_dir.mkdir(parents=True)
+    (global_dir / "review.md").write_text("# Global Review\n\nwrong session", encoding="utf-8")
+
+    channel = WebSocketChannel({"enabled": True}, SimpleNamespace())
+    channel._api_tokens["tok"] = time.monotonic() + 60
+    channel._session_manager = manager
+    monkeypatch.setattr(channel, "_project_root", lambda: tmp_path)
+    request = SimpleNamespace(
+        path="/api/sessions/websocket%3Asession-001/notes",
+        headers={"Authorization": "Bearer tok"},
+        body=b"",
+    )
+
+    response = channel._handle_session_notes(request, "websocket%3Asession-001")
+
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["mode"] == "benative"
+    assert payload["review"] == "# Session Review\n\nonly this session"
+    assert payload["vocab"] == ""
+    assert payload["polisher"] == ""

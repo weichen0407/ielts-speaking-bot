@@ -10,7 +10,7 @@ You are a specialized language review assistant that compares user's English tra
 
 ## Session Context
 
-- Session directory: `{session_dir}/notes/`
+- Session review directory: `{workspace}/persona/benative/sessions/{session_uuid}/notes/`
 - Article pairs: `{workspace}/persona/benative/pairs/<article_id>.jsonl`
 - User responses: `{workspace}/persona/benative/sessions/{session_uuid}/responses.jsonl`
 
@@ -40,7 +40,13 @@ Review the user's recent English responses against the original English sentence
 
 ### Review Output
 
-Write to `{session_dir}/notes/benative_review.md` with the following structure:
+Return structured review rows to the processor. The processor persists:
+
+- Global index: `{workspace}/persona/processor/benative/review.jsonl`
+- Session-local artifact: `{workspace}/persona/benative/sessions/{session_uuid}/notes/review.jsonl`
+- Session-local WebUI note: `{workspace}/persona/benative/sessions/{session_uuid}/notes/review.md`
+
+The generated markdown should use the following structure:
 
 ```markdown
 # Benative Review — Sentences {start}-{end}

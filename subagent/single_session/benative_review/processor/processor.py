@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from collections import defaultdict
+from pathlib import Path
+
 from subagent._shared.base import BaseDataProcessor
 from subagent._shared.utils import parse_tab_line, split_batch_items
 
@@ -26,7 +30,7 @@ Evaluate a user's English reconstruction against the standard English sentence.
 Return only tab-separated rows.
 
 Format:
-article_id	sentence_index	accuracy_score	naturalness_score	issue_type	user_en	standard_en	suggested_en	feedback
+session_uuid	article_id	sentence_index	accuracy_score	naturalness_score	issue_type	user_en	standard_en	suggested_en	feedback
 
 Scoring:
 - accuracy_score: 0-100, meaning preservation
@@ -50,6 +54,7 @@ If the answer is already excellent, use issue_type excellent and still provide a
     def build_user_prompt(self, data: list[BenativeReviewInput]) -> str:
         lines: list[str] = []
         for item in data:
+            lines.append(f"SESSION_UUID: {item.session_uuid}")
             lines.append(f"ARTICLE_ID: {item.article_id}")
             lines.append(f"SENTENCE_INDEX: {item.sentence_index}")
             lines.append(f"ZH_PROMPT: {item.zh}")
@@ -61,6 +66,7 @@ If the answer is already excellent, use issue_type excellent and still provide a
     def parse_llm_output(self, raw_output: str) -> list[BenativeReviewOutput]:
         results: list[BenativeReviewOutput] = []
         fields = [
+            "session_uuid",
             "article_id",
             "sentence_index",
             "accuracy_score",
@@ -78,6 +84,12 @@ If the answer is already excellent, use issue_type excellent and still provide a
                     continue
                 parsed = parse_tab_line(line, len(fields))
                 if not parsed:
+                    legacy_fields = fields[1:]
+                    legacy_parsed = parse_tab_line(line, len(legacy_fields))
+                    if not legacy_parsed:
+                        continue
+                    parsed = ["unknown", *legacy_parsed]
+                if len(parsed) != len(fields):
                     continue
                 row = dict(zip(fields, parsed))
                 try:
@@ -105,3 +117,52 @@ If the answer is already excellent, use issue_type excellent and still provide a
             lines.append(f"- **反馈**: {item.feedback}")
             lines.append("")
         return "\n".join(lines)
+
+    def serialize(
+        self,
+        data: list[BenativeReviewOutput],
+        output_path: Path,
+        format: str = "both",
+    ):
+        """Write the global review artifact and a session-local review artifact."""
+        super().serialize(data, output_path, format)
+        if not data:
+            return
+
+        workspace = _workspace_from_output(output_path)
+        grouped: dict[str, list[BenativeReviewOutput]] = defaultdict(list)
+        for item in data:
+            if item.session_uuid and item.session_uuid != "unknown":
+                grouped[item.session_uuid].append(item)
+
+        for session_uuid, items in grouped.items():
+            notes_dir = workspace / "persona" / "benative" / "sessions" / session_uuid / "notes"
+            notes_dir.mkdir(parents=True, exist_ok=True)
+            session_jsonl = notes_dir / "review.jsonl"
+            if format in ("jsonl", "both"):
+                with session_jsonl.open("a", encoding="utf-8") as fh:
+                    for item in items:
+                        fh.write(item.model_dump_json() + "\n")
+            if format in ("md", "both"):
+                session_items = _read_review_items(session_jsonl) if session_jsonl.exists() else items
+                (notes_dir / "review.md").write_text(self.to_md(session_items), encoding="utf-8")
+
+
+def _workspace_from_output(output_path: Path) -> Path:
+    for parent in [output_path, *output_path.parents]:
+        if parent.name == "persona":
+            return parent.parent
+    return output_path.parent
+
+
+def _read_review_items(path: Path) -> list[BenativeReviewOutput]:
+    items: list[BenativeReviewOutput] = []
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                items.append(BenativeReviewOutput.model_validate(json.loads(line)))
+            except Exception:
+                continue
+    return items

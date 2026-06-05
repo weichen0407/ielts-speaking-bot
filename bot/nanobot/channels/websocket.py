@@ -1475,17 +1475,11 @@ class WebSocketChannel(BaseChannel):
             notes["mode"] = session.metadata.get("mode") or ""
             if session.metadata.get("mode") == "benative":
                 root = self._project_root()
-                processor_dir = root / "persona" / "processor" / "benative"
-                for key_name, file_name in (
-                    ("vocab", "vocab.md"),
-                    ("polisher", "polisher.md"),
-                    ("review", "review.md"),
-                ):
-                    path = processor_dir / file_name
-                    if path.exists():
-                        notes[key_name] = path.read_text(encoding="utf-8")
-                    else:
-                        notes.setdefault(key_name, "")
+                session_uuid = session.session_uuid or session.metadata.get("session_uuid") or ""
+                review_path = root / "persona" / "benative" / "sessions" / session_uuid / "notes" / "review.md"
+                notes["vocab"] = ""
+                notes["polisher"] = ""
+                notes["review"] = review_path.read_text(encoding="utf-8") if review_path.exists() else ""
         except Exception as e:
             logger.debug("failed to load benative processor notes: {}", e)
         # Return empty if no notes found (session might not exist or have no notes yet)

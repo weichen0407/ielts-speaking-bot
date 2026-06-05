@@ -66,6 +66,7 @@ class BenativeResponse(BaseModel):
 class BenativeReviewItem(BaseModel):
     """Structured feedback comparing user answer with the standard sentence."""
 
+    session_uuid: str
     article_id: str
     sentence_index: int
     accuracy_score: int

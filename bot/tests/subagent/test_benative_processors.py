@@ -63,7 +63,7 @@ def test_benative_article_processor_reads_markdown_source(tmp_path: Path) -> Non
 def test_benative_review_processor_parses_review_rows() -> None:
     processor = BenativeReviewProcessor()
     raw = (
-        "article_001\t0\t82\t78\tgrammar\t"
+        "session-001\tarticle_001\t0\t82\t78\tgrammar\t"
         "Family can build strong relationship when they spend time together.\t"
         "Families often build stronger relationships by spending time together.\t"
         "Families can build stronger relationships when they spend time together.\t"
@@ -73,10 +73,32 @@ def test_benative_review_processor_parses_review_rows() -> None:
     parsed = processor.parse_llm_output(raw)
 
     assert len(parsed) == 1
+    assert parsed[0].session_uuid == "session-001"
     assert parsed[0].article_id == "article_001"
     assert parsed[0].sentence_index == 0
     assert parsed[0].accuracy_score == 82
     assert parsed[0].issue_type == "grammar"
+
+
+def test_benative_review_processor_writes_session_notes(tmp_path: Path) -> None:
+    processor = BenativeReviewProcessor()
+    parsed = processor.parse_llm_output(
+        "session-001\tarticle_001\t0\t82\t78\tgrammar\t"
+        "Family can build strong relationship when they spend time together.\t"
+        "Families often build stronger relationships by spending time together.\t"
+        "Families can build stronger relationships when they spend time together.\t"
+        "relationship 应该用复数，stronger relationships 更自然。"
+    )
+    output_path = tmp_path / "persona" / "processor" / "benative" / "review.jsonl"
+
+    processor.serialize(parsed, output_path, "both")
+
+    session_notes = tmp_path / "persona" / "benative" / "sessions" / "session-001" / "notes"
+    assert output_path.exists()
+    assert (session_notes / "review.jsonl").exists()
+    review_md = (session_notes / "review.md").read_text(encoding="utf-8")
+    assert "article_001:0" in review_md
+    assert "relationship 应该用复数" in review_md
 
 
 def test_benative_processors_are_discoverable() -> None:
