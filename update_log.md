@@ -1,5 +1,16 @@
 # Update Log
 
+## 2026-06-07 - P1/P2 后续更新计划
+
+- 新增 `docs/p1-runtime-hardening-plan.md`：
+  - 聚焦 registry control plane、processor cursor/delta、monitor session/mode 可观测性、LLM Wiki pipeline、Be Native runtime flow、P1 regression matrix。
+  - 所有任务保持未完成状态，作为下一轮实现 checklist。
+- 新增 `docs/p2-product-polish-plan.md`：
+  - 聚焦 WebUI graph/artifact navigation、agentic tool layer、cost/token/model governance、data lifecycle/export、browser smoke tests、channel expansion。
+  - 所有任务保持未完成状态，作为产品化和规模化 checklist。
+
+---
+
 ## 2026-06-07 - P0 Runtime 稳定性清理
 
 - 新增 `docs/p0-stability-cleanup-plan.md`，把 P0 项按顺序记录并全部标记完成。
