@@ -240,7 +240,10 @@ class WikiIngestor:
             text = content.get("text", "")
         else:
             text = content or ""
-        if not isinstance(text, str) or not text.strip():
+        if not isinstance(text, str):
+            return None
+        text = text.strip()
+        if not text or not _content_allowed(text, str(role)):
             return None
         source = event.get("source") if isinstance(event.get("source"), dict) else {}
         return IngestMessage(
@@ -249,7 +252,7 @@ class WikiIngestor:
             session_id=source.get("session_uuid"),
             message_index=source.get("message_index"),
             role=str(role),
-            text=text.strip(),
+            text=text,
             timestamp=event.get("timestamp"),
             raw=event,
         )
@@ -315,3 +318,59 @@ def _role_allowed(role: str, allowed_roles: set[str] | None) -> bool:
     if not allowed_roles:
         return True
     return str(role).lower() in allowed_roles
+
+
+def _content_allowed(text: str, role: str) -> bool:
+    """Filter obvious operational noise before it becomes long-term memory."""
+
+    if role != "user":
+        return True
+
+    compact = re.sub(r"\s+", " ", text).strip()
+    lowered = compact.lower()
+    if not compact:
+        return False
+
+    if compact.startswith(("/", "\\", "::")):
+        return False
+
+    if lowered.startswith(
+        (
+            "system:",
+            "assistant:",
+            "user:",
+            "developer:",
+            "tool:",
+            "error:",
+            "traceback",
+            "file \"",
+            "[nanobot",
+        )
+    ):
+        return False
+
+    noise = {
+        "test",
+        "testing",
+        "debug",
+        "hello",
+        "hi",
+        "ok",
+        "okay",
+        "done",
+        "1",
+        "2",
+        "3",
+        "测试",
+        "好的",
+        "可以",
+        "嗯",
+        "好",
+    }
+    if lowered in noise:
+        return False
+
+    if len(compact) <= 2:
+        return False
+
+    return True

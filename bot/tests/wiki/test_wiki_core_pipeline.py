@@ -58,3 +58,55 @@ def test_ingest_crystallize_query_and_lint(tmp_path: Path):
 
     findings = WikiLinter(wiki_root=wiki_root).lint()
     assert not [finding for finding in findings if finding.severity == "error"]
+
+
+def test_ingest_filters_operational_noise(tmp_path: Path):
+    workspace = tmp_path
+    data_dir = workspace / "persona" / "events"
+    data_dir.mkdir(parents=True)
+    thread_path = data_dir / "thread.jsonl"
+    events = [
+        {
+            "id": "noise-command",
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 1},
+            "role": "user",
+            "content": {"type": "text", "text": "/mode benative"},
+        },
+        {
+            "id": "noise-test",
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 2},
+            "role": "user",
+            "content": {"type": "text", "text": "test"},
+        },
+        {
+            "id": "noise-error",
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 3},
+            "role": "user",
+            "content": {"type": "text", "text": "Error: duplicate tool_call_id"},
+        },
+        {
+            "id": "real-signal",
+            "source": {"mode": "freechat", "session_uuid": "s1", "message_index": 4},
+            "role": "user",
+            "content": {
+                "type": "text",
+                "text": "I like basketball, traveling to Paris, and watching Arsenal.",
+            },
+        },
+    ]
+    thread_path.write_text(
+        "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events),
+        encoding="utf-8",
+    )
+
+    ingestor = WikiIngestor(workspace=workspace, wiki_root=workspace / "persona" / "wiki")
+    batch = ingestor.ingest_thread_delta(
+        session_id="s1",
+        allowed_modes={"freechat"},
+        allowed_roles={"user"},
+    )
+    analysis = ingestor.analyze(batch)
+
+    assert [message.event_id for message in batch.messages] == ["real-signal"]
+    assert analysis.candidates
+    assert "Paris" in analysis.candidates[0].content

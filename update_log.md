@@ -1,5 +1,22 @@
 # Update Log
 
+## 2026-06-07 - P0 Runtime 稳定性清理
+
+- 新增 `docs/p0-stability-cleanup-plan.md`，把 P0 项按顺序记录并全部标记完成。
+- 将旧 Be Native prompt-only subagent 归档到 `docs/deprecated/subagents/`，并从 `subagent/` 运行路径移除，避免旧能力被误认为仍可调用。
+- 新增根目录 `pytest.ini`，并移除 `bot/pyproject.toml` 中在当前根环境会产生 warning 的 `asyncio_mode` 配置；`uv run pytest ...` 现在不再出现 unknown config warning。
+- LLM Wiki ingest 增加内容噪声过滤，默认跳过 slash command、测试短句、错误栈和 system-like 文本，减少长期记忆污染。
+- 扩展 `scripts/validate_subagent_config.py`：
+  - 禁止 trigger 重新引用 deprecated subagent。
+  - 校验 `persona/processor/{mode}/...` output path 与 trigger 所属 mode 一致。
+  - 校验 processor 的 `mode_outputs` 与 trigger output path 一致。
+- 验证通过：
+  - `uv run python scripts/validate_subagent_config.py`
+  - `uv run pytest bot/tests/wiki/test_wiki_sync.py -q`
+  - `uv run pytest bot/tests/wiki/test_wiki_core_pipeline.py bot/tests/wiki/test_wiki_sync.py bot/tests/config/test_capabilities_registry.py bot/tests/counter/test_benative_triggers.py -q`
+
+---
+
 ## 2026-06-05 - Capability Registry 一致性校验
 
 - 将 `config/capabilities.yaml` 从单纯能力索引进一步收束为 agent control plane：

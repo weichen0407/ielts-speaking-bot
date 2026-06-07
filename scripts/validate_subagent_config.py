@@ -59,6 +59,15 @@ def _as_list(value: Any) -> list[str]:
     return []
 
 
+def _mode_from_processor_output_path(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    parts = Path(str(raw)).as_posix().split("/")
+    if len(parts) >= 4 and parts[0] == "persona" and parts[1] == "processor":
+        return parts[2]
+    return None
+
+
 def validate_config(root: Path = ROOT) -> dict[str, Any]:
     errors: list[str] = []
     trigger_count = 0
@@ -69,6 +78,10 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
     registered_subagents = capabilities.get("subagents") if isinstance(capabilities.get("subagents"), dict) else {}
     registered_processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
     registered_tools = capabilities.get("tools") if isinstance(capabilities.get("tools"), dict) else {}
+    deprecated = capabilities.get("deprecated") if isinstance(capabilities.get("deprecated"), dict) else {}
+    deprecated_subagents = set(
+        (deprecated.get("subagents") if isinstance(deprecated.get("subagents"), dict) else {}).keys()
+    )
     file_to_mode = _mode_for_trigger_file(root, capabilities)
 
     for file_path in _trigger_files(root):
@@ -99,10 +112,13 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
             processor = str(target.get("processor") or "")
             execution_mode = str(target.get("execution_mode") or "api")
             tools = _as_list(target.get("tools"))
+            output_mode = _mode_from_processor_output_path(target.get("output_path"))
             if not subagent and not processor:
                 errors.append(f"{rel}:{trigger_id}: target must declare subagent or processor")
             if subagent:
                 subagents.add(subagent)
+                if subagent in deprecated_subagents:
+                    errors.append(f"{rel}:{trigger_id}: subagent {subagent} is deprecated and must not be referenced by triggers")
                 if subagent not in registered_subagents:
                     errors.append(f"{rel}:{trigger_id}: subagent missing from config/capabilities.yaml: {subagent}")
                 elif enabled and mode_subagents and subagent not in mode_subagents:
@@ -120,6 +136,20 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
                         errors.append(f"{rel}:{trigger_id}: tool {tool} is not allowlisted for subagent {subagent} execution_mode={execution_mode}")
             if processor and processor not in registered_processors:
                 errors.append(f"{rel}:{trigger_id}: processor missing from config/capabilities.yaml: {processor}")
+            if output_mode and mode_name and output_mode != mode_name:
+                errors.append(f"{rel}:{trigger_id}: output_path mode {output_mode} does not match trigger mode {mode_name}")
+            if processor and processor in registered_processors and output_mode and mode_name:
+                processor_config = registered_processors.get(processor)
+                mode_outputs = (
+                    processor_config.get("mode_outputs")
+                    if isinstance(processor_config, dict) and isinstance(processor_config.get("mode_outputs"), dict)
+                    else {}
+                )
+                expected_output = mode_outputs.get(mode_name)
+                if expected_output and str(expected_output) != str(target.get("output_path")):
+                    errors.append(
+                        f"{rel}:{trigger_id}: output_path does not match processors.{processor}.mode_outputs.{mode_name}"
+                    )
             depends_on = target.get("depends_on")
             if depends_on and str(depends_on) not in trigger_ids:
                 errors.append(f"{rel}:{trigger_id}: depends_on references unknown earlier trigger id: {depends_on}")
