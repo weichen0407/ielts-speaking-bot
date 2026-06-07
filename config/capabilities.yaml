@@ -12,7 +12,13 @@ runtime_roots:
 models:
   deepseek-v4-flash:
     provider: deepseek
+    model_name: deepseek-v4-flash
     intended_use: default low-cost processor and subagent model
+    context_window: 64000
+    default_max_tokens: 1200
+    input_cost_per_1m: 0.14
+    cached_input_cost_per_1m: 0.0028
+    output_cost_per_1m: 0.28
     cost_tier: low
     notes: Used for current processor-mediated subagents and background analysis.
 
@@ -175,18 +181,74 @@ tools:
     status: active
     scope: read_only
     description: Read recent or historical conversation turns from approved thread logs.
+    permissions: [read_thread]
+    timeout_ms: 2000
+    input_schema:
+      query: string
+      role: string
+      limit: integer
+    output_schema:
+      status: string
+      messages: array
+      count: integer
+    audit_log_fields: [timestamp, tool, status, query, role, limit, count]
   artifact_read:
     status: active
     scope: read_only
     description: Read processor artifacts such as vocab.jsonl and polisher.jsonl.
+    permissions: [read_artifacts]
+    timeout_ms: 2000
+    input_schema:
+      artifact: string
+      path: string
+      limit: integer
+    output_schema:
+      status: string
+      path: string
+      rows: array
+      content: string
+    audit_log_fields: [timestamp, tool, status, artifact, path, limit]
   user_profile:
     status: active
     scope: read_only
     description: Read stable user profile, memory, habits, and recurring learning patterns.
+    permissions: [read_user_profile]
+    timeout_ms: 1500
+    input_schema:
+      section: string
+    output_schema:
+      status: string
+      files: object
+    audit_log_fields: [timestamp, tool, status, section]
   wiki_query:
     status: active
     scope: read_only
     description: Query local LLM Wiki pages, graph, entities, concepts, and gaps.
+    permissions: [read_wiki]
+    timeout_ms: 2500
+    input_schema:
+      query: string
+      mode: string
+      topic: string
+      page_type: string
+      limit: integer
+    output_schema:
+      status: string
+      results: array
+      count: integer
+    audit_log_fields: [timestamp, tool, status, query, mode, topic, page_type, limit, count]
+
+budgets:
+  daily:
+    freechat_usd: 0.25
+    benative_usd: 0.25
+    wiki_sync_usd: 0.10
+    background_usd: 0.15
+  per_session:
+    max_processor_runs: 40
+    max_agentic_subagent_runs: 12
+  processors:
+    dry_run_env: NANOBOT_PROCESSOR_DRY_RUN
 
 observability:
   trigger_decisions:

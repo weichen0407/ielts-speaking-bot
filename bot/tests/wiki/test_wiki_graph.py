@@ -175,6 +175,53 @@ class TestWikiGraph:
         page_ids_other = [n["id"] for n in graph_other["nodes"] if n["kind"] == "page"]
         assert "test/sports" not in page_ids_other
 
+    def test_filter_by_memory_status(self, wiki_root: Path):
+        from subagent.cross_session.wiki.processor.wiki_store import WikiStore
+
+        store = WikiStore(workspace=wiki_root.parent, wiki_root=wiki_root)
+        store.apply_patch(
+            WikiPatch(
+                operation="merge_section",
+                slug="test/confirmed",
+                title="Confirmed",
+                type="source",
+                mode="freechat",
+                section="Extracted Signals",
+                content="User likes basketball.",
+                links=[],
+                sources=[WikiSource(kind="thread", session_id="x", message_id="u:1")],
+                confidence="high",
+                memory_status="confirmed",
+            )
+        )
+        store.apply_patch(
+            WikiPatch(
+                operation="merge_section",
+                slug="test/uncertain",
+                title="Uncertain",
+                type="gap",
+                mode="freechat",
+                section="Missing Knowledge",
+                content="Need to confirm if the user still supports Arsenal.",
+                links=[],
+                sources=[WikiSource(kind="thread", session_id="x", message_id="u:2")],
+                confidence="low",
+                memory_status="needs_user_confirmation",
+            )
+        )
+
+        confirmed = build_wiki_graph(wiki_root, memory_status="confirmed")
+        confirmed_ids = {n["id"] for n in confirmed["nodes"] if n["kind"] == "page"}
+        assert "test/confirmed" in confirmed_ids
+        assert "test/uncertain" not in confirmed_ids
+        confirmed_node = next(n for n in confirmed["nodes"] if n["id"] == "test/confirmed")
+        assert confirmed_node["memory_status"] == "confirmed"
+
+        uncertain = build_wiki_graph(wiki_root, memory_status="uncertain")
+        uncertain_ids = {n["id"] for n in uncertain["nodes"] if n["kind"] == "page"}
+        assert "test/uncertain" in uncertain_ids
+        assert "test/confirmed" not in uncertain_ids
+
     def test_link_edges(self, wiki_root: Path):
         from subagent.cross_session.wiki.processor.wiki_store import WikiStore
 

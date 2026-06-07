@@ -31,6 +31,7 @@ class WikiGraphNode:
         topics: list[str] | None = None,
         updated_at: str | None = None,
         summary: str | None = None,
+        memory_status: str | None = None,
         size: int = 1,
     ):
         self.id = id
@@ -42,6 +43,7 @@ class WikiGraphNode:
         self.topics = topics or []
         self.updated_at = updated_at
         self.summary = summary
+        self.memory_status = memory_status
         self.size = size
 
     def to_dict(self) -> dict:
@@ -55,6 +57,7 @@ class WikiGraphNode:
             "topics": self.topics,
             "updated_at": self.updated_at,
             "summary": self.summary,
+            "memory_status": self.memory_status,
             "size": self.size,
         }
 
@@ -80,6 +83,7 @@ def build_wiki_graph(
     topic: str | None = None,
     page_type: str | None = None,
     tags: list[str] | None = None,
+    memory_status: str | None = None,
 ) -> dict:
     """Build graph data from wiki pages.
 
@@ -101,6 +105,8 @@ def build_wiki_graph(
             continue
         if tags and not any(t in meta.tags for t in tags):
             continue
+        if memory_status and not _matches_memory_status(meta.memory_status, memory_status):
+            continue
 
         page_data = store.read_page(meta.slug)
         body = page_data[1] if page_data else ""
@@ -120,6 +126,7 @@ def build_wiki_graph(
                 tags=meta.tags,
                 topics=meta.topics,
                 updated_at=meta.updated_at,
+                memory_status=meta.memory_status,
                 size=max(
                     1,
                     len(meta.links)
@@ -318,6 +325,18 @@ def _matches_topic_filter(meta: WikiPageMeta, topic: str) -> bool:
         return True
     projection = _taxonomy_from_meta(meta)
     return topic in {projection.domain, projection.topic, projection.topic_path}
+
+
+def _matches_memory_status(actual: str, wanted: str) -> bool:
+    wanted = wanted.strip().lower()
+    actual = (actual or "new").strip().lower()
+    if wanted == "uncertain":
+        return actual in {"new", "needs_user_confirmation", "contradicted"}
+    if wanted == "confirmed":
+        return actual == "confirmed"
+    if wanted == "stale":
+        return actual == "stale"
+    return actual == wanted
 
 
 def _tag_value(tags: list[str], prefix: str) -> str | None:

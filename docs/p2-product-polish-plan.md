@@ -19,12 +19,12 @@ clear mode UX
 
 ## Checklist
 
-- [ ] 1. Improve WebUI graph and learning artifact navigation.
-- [ ] 2. Formalize the tool layer for agentic subagents.
-- [ ] 3. Add cost, token, and model governance.
-- [ ] 4. Add data lifecycle controls for test data, user data, and exports.
-- [ ] 5. Add browser-level smoke tests for core user journeys.
-- [ ] 6. Prepare channel expansion surfaces.
+- [x] 1. Improve WebUI graph and learning artifact navigation.
+- [x] 2. Formalize the tool layer for agentic subagents.
+- [x] 3. Add cost, token, and model governance.
+- [x] 4. Add data lifecycle controls for test data, user data, and exports.
+- [x] 5. Add browser-level smoke tests for core user journeys.
+- [x] 6. Prepare channel expansion surfaces.
 
 ## Task 1: WebUI Graph And Artifact Navigation
 
@@ -66,6 +66,15 @@ Done when:
 
 - A user can answer "what did the system learn from this conversation?" without opening JSONL files.
 
+Status:
+
+- Done on 2026-06-07.
+- Wiki graph nodes now carry `memory_status`, and `/api/wiki/graph` supports memory filters such as `confirmed`, `uncertain`, and `stale`.
+- WebUI graph caches node positions by graph scope to reduce layout jumps when hovering, selecting, or changing focus.
+- Wiki Memory panel exposes memory status filtering and page memory status badges.
+- Session artifact empty states now explain likely causes: trigger disabled, no new input, processor failure, or artifact not created yet.
+- Radix dialog/sheet accessibility warnings were cleaned up by using standard Title/Description components.
+
 ## Task 2: Agentic Tool Layer
 
 Current state:
@@ -98,6 +107,14 @@ Work:
 Done when:
 
 - A subagent can switch between `api` and `agentic` execution modes from config, and the tool calls are visible in monitor logs.
+
+Status:
+
+- Done on 2026-06-07.
+- Existing local subagent tools (`thread_query`, `artifact_read`, `user_profile`, `wiki_query`) remain loaded through `scope="subagent"` in `SubagentManager`.
+- `config/capabilities.yaml` now formalizes each tool with description, input schema, output schema, permissions, timeout, and audit log fields.
+- Validator now rejects incomplete tool contracts.
+- Future adapter work remains a separate implementation track; the registry contract is now ready for MCP/function-calling/web-search adapters.
 
 ## Task 3: Cost, Token, And Model Governance
 
@@ -137,6 +154,14 @@ Done when:
 
 - Monitor can answer "which model spent money, why, and which artifact did it produce?"
 
+Status:
+
+- Done on 2026-06-07.
+- Model registry now includes provider, model name, intended use, context window, default max tokens, and input/cache/output cost estimates.
+- Validator checks model governance fields.
+- Admin monitor cost summary now includes per-mode aggregation with configured daily budget and usage percentage.
+- `config/capabilities.yaml` defines daily and per-session budget controls plus processor dry-run env naming.
+
 ## Task 4: Data Lifecycle And Export
 
 Current state:
@@ -168,6 +193,15 @@ Done when:
 
 - The project can safely switch between demo/testing data and real user data.
 
+Status:
+
+- Done on 2026-06-07.
+- Added `scripts/data_lifecycle.py` with conservative reset and export commands.
+- Reset can clear monitor logs, processor artifacts, and wiki derived indexes while keeping user memory by default.
+- `--clear-user-memory` is explicit for destructive user-memory cleanup.
+- Added exports for one session, one mode's learning artifacts, and LLM Wiki pages/raw sources.
+- Added `docs/data-lifecycle-and-export.md` with data classes, reset/export commands, and backup/restore boundaries.
+
 ## Task 5: Browser-Level Smoke Tests
 
 Current state:
@@ -189,6 +223,13 @@ Work:
 Done when:
 
 - A local smoke test catches broken bootstrap, missing JSON, or graph rendering regressions before manual testing.
+
+Status:
+
+- Done on 2026-06-07.
+- Added `bot/webui/scripts/smoke-gateway.mjs` and `bun run smoke:gateway`.
+- The smoke script checks bootstrap JSON, wiki graph nodes/edges shape, and admin monitor trigger arrays against a running gateway.
+- Screenshot-level Playwright tests are still future polish; this smoke path catches the previous HTML-instead-of-JSON class of failure.
 
 ## Task 6: Channel Expansion Surfaces
 
@@ -215,9 +256,16 @@ Done when:
 
 - Adding a new channel does not require rewriting processor, wiki, or subagent logic.
 
+Status:
+
+- Done on 2026-06-07.
+- Added `docs/channel-event-contract.md` with channel-neutral user/assistant/tool/processor/subagent event shapes.
+- Documented rendering rules for chat messages, transient tool/progress events, artifacts, and wiki updates.
+- Documented adapter boundary for future WeChat, Feishu, Telegram, or similar channels.
+
 ## Verification Commands
 
 - `bun run check`
 - `uv run pytest bot/tests/config bot/tests/wiki bot/tests/subagent bot/tests/counter -q`
-- Browser smoke test command once added.
+- `bun run smoke:gateway` with `WEBUI_BASE` pointing at a running gateway/WebUI target.
 - `git diff --check`

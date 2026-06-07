@@ -46,6 +46,7 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
   const [topicFilter, setTopicFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [tagsFilter, setTagsFilter] = useState("");
+  const [memoryStatusFilter, setMemoryStatusFilter] = useState("");
   const [searchResults, setSearchResults] = useState<WikiSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -281,6 +282,17 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
               placeholder="tags"
               className="h-6 w-16 text-[10px]"
             />
+            <select
+              aria-label="Filter wiki graph by memory status"
+              value={memoryStatusFilter}
+              onChange={(e) => setMemoryStatusFilter(e.target.value)}
+              className="h-6 rounded-md border border-input bg-background px-1 text-[10px]"
+            >
+              <option value="">memory</option>
+              <option value="confirmed">confirmed</option>
+              <option value="uncertain">uncertain</option>
+              <option value="stale">stale</option>
+            </select>
           </div>
 
           {/* Results */}
@@ -385,6 +397,11 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
                       {pageData.meta.status}
                     </span>
                   )}
+                  {pageData.meta.memory_status && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                      {pageData.meta.memory_status}
+                    </span>
+                  )}
                   {pageData.meta.stability && (
                     <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                       {pageData.meta.stability}
@@ -455,6 +472,7 @@ export function WikiMemoryPanel({ api }: WikiMemoryPanelProps) {
             filterTopic={topicFilter || undefined}
             filterType={typeFilter || undefined}
             filterTags={tagsFilter || undefined}
+            filterMemoryStatus={memoryStatusFilter || undefined}
             onPageClick={(slug) => doLoadPage(slug)}
             onFilterClick={handleGraphFilterClick}
             interactive={true}

@@ -43,6 +43,21 @@ def test_freechat_registers_middleware_gated_subagents() -> None:
     tools = capabilities["tools"]
     for name in ["thread_query", "artifact_read", "user_profile", "wiki_query"]:
         assert tools[name]["scope"] == "read_only"
+        assert tools[name]["input_schema"]
+        assert tools[name]["output_schema"]
+        assert tools[name]["permissions"]
+        assert tools[name]["timeout_ms"] > 0
+        assert tools[name]["audit_log_fields"]
+
+    model = capabilities["models"]["deepseek-v4-flash"]
+    assert model["context_window"] > 0
+    assert model["default_max_tokens"] > 0
+    assert model["input_cost_per_1m"] >= 0
+    assert model["output_cost_per_1m"] >= 0
+
+    budgets = capabilities["budgets"]
+    assert budgets["daily"]["freechat_usd"] >= 0
+    assert budgets["per_session"]["max_processor_runs"] > 0
 
 
 def test_wiki_sync_defaults_to_freechat_only() -> None:
@@ -169,12 +184,23 @@ def test_validator_rejects_deprecated_subagent_even_when_trigger_disabled(tmp_pa
     assert any("subagent old_vocab is deprecated" in error for error in result["errors"])
 
 
+def test_validator_rejects_incomplete_tool_contract(tmp_path: Path) -> None:
+    _write_minimal_registry(tmp_path, include_tool=True, incomplete_tool=True)
+
+    result = validate_config(tmp_path)
+
+    assert result["ok"] is False
+    assert any("tool thread_query input_schema" in error for error in result["errors"])
+
+
 def _write_minimal_registry(
     root: Path,
     *,
     subagent_prompt: str = "subagent/single_session/vocab/context/vocab_subagent.md",
     trigger_enabled: bool = True,
     target_overrides: dict[str, object] | None = None,
+    include_tool: bool = False,
+    incomplete_tool: bool = False,
 ) -> None:
     prompt_path = root / subagent_prompt
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,12 +241,36 @@ def _write_minimal_registry(
         encoding="utf-8",
     )
 
+    tools_yaml = "tools: {}\n"
+    if include_tool:
+        tools_yaml = (
+            "tools:\n"
+            "  thread_query:\n"
+            "    status: active\n"
+            "    scope: read_only\n"
+            "    description: Read thread rows.\n"
+            "    permissions: [read_thread]\n"
+            "    timeout_ms: 1000\n"
+            + (
+                ""
+                if incomplete_tool
+                else "    input_schema:\n      query: string\n    output_schema:\n      status: string\n    audit_log_fields: [timestamp, tool, status]\n"
+            )
+        )
+
     (root / "config/capabilities.yaml").write_text(
         f"""
 version: 1
 models:
   deepseek-v4-flash:
     provider: deepseek
+    model_name: deepseek-v4-flash
+    intended_use: test
+    context_window: 64000
+    default_max_tokens: 1200
+    input_cost_per_1m: 0.14
+    cached_input_cost_per_1m: 0.0028
+    output_cost_per_1m: 0.28
 modes:
   freechat:
     trigger_file: mode/freechat/trigger/triggers.json
@@ -244,7 +294,16 @@ processors:
     output: persona/processor/freechat/vocab.jsonl
     mode_outputs:
       freechat: persona/processor/freechat/vocab.jsonl
-tools: {{}}
+{tools_yaml.rstrip()}
+budgets:
+  daily:
+    freechat_usd: 0.25
+    benative_usd: 0.25
+    wiki_sync_usd: 0.10
+    background_usd: 0.15
+  per_session:
+    max_processor_runs: 40
+    max_agentic_subagent_runs: 12
 deprecated:
   subagents:
     old_vocab:

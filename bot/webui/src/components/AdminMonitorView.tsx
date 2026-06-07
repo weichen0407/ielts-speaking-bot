@@ -685,6 +685,25 @@ export function AdminMonitorView({ onBackToChat }: AdminMonitorViewProps) {
                         <span>{costSummary.currency}</span>
                       </div>
                     </div>
+                    {costSummary.modes?.length ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] font-medium text-muted-foreground">按模式预算</p>
+                        {costSummary.modes.map((row) => (
+                          <div key={row.mode} className="rounded-md border p-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate font-medium">{row.mode}</span>
+                              <span>{formatUsd(row.estimated_usd)}</span>
+                            </div>
+                            <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-muted-foreground">
+                              <span>runs {row.runs}</span>
+                              <span>budget {typeof row.budget_usd === "number" ? formatUsd(row.budget_usd) : "n/a"}</span>
+                              <span>in {row.prompt_tokens}</span>
+                              <span>{typeof row.budget_used_pct === "number" ? `${row.budget_used_pct}%` : "no limit"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     {costSummary.models.map((row) => (
                       <div key={row.model} className="rounded-md border p-2">
                         <div className="flex items-center justify-between gap-2">

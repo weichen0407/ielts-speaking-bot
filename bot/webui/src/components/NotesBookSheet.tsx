@@ -1,5 +1,3 @@
-import * as React from "react";
-import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpen, Calendar, Trash2, Edit3, Quote, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -9,15 +7,16 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogPortal,
 } from "@/components/ui/dialog";
 import { parseNotesContent, type NoteEntry } from "@/components/GlobalNotes";
 import { fetchAllGlobalNotes, saveGlobalNotes, triggerNotesAiReply, fetchNotesAiReplies, fetchNotesAiReplyStatus, type AiReplyEntry } from "@/lib/api";
@@ -235,12 +234,18 @@ export function NotesBookSheet({ open, onOpenChange, onAiReplyComplete }: NotesB
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="left" className="flex flex-col p-0 sm:max-w-md">
+        <SheetContent
+          side="left"
+          className="flex flex-col p-0 sm:max-w-md"
+        >
           <SheetHeader className="border-b border-border/50 p-4">
             <div className="flex items-center gap-2">
               <BookOpen className="h-5 w-5 text-primary" />
               <SheetTitle>{t("notesBook.title")}</SheetTitle>
             </div>
+            <SheetDescription className="sr-only">
+              {t("notesBook.description", "Browse saved notes and AI replies across sessions.")}
+            </SheetDescription>
 
             {/* Date filter */}
             <div className="flex items-center gap-2 pt-2">
@@ -463,11 +468,14 @@ function NoteDetailDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPortal>
-        <DialogOverlay />
-        <DialogContent className="max-h-[80vh] overflow-y-auto">
+        <DialogContent
+          className="max-h-[80vh] overflow-y-auto"
+        >
           <DialogHeader>
             <DialogTitle>{t("notesBook.noteDetail")}</DialogTitle>
+            <DialogDescription className="sr-only">
+              {t("notesBook.noteDetailDescription", "View, edit, delete, or ask AI about this saved note.")}
+            </DialogDescription>
           </DialogHeader>
 
           {/* Meta info */}
@@ -567,23 +575,6 @@ function NoteDetailDialog({
             </div>
           )}
         </DialogContent>
-      </DialogPortal>
     </Dialog>
   );
 }
-
-// DialogOverlay - inline since not exported from ui/dialog
-const DialogOverlay = React.forwardRef<
-  React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className,
-    )}
-    {...props}
-  />
-));
-DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;

@@ -47,6 +47,7 @@ export interface WikiGraphViewProps {
   filterTopic?: string;
   filterType?: string;
   filterTags?: string;
+  filterMemoryStatus?: string;
   highlightedNodes?: Set<string>;
   onPageClick?: (slug: string) => void;
   onFilterClick?: (kind: string, value: string) => void;
@@ -271,6 +272,7 @@ export function WikiGraphView({
   filterTopic,
   filterType,
   filterTags,
+  filterMemoryStatus,
   highlightedNodes,
   onPageClick,
   onFilterClick,
@@ -289,6 +291,7 @@ export function WikiGraphView({
   const hoveredNodeRef = useRef<GraphNode | null>(null);
   const selectedNodeRef = useRef<GraphNode | null>(null);
   const canvasSizeRef = useRef<{ width: number; height: number; ratio: number }>({ width: 0, height: 0, ratio: 0 });
+  const positionCacheRef = useRef<Map<string, Map<string, { x: number; y: number }>>>(new Map());
 
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
   const [dimensions, setDimensions] = useState({ width: 640, height: 420 });
@@ -322,6 +325,7 @@ export function WikiGraphView({
         topic: filterTopic,
         type: filterType,
         tags: filterTags,
+        memory_status: filterMemoryStatus,
       });
       const degree = new Map<string, number>();
       for (const edge of data.edges) {
@@ -340,7 +344,7 @@ export function WikiGraphView({
     } finally {
       setIsLoading(false);
     }
-  }, [filterMode, filterTags, filterTopic, filterType, token]);
+  }, [filterMemoryStatus, filterMode, filterTags, filterTopic, filterType, token]);
 
   useEffect(() => {
     loadGraph();
@@ -367,6 +371,31 @@ export function WikiGraphView({
     if (node.kind === "concept") return Math.min(20, 8 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 2);
     return Math.min(18, 7 + Math.sqrt(Math.max(node.degree, node.size ?? 1)) * 1.8);
   }, []);
+
+  const graphScopeKey = useMemo(
+    () => [
+      layoutMode,
+      filterMode || "all",
+      filterTopic || "all",
+      filterType || "all",
+      filterTags || "all",
+      filterMemoryStatus || "all",
+      focusedNode?.id || "root",
+      Math.round(dimensions.width / 40),
+      Math.round(dimensions.height / 40),
+    ].join("|"),
+    [
+      dimensions.height,
+      dimensions.width,
+      filterMemoryStatus,
+      filterMode,
+      filterTags,
+      filterTopic,
+      filterType,
+      focusedNode?.id,
+      layoutMode,
+    ],
+  );
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -484,7 +513,8 @@ export function WikiGraphView({
       : new Map<string, { x: number; y: number }>();
     const nodes = currentGraphData.nodes.map((node, index) => ({
       ...node,
-      ...(layerPositions.get(node.id)
+      ...(positionCacheRef.current.get(graphScopeKey)?.get(node.id)
+        ?? layerPositions.get(node.id)
         ?? initialNodePosition(node, index, topicPositions, dimensions.width, dimensions.height, currentGraphData.links)),
     }));
     const links = currentGraphData.links.map((link) => ({ ...link }));
@@ -534,6 +564,13 @@ export function WikiGraphView({
       .velocityDecay(0.58)
       .on("tick", () => {
         graphRef.current = { nodes, links };
+        const scopeCache = positionCacheRef.current.get(graphScopeKey) ?? new Map<string, { x: number; y: number }>();
+        for (const node of nodes) {
+          if (typeof node.x === "number" && typeof node.y === "number") {
+            scopeCache.set(node.id, { x: node.x, y: node.y });
+          }
+        }
+        positionCacheRef.current.set(graphScopeKey, scopeCache);
         draw();
       });
 
@@ -541,7 +578,7 @@ export function WikiGraphView({
     return () => {
       simulation.stop();
     };
-  }, [dimensions.height, dimensions.width, draw, focusedNode, getNodeRadius, graphData, layoutMode]);
+  }, [dimensions.height, dimensions.width, draw, focusedNode, getNodeRadius, graphData, graphScopeKey, layoutMode]);
 
   useEffect(() => {
     draw();
@@ -826,6 +863,7 @@ export function WikiGraphView({
           </div>
           {selectedNode.type ? <p className="mt-1 text-muted-foreground">type: {selectedNode.type}</p> : null}
           {selectedNode.mode ? <p className="text-muted-foreground">mode: {selectedNode.mode}</p> : null}
+          {selectedNode.memory_status ? <p className="text-muted-foreground">memory: {selectedNode.memory_status}</p> : null}
           {selectedNode.tags?.length ? <p className="mt-1 line-clamp-2 text-muted-foreground">tags: {selectedNode.tags.join(", ")}</p> : null}
           {selectedNode.kind !== "root" ? (
             <div className="mt-2 flex flex-wrap gap-1.5">

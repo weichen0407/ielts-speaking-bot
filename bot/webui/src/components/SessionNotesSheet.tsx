@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -77,14 +78,29 @@ export function SessionNotesSheet({
           : notes.review;
 
     if (!content || content.trim() === "") {
+      const modeLabel = isBenative ? "Be Native" : "Freechat";
+      const artifactLabel = activeTab === "vocab"
+        ? "vocab"
+        : activeTab === "polisher"
+          ? "polisher"
+          : "review";
       return (
-        <div className="flex flex-1 items-center justify-center py-12 text-sm text-muted-foreground">
-          <BookOpen className="mr-2 h-4 w-4" />
-          {activeTab === "vocab"
-            ? t("notes.emptyVocab", "No vocabulary notes yet")
-            : activeTab === "polisher"
-              ? t("notes.emptyGrammar", "No grammar notes yet")
-              : t("notes.emptyReview", "No review notes yet")}
+        <div className="flex flex-1 flex-col items-center justify-center py-12 text-center text-sm text-muted-foreground">
+          <BookOpen className="mb-2 h-4 w-4" />
+          <p>
+            {activeTab === "vocab"
+              ? t("notes.emptyVocab", "No vocabulary notes yet")
+              : activeTab === "polisher"
+                ? t("notes.emptyGrammar", "No grammar notes yet")
+                : t("notes.emptyReview", "No review notes yet")}
+          </p>
+          <p className="mt-1 max-w-xs text-xs">
+            {t(
+              "notes.emptyReason",
+              "{{mode}} {{artifact}} artifact has not been created yet. Check monitor for trigger disabled, no new input, or processor failure.",
+              { mode: modeLabel, artifact: artifactLabel },
+            )}
+          </p>
         </div>
       );
     }
@@ -96,14 +112,16 @@ export function SessionNotesSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        aria-labelledby="session-notes-title"
         className="flex flex-col bg-background/95 backdrop-blur-xlsupports-[backdrop-filter]:bg-background/80"
         style={{ width: "min(600px, 95vw)" }}
       >
         <SheetHeader className="flex-row items-center justify-between space-y-0 pb-4">
-          <SheetTitle className="text-base font-semibold" id="session-notes-title">
+          <SheetTitle className="text-base font-semibold">
             {sessionTitle || t("notes.title", "Session Notes")}
           </SheetTitle>
+          <SheetDescription className="sr-only">
+            {t("notes.description", "Mode-specific learning artifacts for this session.")}
+          </SheetDescription>
           {loading && hasAnyNotes && (
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           )}

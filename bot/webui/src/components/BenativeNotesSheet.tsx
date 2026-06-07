@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -127,14 +128,16 @@ export function BenativeNotesSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        aria-labelledby="benative-notes-title"
         className="flex flex-col bg-background/95 backdrop-blur-xlsupports-[backdrop-filter]:bg-background/80"
         style={{ width: "min(600px, 95vw)" }}
       >
         <SheetHeader className="flex-row items-center justify-between space-y-0 pb-4">
-          <SheetTitle className="text-base font-semibold" id="benative-notes-title">
+          <SheetTitle className="text-base font-semibold">
             {sessionTitle || t("benative.title", "Benative Practice")}
           </SheetTitle>
+          <SheetDescription className="sr-only">
+            {t("benative.notesDescription", "Current Be Native article progress, responses, and review artifacts.")}
+          </SheetDescription>
           {responsesLoading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         </SheetHeader>
 

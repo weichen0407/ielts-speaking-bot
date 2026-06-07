@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc -p tsconfig.build.json --noEmit",
-    "check": "bun run lint && bun run test -- --run"
+    "check": "bun run lint && bun run test -- --run",
+    "smoke:gateway": "bun run scripts/smoke-gateway.mjs"
   },
   "dependencies": {
     "@deepgram/sdk": "^5.2.0",

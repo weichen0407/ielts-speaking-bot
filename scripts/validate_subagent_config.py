@@ -82,6 +82,10 @@ def _artifact_type_matches_path(artifact_type: str, raw_path: str | None) -> boo
     return expected is None or suffix == expected
 
 
+def _positive_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+
+
 def _subagent_root(root: Path, name: str, scope: str | None) -> Path | None:
     if scope not in {"single_session", "cross_session"}:
         return None
@@ -274,6 +278,53 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
                 errors.append(
                     f"config/capabilities.yaml: processor {name} mode_outputs.{mode_name} does not match artifact_type={artifact_type}"
                 )
+
+    for name, item in registered_models.items():
+        if not isinstance(item, dict):
+            errors.append(f"config/capabilities.yaml: model {name} must be an object")
+            continue
+        for key in ("provider", "model_name", "intended_use"):
+            if not str(item.get(key) or "").strip():
+                errors.append(f"config/capabilities.yaml: model {name} missing required field {key}")
+        for key in ("context_window", "default_max_tokens"):
+            value = item.get(key)
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                errors.append(f"config/capabilities.yaml: model {name} {key} must be a positive integer")
+        for key in ("input_cost_per_1m", "cached_input_cost_per_1m", "output_cost_per_1m"):
+            if not _positive_number(item.get(key)):
+                errors.append(f"config/capabilities.yaml: model {name} {key} must be a non-negative number")
+
+    for name, item in registered_tools.items():
+        if not isinstance(item, dict):
+            errors.append(f"config/capabilities.yaml: tool {name} must be an object")
+            continue
+        for key in ("description", "scope"):
+            if not str(item.get(key) or "").strip():
+                errors.append(f"config/capabilities.yaml: tool {name} missing required field {key}")
+        if not isinstance(item.get("input_schema"), dict) or not item["input_schema"]:
+            errors.append(f"config/capabilities.yaml: tool {name} input_schema must be a non-empty object")
+        if not isinstance(item.get("output_schema"), dict) or not item["output_schema"]:
+            errors.append(f"config/capabilities.yaml: tool {name} output_schema must be a non-empty object")
+        permissions = item.get("permissions")
+        if not isinstance(permissions, list) or not all(isinstance(p, str) and p for p in permissions):
+            errors.append(f"config/capabilities.yaml: tool {name} permissions must be a non-empty string array")
+        timeout_ms = item.get("timeout_ms")
+        if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or timeout_ms <= 0:
+            errors.append(f"config/capabilities.yaml: tool {name} timeout_ms must be a positive integer")
+        audit_fields = item.get("audit_log_fields")
+        if not isinstance(audit_fields, list) or not all(isinstance(f, str) and f for f in audit_fields):
+            errors.append(f"config/capabilities.yaml: tool {name} audit_log_fields must be a non-empty string array")
+
+    budgets = capabilities.get("budgets") if isinstance(capabilities.get("budgets"), dict) else {}
+    daily = budgets.get("daily") if isinstance(budgets.get("daily"), dict) else {}
+    for key in ("freechat_usd", "benative_usd", "wiki_sync_usd", "background_usd"):
+        if key not in daily or not _positive_number(daily.get(key)):
+            errors.append(f"config/capabilities.yaml: budgets.daily.{key} must be a non-negative number")
+    per_session = budgets.get("per_session") if isinstance(budgets.get("per_session"), dict) else {}
+    for key in ("max_processor_runs", "max_agentic_subagent_runs"):
+        value = per_session.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            errors.append(f"config/capabilities.yaml: budgets.per_session.{key} must be a positive integer")
 
     return {
         "ok": not errors,

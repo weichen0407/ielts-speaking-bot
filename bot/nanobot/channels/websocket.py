@@ -2276,7 +2276,7 @@ class WebSocketChannel(BaseChannel):
             return _http_error(500, str(e))
 
     def _handle_wiki_graph(self, request: WsRequest) -> Response:
-        """GET /api/wiki/graph?mode=...&topic=...&type=...&tags=..."""
+        """GET /api/wiki/graph?mode=...&topic=...&type=...&tags=...&memory_status=..."""
         from urllib.parse import parse_qs
 
         if not self._check_api_token(request):
@@ -2298,6 +2298,7 @@ class WebSocketChannel(BaseChannel):
                 topic=params.get("topic", [None])[0] or None,
                 page_type=params.get("type", [None])[0] or None,
                 tags=tags,
+                memory_status=params.get("memory_status", [None])[0] or None,
             )
             return _http_json_response(graph)
         except Exception as e:
@@ -2659,10 +2660,14 @@ class WebSocketChannel(BaseChannel):
 
     def _monitor_cost_summary(self, runs: list[dict[str, Any]]) -> dict[str, Any]:
         by_model: dict[str, dict[str, Any]] = {}
+        by_mode: dict[str, dict[str, Any]] = {}
         total = 0.0
         prompt = 0
         cached = 0
         completion = 0
+        capabilities = load_capabilities(self._project_root())
+        budgets = capabilities.get("budgets") if isinstance(capabilities.get("budgets"), dict) else {}
+        daily_budgets = budgets.get("daily") if isinstance(budgets.get("daily"), dict) else {}
 
         for run in runs:
             usage = run.get("usage") if isinstance(run.get("usage"), dict) else {}
@@ -2690,6 +2695,28 @@ class WebSocketChannel(BaseChannel):
             row["completion_tokens"] += int(estimate.get("completion_tokens") or 0)
             row["estimated_usd"] += float(estimate.get("estimated_usd") or 0.0)
             row["known_price"] = row["known_price"] or bool(estimate.get("known_price"))
+            mode = run.get("mode")
+            if mode is None and isinstance(run.get("origin"), dict):
+                mode = run["origin"].get("mode")
+            mode_key = str(mode or "background")
+            mode_row = by_mode.setdefault(
+                mode_key,
+                {
+                    "mode": mode_key,
+                    "prompt_tokens": 0,
+                    "cached_tokens": 0,
+                    "completion_tokens": 0,
+                    "estimated_usd": 0.0,
+                    "runs": 0,
+                    "budget_usd": daily_budgets.get(f"{mode_key}_usd"),
+                    "budget_used_pct": None,
+                },
+            )
+            mode_row["runs"] += 1
+            mode_row["prompt_tokens"] += int(estimate.get("prompt_tokens") or 0)
+            mode_row["cached_tokens"] += int(estimate.get("cached_tokens") or 0)
+            mode_row["completion_tokens"] += int(estimate.get("completion_tokens") or 0)
+            mode_row["estimated_usd"] += float(estimate.get("estimated_usd") or 0.0)
             total += float(estimate.get("estimated_usd") or 0.0)
             prompt += int(estimate.get("prompt_tokens") or 0)
             cached += int(estimate.get("cached_tokens") or 0)
@@ -2700,6 +2727,14 @@ class WebSocketChannel(BaseChannel):
             row["estimated_usd"] = round(float(row["estimated_usd"]), 8)
             models.append(row)
         models.sort(key=lambda row: float(row.get("estimated_usd") or 0), reverse=True)
+        modes = []
+        for row in by_mode.values():
+            row["estimated_usd"] = round(float(row["estimated_usd"]), 8)
+            budget = row.get("budget_usd")
+            if isinstance(budget, (int, float)) and budget > 0:
+                row["budget_used_pct"] = round((float(row["estimated_usd"]) / float(budget)) * 100, 2)
+            modes.append(row)
+        modes.sort(key=lambda row: float(row.get("estimated_usd") or 0), reverse=True)
         last_turn = self._estimate_llm_cost_usd(
             model=getattr(self, "model", ""),
             usage=getattr(self, "_last_usage", None),
@@ -2711,6 +2746,7 @@ class WebSocketChannel(BaseChannel):
             "cached_tokens": cached,
             "completion_tokens": completion,
             "models": models,
+            "modes": modes,
             "last_turn": last_turn,
             "price_source": "https://api-docs.deepseek.com/quick_start/pricing",
             "note": "Local estimate from logged usage; official invoice is authoritative.",

@@ -301,6 +301,16 @@ export interface AdminCostSummary {
     runs: number;
     known_price: boolean;
   }>;
+  modes?: Array<{
+    mode: string;
+    prompt_tokens: number;
+    cached_tokens: number;
+    completion_tokens: number;
+    estimated_usd: number;
+    runs: number;
+    budget_usd?: number | null;
+    budget_used_pct?: number | null;
+  }>;
   last_turn?: {
     model: string;
     normalized_model?: string;
@@ -750,6 +760,7 @@ export interface WikiPageMeta {
   updated_at: string;
   last_reviewed_at?: string | null;
   confidence: "low" | "medium" | "high";
+  memory_status?: "new" | "confirmed" | "contradicted" | "stale" | "needs_user_confirmation" | string;
   stability?: "volatile" | "stable" | "canonical" | string;
   version?: number;
 }
@@ -769,6 +780,7 @@ export interface WikiGraphNode {
   topics?: string[];
   updated_at?: string;
   summary?: string;
+  memory_status?: "new" | "confirmed" | "contradicted" | "stale" | "needs_user_confirmation" | string;
   size: number;
 }
 
@@ -861,6 +873,7 @@ export async function fetchWikiGraph(
     topic?: string;
     type?: string;
     tags?: string;
+    memory_status?: string;
   } = {},
   base: string = "",
 ): Promise<WikiGraphResponse> {
@@ -869,6 +882,7 @@ export async function fetchWikiGraph(
   if (params.topic) searchParams.set("topic", params.topic);
   if (params.type) searchParams.set("type", params.type);
   if (params.tags) searchParams.set("tags", params.tags);
+  if (params.memory_status) searchParams.set("memory_status", params.memory_status);
   return request<WikiGraphResponse>(
     `${base}/api/wiki/graph?${searchParams}`,
     token,

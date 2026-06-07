@@ -1,5 +1,29 @@
 # Update Log
 
+## 2026-06-07 - P2 Product Polish And Scale
+
+- 标记 `docs/p2-product-polish-plan.md` 的 P2-1 到 P2-6 为 done。
+- WebUI / Wiki graph：
+  - graph node 增加 `memory_status`。
+  - `/api/wiki/graph` 支持 `memory_status` 过滤。
+  - WebUI Wiki Memory panel 增加 memory status 过滤与页面 badge。
+  - graph canvas 按 scope 缓存节点位置，减少 hover/select/focus 时的布局跳动。
+  - session artifact 空状态增加真实原因提示。
+  - 修复 Radix Dialog/Sheet title/description warning。
+- Agentic tool layer / governance：
+  - `config/capabilities.yaml` 的 tool 增加 input/output schema、permissions、timeout、audit log fields。
+  - validator 会拒绝不完整 tool contract。
+  - model registry 增加 context window、default max tokens、input/cache/output cost estimate。
+  - monitor cost summary 增加按 mode 聚合和 budget used percentage。
+- Data lifecycle：
+  - 新增 `scripts/data_lifecycle.py`，支持 reset-dev、export-session、export-mode-artifacts、export-wiki。
+  - 新增 `docs/data-lifecycle-and-export.md`，说明 raw events、derived artifacts、long-term memory、observability logs 的边界。
+- Smoke / channel expansion：
+  - 新增 `bot/webui/scripts/smoke-gateway.mjs` 和 `bun run smoke:gateway`。
+  - 新增 `docs/channel-event-contract.md`，定义 channel-neutral event shape 和 channel adapter 边界。
+
+---
+
 ## 2026-06-07 - P1-3 到 P1-6 Runtime Hardening
 
 - 标记 `docs/p1-runtime-hardening-plan.md` 的 P1-3、P1-4、P1-5、P1-6 为 done。
