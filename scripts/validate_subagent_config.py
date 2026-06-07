@@ -68,6 +68,34 @@ def _mode_from_processor_output_path(raw: str | None) -> str | None:
     return None
 
 
+def _artifact_type_matches_path(artifact_type: str, raw_path: str | None) -> bool:
+    if not raw_path or artifact_type in {"", "mixed"}:
+        return True
+    suffix = Path(str(raw_path)).suffix.lower()
+    expected = {
+        "jsonl": ".jsonl",
+        "json": ".json",
+        "md": ".md",
+        "markdown": ".md",
+        "sqlite": ".sqlite",
+    }.get(artifact_type)
+    return expected is None or suffix == expected
+
+
+def _subagent_root(root: Path, name: str, scope: str | None) -> Path | None:
+    if scope not in {"single_session", "cross_session"}:
+        return None
+    return root / "subagent" / str(scope) / name
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def validate_config(root: Path = ROOT) -> dict[str, Any]:
     errors: list[str] = []
     trigger_count = 0
@@ -78,6 +106,7 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
     registered_subagents = capabilities.get("subagents") if isinstance(capabilities.get("subagents"), dict) else {}
     registered_processors = capabilities.get("processors") if isinstance(capabilities.get("processors"), dict) else {}
     registered_tools = capabilities.get("tools") if isinstance(capabilities.get("tools"), dict) else {}
+    registered_models = capabilities.get("models") if isinstance(capabilities.get("models"), dict) else {}
     deprecated = capabilities.get("deprecated") if isinstance(capabilities.get("deprecated"), dict) else {}
     deprecated_subagents = set(
         (deprecated.get("subagents") if isinstance(deprecated.get("subagents"), dict) else {}).keys()
@@ -111,10 +140,15 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
             subagent = str(target.get("subagent") or "")
             processor = str(target.get("processor") or "")
             execution_mode = str(target.get("execution_mode") or "api")
+            model = str(target.get("model") or "")
             tools = _as_list(target.get("tools"))
             output_mode = _mode_from_processor_output_path(target.get("output_path"))
             if not subagent and not processor:
                 errors.append(f"{rel}:{trigger_id}: target must declare subagent or processor")
+            if (subagent or processor) and not model:
+                errors.append(f"{rel}:{trigger_id}: target.model is required for processor/subagent execution")
+            if model and registered_models and model not in registered_models:
+                errors.append(f"{rel}:{trigger_id}: model missing from config/capabilities.yaml models: {model}")
             if subagent:
                 subagents.add(subagent)
                 if subagent in deprecated_subagents:
@@ -136,6 +170,17 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
                         errors.append(f"{rel}:{trigger_id}: tool {tool} is not allowlisted for subagent {subagent} execution_mode={execution_mode}")
             if processor and processor not in registered_processors:
                 errors.append(f"{rel}:{trigger_id}: processor missing from config/capabilities.yaml: {processor}")
+            if processor and processor in registered_processors and target.get("output_path"):
+                processor_config = registered_processors.get(processor)
+                artifact_type = (
+                    str(processor_config.get("artifact_type") or "")
+                    if isinstance(processor_config, dict)
+                    else ""
+                )
+                if not _artifact_type_matches_path(artifact_type, str(target.get("output_path"))):
+                    errors.append(
+                        f"{rel}:{trigger_id}: output_path does not match processors.{processor}.artifact_type={artifact_type}"
+                    )
             if output_mode and mode_name and output_mode != mode_name:
                 errors.append(f"{rel}:{trigger_id}: output_path mode {output_mode} does not match trigger mode {mode_name}")
             if processor and processor in registered_processors and output_mode and mode_name:
@@ -158,6 +203,16 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
                 prompt_path = _prompt_path(root, str(prompt_file))
                 if prompt_path is None or not prompt_path.exists():
                     errors.append(f"{rel}:{trigger_id}: prompt not found: {prompt_file}")
+                if subagent and subagent in registered_subagents and prompt_path and prompt_path.exists():
+                    subagent_config = registered_subagents.get(subagent)
+                    registered_prompt = _prompt_path(
+                        root,
+                        str(subagent_config.get("prompt") or "")
+                        if isinstance(subagent_config, dict)
+                        else "",
+                    )
+                    if registered_prompt and registered_prompt.exists() and prompt_path.resolve() != registered_prompt.resolve():
+                        errors.append(f"{rel}:{trigger_id}: prompt_file must match registered prompt for subagent {subagent}")
             condition = item.get("condition") if isinstance(item.get("condition"), dict) else {}
             if condition.get("kind") in {"turn_count", "file_line_count"}:
                 try:
@@ -177,6 +232,17 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
         prompt = _prompt_path(root, str(item.get("prompt") or ""))
         if prompt is None or not prompt.exists():
             errors.append(f"config/capabilities.yaml: subagent {name} prompt not found: {item.get('prompt')}")
+        scope = str(item.get("scope") or "")
+        expected_root = _subagent_root(root, str(name), scope)
+        if prompt and prompt.exists() and expected_root and not _is_relative_to(prompt, expected_root):
+            errors.append(f"config/capabilities.yaml: subagent {name} prompt must live under {expected_root.relative_to(root)}")
+        writes = _as_list(item.get("writes"))
+        if scope == "cross_session" and not bool(item.get("allow_session_writes", False)):
+            for raw_write in writes:
+                if raw_write.startswith("persona/sessions/") or "{session_uuid}" in raw_write:
+                    errors.append(
+                        f"config/capabilities.yaml: cross_session subagent {name} declares session-only write without allow_session_writes"
+                    )
         execution_modes = _as_list(item.get("execution_modes"))
         default_execution_mode = item.get("default_execution_mode")
         if execution_modes and default_execution_mode and str(default_execution_mode) not in execution_modes:
@@ -197,6 +263,17 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
         raw_path = item.get("path")
         if raw_path and not (root / str(raw_path)).exists():
             errors.append(f"config/capabilities.yaml: processor {name} path not found: {raw_path}")
+        artifact_type = str(item.get("artifact_type") or "")
+        if artifact_type not in {"jsonl", "json", "md", "markdown", "sqlite", "mixed"}:
+            errors.append(f"config/capabilities.yaml: processor {name} artifact_type is required and must be valid")
+        if item.get("output") and not _artifact_type_matches_path(artifact_type, str(item.get("output"))):
+            errors.append(f"config/capabilities.yaml: processor {name} output does not match artifact_type={artifact_type}")
+        mode_outputs = item.get("mode_outputs") if isinstance(item.get("mode_outputs"), dict) else {}
+        for mode_name, raw_output in mode_outputs.items():
+            if not _artifact_type_matches_path(artifact_type, str(raw_output)):
+                errors.append(
+                    f"config/capabilities.yaml: processor {name} mode_outputs.{mode_name} does not match artifact_type={artifact_type}"
+                )
 
     return {
         "ok": not errors,
@@ -204,6 +281,7 @@ def validate_config(root: Path = ROOT) -> dict[str, Any]:
         "trigger_count": trigger_count,
         "subagents": sorted(subagents),
         "registered_subagents": sorted(registered_subagents),
+        "registered_models": sorted(registered_models),
         "registered_tools": sorted(registered_tools),
         "context_prompt_count": len(context_files),
         "processor_count": len(processor_files),

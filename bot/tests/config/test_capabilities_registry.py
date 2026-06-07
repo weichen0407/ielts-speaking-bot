@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from nanobot.config.capabilities import (
@@ -117,4 +118,138 @@ def test_capability_registry_matches_trigger_targets() -> None:
     assert result["ok"] is True
     assert result["errors"] == []
     assert "vocab" in result["registered_subagents"]
+    assert "deepseek-v4-flash" in result["registered_models"]
     assert "thread_query" in result["registered_tools"]
+
+
+def test_validator_rejects_unknown_model(tmp_path: Path) -> None:
+    _write_minimal_registry(tmp_path, target_overrides={"model": "gpt-4o-mini"})
+
+    result = validate_config(tmp_path)
+
+    assert result["ok"] is False
+    assert any("model missing from config/capabilities.yaml models" in error for error in result["errors"])
+
+
+def test_validator_rejects_processor_output_contract_mismatch(tmp_path: Path) -> None:
+    _write_minimal_registry(tmp_path, target_overrides={"output_path": "persona/processor/freechat/vocab.md"})
+
+    result = validate_config(tmp_path)
+
+    assert result["ok"] is False
+    assert any("artifact_type=jsonl" in error for error in result["errors"])
+
+
+def test_validator_rejects_prompt_outside_subagent_directory(tmp_path: Path) -> None:
+    _write_minimal_registry(
+        tmp_path,
+        subagent_prompt="subagent/single_session/other/context/vocab_subagent.md",
+    )
+
+    result = validate_config(tmp_path)
+
+    assert result["ok"] is False
+    assert any("prompt must live under subagent/single_session/vocab" in error for error in result["errors"])
+
+
+def test_validator_rejects_deprecated_subagent_even_when_trigger_disabled(tmp_path: Path) -> None:
+    _write_minimal_registry(
+        tmp_path,
+        trigger_enabled=False,
+        target_overrides={
+            "subagent": "old_vocab",
+            "processor": "",
+            "output_path": "",
+        },
+    )
+
+    result = validate_config(tmp_path)
+
+    assert result["ok"] is False
+    assert any("subagent old_vocab is deprecated" in error for error in result["errors"])
+
+
+def _write_minimal_registry(
+    root: Path,
+    *,
+    subagent_prompt: str = "subagent/single_session/vocab/context/vocab_subagent.md",
+    trigger_enabled: bool = True,
+    target_overrides: dict[str, object] | None = None,
+) -> None:
+    prompt_path = root / subagent_prompt
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text("# Vocab\n", encoding="utf-8")
+    (root / "subagent/single_session/vocab/processor").mkdir(parents=True, exist_ok=True)
+    (root / "mode/freechat/trigger").mkdir(parents=True, exist_ok=True)
+    (root / "config").mkdir(parents=True, exist_ok=True)
+
+    target: dict[str, object] = {
+        "processor": "vocab",
+        "subagent": "vocab",
+        "execution_mode": "api",
+        "agentic": False,
+        "tools": [],
+        "input_path": "persona/events/thread.jsonl",
+        "output_path": "persona/processor/freechat/vocab.jsonl",
+        "batch_size": 20,
+        "model": "deepseek-v4-flash",
+    }
+    target.update(target_overrides or {})
+
+    (root / "mode/freechat/trigger/triggers.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "freechat_vocab",
+                        "enabled": trigger_enabled,
+                        "condition": {"kind": "file_line_count", "count": 1},
+                        "target": target,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    (root / "config/capabilities.yaml").write_text(
+        f"""
+version: 1
+models:
+  deepseek-v4-flash:
+    provider: deepseek
+modes:
+  freechat:
+    trigger_file: mode/freechat/trigger/triggers.json
+    subagents: [vocab]
+subagents:
+  vocab:
+    scope: single_session
+    prompt: {subagent_prompt}
+    trigger_ids: [freechat_vocab]
+    execution_modes: [api]
+    default_execution_mode: api
+    tools:
+      api: []
+    writes:
+      - persona/sessions/{{session_uuid}}/notes/vocab.md
+processors:
+  vocab:
+    path: subagent/single_session/vocab/processor
+    status: active
+    artifact_type: jsonl
+    output: persona/processor/freechat/vocab.jsonl
+    mode_outputs:
+      freechat: persona/processor/freechat/vocab.jsonl
+tools: {{}}
+deprecated:
+  subagents:
+    old_vocab:
+      replacement: subagents.vocab
+      reason: test deprecated entry
+""".lstrip(),
+        encoding="utf-8",
+    )

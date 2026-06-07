@@ -20,7 +20,7 @@ mode trigger
 
 ## Checklist
 
-- [ ] 1. Strengthen registry as the runtime control plane.
+- [x] 1. Strengthen registry as the runtime control plane.
 - [ ] 2. Standardize processor cursor, delta, retry, and partial-write behavior.
 - [ ] 3. Make monitor output session-aware and mode-aware for every processor-mediated subagent.
 - [ ] 4. Harden LLM Wiki ingest / crystallize / lint as a reviewable memory pipeline.
@@ -52,6 +52,12 @@ Work:
 Done when:
 
 - `uv run python scripts/validate_subagent_config.py` catches stale, deprecated, misplaced, or mismatched runtime wiring before gateway startup.
+
+Status:
+
+- Done on 2026-06-07.
+- Added model registry validation, processor artifact type validation, prompt ownership validation, and cross-session write-scope validation.
+- Added regression tests for unknown models, artifact suffix mismatches, prompt directory drift, and deprecated subagent references in disabled triggers.
 
 ## Task 2: Processor Cursor And Delta Semantics
 

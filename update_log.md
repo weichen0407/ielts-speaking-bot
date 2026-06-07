@@ -1,5 +1,25 @@
 # Update Log
 
+## 2026-06-07 - P1-1 Registry Control Plane
+
+- 扩展 `config/capabilities.yaml`：
+  - 新增 `models.deepseek-v4-flash` 注册信息，作为 processor/subagent trigger 的模型 allowlist。
+  - 为所有 processor 增加 `artifact_type`，让输出契约从隐式路径变为显式配置。
+- 增强 `scripts/validate_subagent_config.py`：
+  - processor/subagent trigger 必须声明可注册模型。
+  - trigger 的 `output_path` 必须匹配 processor 的 `artifact_type`。
+  - trigger prompt_file 必须和 subagent registry prompt 一致。
+  - subagent prompt 必须位于对应 `subagent/{scope}/{name}/` 目录下。
+  - cross-session subagent 默认禁止声明 session-only writes，除非显式允许。
+- 增加 registry 反向测试：
+  - 未注册模型。
+  - processor 输出后缀和 artifact type 不一致。
+  - prompt 位于错误 subagent 目录。
+  - disabled trigger 仍引用 deprecated subagent。
+- 更新 `docs/p1-runtime-hardening-plan.md`，将 P1-1 标记为 done。
+
+---
+
 ## 2026-06-07 - P1/P2 后续更新计划
 
 - 新增 `docs/p1-runtime-hardening-plan.md`：

@@ -9,6 +9,13 @@ runtime_roots:
   observability: monitor
   global_notes: user-notes
 
+models:
+  deepseek-v4-flash:
+    provider: deepseek
+    intended_use: default low-cost processor and subagent model
+    cost_tier: low
+    notes: Used for current processor-mediated subagents and background analysis.
+
 modes:
   default:
     trigger_file: mode/default/trigger/triggers.json
@@ -102,6 +109,7 @@ processors:
   wiki:
     path: subagent/cross_session/wiki/processor
     status: active
+    artifact_type: mixed
     runtime_root: persona/wiki
     sync:
       source: persona/events/thread.jsonl
@@ -114,43 +122,52 @@ processors:
   vocab:
     path: subagent/single_session/vocab/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/vocab.jsonl
     mode_outputs:
       freechat: persona/processor/freechat/vocab.jsonl
   polisher:
     path: subagent/single_session/polisher/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/polisher.jsonl
     mode_outputs:
       freechat: persona/processor/freechat/polisher.jsonl
   benative_article:
     path: subagent/cross_session/benative_article/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/benative/article.jsonl
     runtime_root: persona/benative
   benative_review:
     path: subagent/single_session/benative_review/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/benative/review.jsonl
   progress_tracker:
     path: subagent/cross_session/progress_tracker/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/progress_tracker.jsonl
   progress_organizer:
     path: subagent/cross_session/progress_organizer/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/progress_organizer.jsonl
   review:
     path: subagent/cross_session/review/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/review.jsonl
   notes:
     path: subagent/single_session/notes/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/notes.jsonl
   quiz:
     path: subagent/single_session/quiz/processor
     status: active
+    artifact_type: jsonl
     output: persona/processor/freechat/quiz.jsonl
 
 tools:
