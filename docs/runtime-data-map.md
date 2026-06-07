@@ -15,8 +15,8 @@ This project has three different kinds of files:
 | `persona/session_index.jsonl` | Session list and metadata used to find sessions quickly. | `SessionManager._update_session_index()` |
 | `persona/user_responses.jsonl` | Cross-session stream of user answers for progress/wiki processing. | `SessionManager.append_user_expression()` |
 | `persona/{mode}/sessions/{session_uuid}/responses.jsonl` | Mode-specific user response records, such as freechat or benative responses. | `SessionManager.append_mode_response()` |
-| `persona/benative/articles/` | Benative source articles for translation practice. | `benative_article_fetcher` |
-| `persona/benative/pairs/` | Sentence-level English/Chinese pairs for Benative practice. | `benative_translator` |
+| `persona/benative/articles/` | Benative source articles for translation practice. | `benative_article` processor-mediated capability |
+| `persona/benative/pairs/` | Sentence-level English/Chinese pairs for Benative practice. | `benative_article` processor-mediated capability |
 | `persona/benative/sessions/{session_uuid}/responses.jsonl` | Benative user translation attempts. | `SessionManager.append_mode_response()` |
 | `user-notes/` | User-authored notes and AI note replies. | Notes UI and notes subagents |
 
