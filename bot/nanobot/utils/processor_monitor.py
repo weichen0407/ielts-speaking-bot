@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,13 @@ def _read_lines(path: Path) -> list[str]:
         return []
 
 
+def _fingerprint_lines(lines: list[str]) -> str:
+    payload = "\n".join(lines)
+    if lines:
+        payload += "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _sanitize_filename(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_") or "input.jsonl"
 
@@ -57,16 +65,21 @@ class ProcessorDeltaInput:
     total_lines: int
     input_rows: int
     cursor_key: str
+    input_fingerprint: str
 
     def to_record(self, root: Path) -> dict[str, Any]:
+        rel_path = _safe_rel(root, self.source_path)
         return {
-            "path": _safe_rel(root, self.source_path),
+            "path": rel_path,
+            "input_path": rel_path,
             "run_path": _safe_rel(root, self.run_path) if self.run_path.is_relative_to(root) else str(self.run_path),
             "cursor_before": self.cursor_before,
             "cursor_after": self.cursor_after,
+            "last_line": self.cursor_after,
             "total_lines": self.total_lines,
             "input_rows": self.input_rows,
             "cursor_key": self.cursor_key,
+            "input_fingerprint": self.input_fingerprint,
         }
 
 
@@ -89,6 +102,17 @@ class ProcessorDeltaBundle:
     @property
     def cursor_after(self) -> dict[str, int]:
         return {item.cursor_key: item.cursor_after for item in self.inputs}
+
+    @property
+    def cursor_records_after(self) -> dict[str, dict[str, Any]]:
+        return {
+            item.cursor_key: {
+                "input_path": item.cursor_key,
+                "last_line": item.cursor_after,
+                "input_fingerprint": item.input_fingerprint,
+            }
+            for item in self.inputs
+        }
 
     def cleanup(self) -> None:
         if self.temp_dir is not None:
@@ -126,14 +150,35 @@ class ProcessorCursorStore:
                 continue
         return result
 
-    def write(self, trigger_id: str, offsets: dict[str, int]) -> None:
+    def write(
+        self,
+        trigger_id: str,
+        offsets: dict[str, int],
+        *,
+        inputs: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         path = self.path_for(trigger_id)
         path.parent.mkdir(parents=True, exist_ok=True)
+        normalized_offsets = {key: max(int(value), 0) for key, value in offsets.items()}
+        normalized_inputs: dict[str, dict[str, Any]] = {}
+        for key, value in normalized_offsets.items():
+            raw_input = inputs.get(key, {}) if inputs else {}
+            normalized_inputs[key] = {
+                "input_path": str(raw_input.get("input_path") or key),
+                "last_line": value,
+                "input_fingerprint": str(raw_input.get("input_fingerprint") or ""),
+                "updated_at": _now_iso(),
+            }
         payload = {
+            "version": 2,
+            "trigger_id": trigger_id,
             "updated_at": _now_iso(),
-            "offsets": {key: max(int(value), 0) for key, value in offsets.items()},
+            "offsets": normalized_offsets,
+            "inputs": normalized_inputs,
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path = path.with_name(f".{path.name}.tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
 
 
 def materialize_processor_delta(
@@ -182,6 +227,7 @@ def materialize_processor_delta(
                 total_lines=total,
                 input_rows=len(delta_lines),
                 cursor_key=cursor_key,
+                input_fingerprint=_fingerprint_lines(lines),
             )
         )
         if file_line_cursor is None:
@@ -196,8 +242,14 @@ def materialize_processor_delta(
     )
 
 
-def update_processor_cursor(root: Path, trigger_id: str, offsets: dict[str, int]) -> None:
-    ProcessorCursorStore(root).write(trigger_id, offsets)
+def update_processor_cursor(
+    root: Path,
+    trigger_id: str,
+    offsets: dict[str, int],
+    *,
+    inputs: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    ProcessorCursorStore(root).write(trigger_id, offsets, inputs=inputs)
 
 
 def output_delta_records(path: Path, *, start_line: int, limit: int = 20) -> list[dict[str, Any]]:

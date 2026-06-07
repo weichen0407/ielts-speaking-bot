@@ -300,22 +300,45 @@ class BaseDataProcessor(ABC, Generic[T, U]):
             output_path: jsonl 输出路径（md 路径自动推导）
             format: "jsonl" | "md" | "both"
         """
+        jsonl_written = True
         if format in ("jsonl", "both"):
-            self._serialize_jsonl(data, output_path)
+            jsonl_written = self._serialize_jsonl(data, output_path)
 
-        if format in ("md", "both"):
+        if format in ("md", "both") and (format == "md" or jsonl_written):
             md_path = output_path.with_suffix(".md")
             md_content = self.to_md(data)
             ensure_output_dir(md_path)
-            with open(md_path, "w", encoding="utf-8") as f:
-                f.write(md_content)
+            self._write_text_atomic(md_path, md_content)
 
-    def _serialize_jsonl(self, data: list[U], path: Path) -> None:
-        """追加写入 jsonl"""
+    def _serialize_jsonl(self, data: list[U], path: Path) -> bool:
+        """Write validated JSONL records without duplicating existing rows."""
         ensure_output_dir(path)
-        with open(path, "a", encoding="utf-8") as f:
-            for item in data:
-                f.write(item.model_dump_json() + "\n")
+        existing_lines: list[str] = []
+        if path.exists():
+            try:
+                existing_lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                existing_lines = []
+        seen = {line for line in existing_lines if line.strip()}
+        new_lines: list[str] = []
+        for item in data:
+            line = item.model_dump_json()
+            if line in seen:
+                continue
+            seen.add(line)
+            new_lines.append(line)
+        if not new_lines:
+            return False
+        all_lines = [line for line in existing_lines if line.strip()]
+        all_lines.extend(new_lines)
+        self._write_text_atomic(path, "\n".join(all_lines) + "\n")
+        return True
+
+    def _write_text_atomic(self, path: Path, content: str) -> None:
+        ensure_output_dir(path)
+        tmp_path = path.with_name(f".{path.name}.tmp")
+        tmp_path.write_text(content, encoding="utf-8")
+        tmp_path.replace(path)
 
     def get_system_prompt(self) -> str:
         """默认 system prompt，子类可 override"""

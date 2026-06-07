@@ -137,6 +137,25 @@ def test_vocab_processor_sync_process_all_writes_outputs(tmp_path: Path) -> None
     )
 
 
+def test_processor_process_all_does_not_duplicate_existing_artifact_rows(tmp_path: Path) -> None:
+    input_path = tmp_path / "thread.jsonl"
+    output_path = tmp_path / "vocab.jsonl"
+    _write_thread(input_path)
+
+    provider = FakeProvider(
+        "I like basketball very much.\tI'm really into basketball.\texpression\t更自然的兴趣表达"
+    )
+    processor = VocabProcessor()
+    processor.configure_llm(provider=provider, model="deepseek-v4-flash")
+
+    processor.process_all(input_path=input_path, output_path=output_path, batch_size=10)
+    processor.process_all(input_path=input_path, output_path=output_path, batch_size=10)
+
+    lines = output_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert len(provider.calls) == 2
+
+
 @pytest.mark.asyncio
 async def test_vocab_processor_async_process_all_writes_outputs(tmp_path: Path) -> None:
     input_path = tmp_path / "thread.jsonl"

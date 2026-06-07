@@ -485,7 +485,12 @@ class AgentLoop:
             output_after = line_count(output_path)
             output_rows = max(output_after - output_before, 0)
             if delta_bundle.processor_cursor_after is not None:
-                update_processor_cursor(root, trigger.id, delta_bundle.processor_cursor_after)
+                update_processor_cursor(
+                    root,
+                    trigger.id,
+                    delta_bundle.processor_cursor_after,
+                    inputs=delta_bundle.cursor_records_after,
+                )
 
             self.counter_engine.record_trigger(session.metadata, trigger.id)
             usage = (

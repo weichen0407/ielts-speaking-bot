@@ -21,7 +21,7 @@ mode trigger
 ## Checklist
 
 - [x] 1. Strengthen registry as the runtime control plane.
-- [ ] 2. Standardize processor cursor, delta, retry, and partial-write behavior.
+- [x] 2. Standardize processor cursor, delta, retry, and partial-write behavior.
 - [ ] 3. Make monitor output session-aware and mode-aware for every processor-mediated subagent.
 - [ ] 4. Harden LLM Wiki ingest / crystallize / lint as a reviewable memory pipeline.
 - [ ] 5. Tighten Be Native runtime data flow and review visibility.
@@ -92,6 +92,14 @@ Done when:
 
 - A test can run the same processor twice and prove old rows are not processed twice.
 - A malformed LLM result does not corrupt artifact files.
+
+Status:
+
+- Done on 2026-06-07.
+- Processor cursor files now use a versioned envelope with `trigger_id`, `offsets`, and per-input records containing `input_path`, `last_line`, `input_fingerprint`, and `updated_at`.
+- Delta materialization now exposes per-input fingerprints in monitor/debug records.
+- Processor JSONL artifacts are written through dedupe + temporary-file replacement, so rerunning the same input does not append duplicate rows.
+- Cursor advancement remains success-only in `AgentLoop`; error runs are logged without moving processor cursors.
 
 ## Task 3: Monitor Session And Mode Visibility
 

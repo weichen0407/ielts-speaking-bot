@@ -1,5 +1,26 @@
 # Update Log
 
+## 2026-06-07 - P1-2 Processor Cursor And Delta Semantics
+
+- 标记 `docs/p1-runtime-hardening-plan.md` 的 P1-2 为 done。
+- 增强 `bot/nanobot/utils/processor_monitor.py`：
+  - processor cursor 文件升级为 versioned envelope。
+  - cursor 记录包含 `trigger_id`、`offsets`、以及每个输入的 `input_path`、`last_line`、`input_fingerprint`、`updated_at`。
+  - delta materialization 的 input record 增加 `last_line` 和 `input_fingerprint`，方便 monitor/debug 解释“处理了哪些新增内容”。
+- 更新 `bot/nanobot/agent/loop.py`，成功完成 processor 后写入标准 cursor records；失败时仍只记录 error run，不推进 cursor。
+- 增强 `subagent/_shared/base.py`：
+  - JSONL artifact 写入改为读取已有行、过滤重复记录、写临时文件再 replace。
+  - Markdown artifact 写入也使用临时文件 replace，降低半写入风险。
+- 增加测试：
+  - 同一个 processor 重复处理同一批输入不会重复追加 artifact rows。
+  - processor cursor payload 包含标准 envelope 与 input fingerprint。
+- 验证通过：
+  - `uv run pytest bot/tests/subagent/test_processor_cursor.py bot/tests/subagent/test_data_processor_runtime.py bot/tests/subagent/test_processor_gated_subagent_runtime.py -q`
+  - `uv run pytest bot/tests/config bot/tests/wiki bot/tests/subagent bot/tests/counter -q`
+  - `uv run python scripts/validate_subagent_config.py`
+
+---
+
 ## 2026-06-07 - P1-1 Registry Control Plane
 
 - 扩展 `config/capabilities.yaml`：

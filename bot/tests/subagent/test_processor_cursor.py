@@ -31,7 +31,24 @@ def test_processor_cursor_materializes_only_new_artifact_rows(tmp_path: Path) ->
 
     assert first.input_rows == 2
     assert [path.read_text(encoding="utf-8").count("\n") for path in first.run_paths] == [1, 1]
-    update_processor_cursor(tmp_path, "freechat_review_processor", first.processor_cursor_after or {})
+    first_records = [item.to_record(tmp_path) for item in first.inputs]
+    assert first_records[0]["last_line"] == 1
+    assert first_records[0]["input_fingerprint"]
+    update_processor_cursor(
+        tmp_path,
+        "freechat_review_processor",
+        first.processor_cursor_after or {},
+        inputs=first.cursor_records_after,
+    )
+    cursor_payload = json.loads(
+        ProcessorCursorStore(tmp_path).path_for("freechat_review_processor").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert cursor_payload["version"] == 2
+    assert cursor_payload["trigger_id"] == "freechat_review_processor"
+    assert cursor_payload["inputs"]["persona/processor/freechat/vocab.jsonl"]["last_line"] == 1
+    assert cursor_payload["inputs"]["persona/processor/freechat/vocab.jsonl"]["input_fingerprint"]
     first.cleanup()
 
     _append_jsonl(vocab, [{"original": "new vocab"}])
