@@ -84,6 +84,17 @@ async def test_benative_answer_advances_sentence_without_llm(tmp_path: Path) -> 
     assert session_rows[0]["mode"] == "benative"
     assert session_rows[0]["sentence_index"] == 0
 
+    summary = json.loads(
+        (tmp_path / "persona" / "benative" / "sessions" / "s1" / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["article_id"] == "article-1"
+    assert summary["current_sentence"] == 1
+    assert summary["total_sentences"] == 2
+    assert summary["completed_sentence_indexes"] == [0]
+    assert summary["latest_review_status"] == "pending"
+
 
 @pytest.mark.asyncio
 async def test_benative_answer_completes_article_without_llm(tmp_path: Path) -> None:
@@ -120,6 +131,13 @@ async def test_benative_answer_completes_article_without_llm(tmp_path: Path) -> 
 
     progress = json.loads(progress_file.read_text(encoding="utf-8"))
     assert progress["current_sentence"] == 2
+    summary = json.loads(
+        (tmp_path / "persona" / "benative" / "sessions" / "s1" / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["current_sentence"] == 2
+    assert summary["completed_sentence_indexes"] == [1]
 
 
 def test_benative_mode_does_not_schedule_wiki_sync(tmp_path: Path, monkeypatch) -> None:

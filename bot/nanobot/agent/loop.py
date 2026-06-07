@@ -2479,13 +2479,18 @@ Note Content:
             standard_en = str(pair.get("en", ""))
             user_en = raw.strip()
 
-            from nanobot.benative.events import append_benative_response
+            from nanobot.benative.events import (
+                append_benative_response,
+                refresh_benative_session_summary,
+            )
             from subagent._shared.benative_schema import BenativeResponse
 
+            session_uuid = ctx.session.session_uuid or ctx.session.key
+            workspace = Path(self.counter_engine.workspace)
             append_benative_response(
-                Path(self.counter_engine.workspace),
+                workspace,
                 BenativeResponse(
-                    session_uuid=ctx.session.session_uuid or ctx.session.key,
+                    session_uuid=session_uuid,
                     article_id=article_id,
                     sentence_index=sentence_index,
                     zh=zh,
@@ -2510,6 +2515,13 @@ Note Content:
             progress_file.write_text(
                 json.dumps(progress, ensure_ascii=False, indent=2),
                 encoding="utf-8",
+            )
+            refresh_benative_session_summary(
+                workspace,
+                session_uuid,
+                article_id=article_id,
+                total_sentences=total,
+                current_sentence=next_index,
             )
 
             if next_index < total:

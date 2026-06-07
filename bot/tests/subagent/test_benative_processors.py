@@ -100,15 +100,28 @@ def test_benative_review_processor_writes_session_notes(tmp_path: Path) -> None:
 
     processor.serialize(first, output_path, "both")
     processor.serialize(second, output_path, "both")
+    processor.serialize(second, output_path, "both")
 
     session_notes = tmp_path / "persona" / "benative" / "sessions" / "session-001" / "notes"
     assert output_path.exists()
     assert (session_notes / "review.jsonl").exists()
+    review_rows = (session_notes / "review.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(review_rows) == 2
     review_md = (session_notes / "review.md").read_text(encoding="utf-8")
     assert "article_001:0" in review_md
     assert "article_001:1" in review_md
     assert "relationship 应该用复数" in review_md
     assert "want 后面需要接 to do" in review_md
+    summary = json.loads(
+        (tmp_path / "persona" / "benative" / "sessions" / "session-001" / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["session_uuid"] == "session-001"
+    assert summary["article_id"] == "article_001"
+    assert summary["completed_sentence_indexes"] == [0, 1]
+    assert summary["review_count"] == 2
+    assert summary["latest_review_status"] == "reviewed"
 
 
 def test_benative_review_processor_enriches_legacy_rows_with_session_uuid() -> None:

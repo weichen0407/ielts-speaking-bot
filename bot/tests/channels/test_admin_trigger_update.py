@@ -102,6 +102,8 @@ def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: P
                 "model": "deepseek-v4-flash",
                 "input_rows": 1,
                 "output_rows": 1,
+                "session_uuid": "session-benative",
+                "output_path": "persona/processor/benative/review.jsonl",
                 "output_preview": [
                     {
                         "article_id": "article_001",
@@ -129,6 +131,7 @@ def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: P
                     "trigger_id": "benative_review",
                     "processor": "benative_review",
                     "mode": "benative",
+                    "session_uuid": "session-benative",
                 },
                 "result": "ARTICLE article_001 review complete",
                 "execution_mode": "api",
@@ -148,7 +151,7 @@ def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: P
     monkeypatch.setattr(channel, "_monitor_context_prompt_files", lambda root: [])
     monkeypatch.setattr(channel, "_monitor_recent_activity", lambda root: [])
     request = SimpleNamespace(
-        path="/api/admin/monitor",
+        path="/api/admin/monitor?mode=benative&session_uuid=session-benative",
         headers={"Authorization": "Bearer tok"},
         body=b"",
     )
@@ -158,10 +161,89 @@ def test_admin_monitor_includes_benative_processor_and_subagent_runs(tmp_path: P
     assert response.status_code == 200
     payload = json.loads(response.body.decode("utf-8"))
     assert payload["processor_runs"][0]["mode"] == "benative"
+    assert payload["processor_runs"][0]["artifact_paths"] == [
+        "persona/processor/benative/review.jsonl",
+        "persona/processor/benative/review.md",
+    ]
     assert payload["processor_runs"][0]["output_preview"][0]["article_id"] == "article_001"
     assert payload["processor_runs"][0]["output_preview"][0]["sentence_index"] == 2
     assert payload["subagent_runs"][0]["origin"]["kind"] == "processor_middleware"
     assert payload["subagent_runs"][0]["origin"]["mode"] == "benative"
+    assert payload["expected_triggers"] == []
+
+
+def test_admin_monitor_expected_trigger_explains_skipped_run(tmp_path: Path, monkeypatch) -> None:
+    trigger_file = tmp_path / "mode" / "freechat" / "trigger" / "triggers.json"
+    trigger_file.parent.mkdir(parents=True)
+    trigger_file.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "triggers": [
+                    {
+                        "id": "freechat_vocab",
+                        "name": "Freechat Vocab",
+                        "enabled": True,
+                        "condition": {"kind": "file_line_count", "count": 1},
+                        "target": {
+                            "processor": "vocab",
+                            "subagent": "vocab",
+                            "output_path": "persona/processor/freechat/vocab.jsonl",
+                        },
+                    },
+                    {
+                        "id": "freechat_polisher",
+                        "name": "Freechat Polisher",
+                        "enabled": False,
+                        "condition": {"kind": "file_line_count", "count": 1},
+                        "target": {"processor": "polisher"},
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monitor_dir = tmp_path / "monitor"
+    monitor_dir.mkdir()
+    (monitor_dir / "trigger_decisions.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-06-07T00:00:00Z",
+                "trigger_id": "freechat_vocab",
+                "decision": "skipped",
+                "reason": "processor_no_delta",
+                "mode": "freechat",
+                "session_uuid": "session-freechat",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    channel = WebSocketChannel({"enabled": True}, SimpleNamespace())
+    channel._api_tokens["tok"] = time.monotonic() + 60
+    monkeypatch.setattr(channel, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(channel, "_monitor_context_prompt_files", lambda root: [])
+    monkeypatch.setattr(channel, "_monitor_recent_activity", lambda root: [])
+    request = SimpleNamespace(
+        path="/api/admin/monitor?mode=freechat&session_uuid=session-freechat",
+        headers={"Authorization": "Bearer tok"},
+        body=b"",
+    )
+
+    response = channel._handle_admin_monitor(request)
+
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    expected = {item["trigger_id"]: item for item in payload["expected_triggers"]}
+    assert expected["freechat_vocab"]["status"] == "skipped"
+    assert expected["freechat_vocab"]["reason"] == "processor_no_delta"
+    assert expected["freechat_vocab"]["artifact_paths"] == [
+        "persona/processor/freechat/vocab.jsonl",
+        "persona/processor/freechat/vocab.md",
+    ]
+    assert expected["freechat_polisher"]["status"] == "disabled"
+    assert expected["freechat_polisher"]["reason"] == "trigger_disabled"
 
 
 def test_benative_session_notes_read_session_local_review(tmp_path: Path, monkeypatch) -> None:

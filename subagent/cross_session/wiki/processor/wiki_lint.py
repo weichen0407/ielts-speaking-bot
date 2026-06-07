@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .schema import ALLOWED_PAGE_TYPES, WikiPageMeta
+from .schema import ALLOWED_MEMORY_STATUSES, ALLOWED_PAGE_TYPES, WikiPageMeta
 from .wiki_store import WikiStore, _parse_frontmatter
 
 
@@ -78,6 +78,16 @@ class WikiLinter:
                         message=f"Missing frontmatter fields: {', '.join(missing)}",
                     )
                 )
+            if "memory_status" not in fm:
+                findings.append(
+                    WikiLintFinding(
+                        layer="structure",
+                        severity="warning",
+                        slug=slug,
+                        code="missing_memory_status",
+                        message="Page frontmatter has no memory_status; defaulting to new.",
+                    )
+                )
         return findings
 
     def _lint_page_meta(
@@ -95,6 +105,16 @@ class WikiLinter:
                         slug=page.slug,
                         code="invalid_type",
                         message=f"Unknown page type: {page.type}",
+                    )
+                )
+            if page.memory_status not in ALLOWED_MEMORY_STATUSES:
+                findings.append(
+                    WikiLintFinding(
+                        layer="structure",
+                        severity="error",
+                        slug=page.slug,
+                        code="invalid_memory_status",
+                        message=f"Unknown memory_status: {page.memory_status}",
                     )
                 )
             for link in page.links:
@@ -118,6 +138,17 @@ class WikiLinter:
                         message="Fact-bearing page has no source refs in frontmatter.",
                     )
                 )
+            for source in page.sources:
+                if not source or source == "unknown" or source.endswith(":unknown"):
+                    findings.append(
+                        WikiLintFinding(
+                            layer="semantic",
+                            severity="warning",
+                            slug=page.slug,
+                            code="weak_source_ref",
+                            message=f"Page has a weak source ref: {source}",
+                        )
+                    )
             sidecar = self.store.read_sources(page.slug)
             if page.type not in {"meta", "gap", "question"} and sidecar is None:
                 findings.append(
@@ -129,6 +160,18 @@ class WikiLinter:
                         message="Fact-bearing page has no .sources.json sidecar.",
                     )
                 )
+            if sidecar is not None:
+                for fact_key, fact in sidecar.facts.items():
+                    if not fact.sources:
+                        findings.append(
+                            WikiLintFinding(
+                                layer="semantic",
+                                severity="warning",
+                                slug=page.slug,
+                                code="fact_missing_sources",
+                                message=f"Fact has no source refs in sidecar: {fact_key}",
+                            )
+                        )
         return findings
 
     def _lint_semantics(self, pages: list[WikiPageMeta]) -> list[WikiLintFinding]:
@@ -167,6 +210,16 @@ class WikiLinter:
                         message="Page mentions a possible contradiction/conflict and should be reviewed.",
                     )
                 )
+            if page.type in {"entity", "concept"} and _looks_like_schema_projection(lowered):
+                findings.append(
+                    WikiLintFinding(
+                        layer="semantic",
+                        severity="warning",
+                        slug=page.slug,
+                        code="schema_projection_noise",
+                        message="Entity/concept page appears to contain internal wiki schema labels.",
+                    )
+                )
             if page.type == "decision" and page.status == "active" and not page.last_reviewed_at:
                 findings.append(
                     WikiLintFinding(
@@ -182,3 +235,19 @@ class WikiLinter:
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
+
+
+def _looks_like_schema_projection(text: str) -> bool:
+    schema_terms = {
+        "source",
+        "entity",
+        "concept",
+        "comparison",
+        "question",
+        "synthesis",
+        "decision",
+        "gap",
+        "meta",
+    }
+    hits = sum(1 for term in schema_terms if re.search(rf"\b{term}\b", text))
+    return hits >= 5

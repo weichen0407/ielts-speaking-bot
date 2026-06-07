@@ -25,6 +25,13 @@ ALLOWED_PAGE_TYPES: set[str] = {
 }
 
 ALLOWED_MODES: set[str] = {"global", "ielts", "freechat", "benative", "language"}
+ALLOWED_MEMORY_STATUSES: set[str] = {
+    "new",
+    "confirmed",
+    "contradicted",
+    "stale",
+    "needs_user_confirmation",
+}
 
 ALLOWED_OPERATIONS: set[str] = {
     "create_page",
@@ -141,6 +148,13 @@ class WikiPatch(BaseModel):
     links: list[str] = Field(default_factory=list)
     sources: list[WikiSource] = Field(default_factory=list)
     confidence: Literal["low", "medium", "high"] = Field(default="medium")
+    memory_status: Literal[
+        "new",
+        "confirmed",
+        "contradicted",
+        "stale",
+        "needs_user_confirmation",
+    ] = Field(default="new")
     reason: str | None = Field(default=None)
 
     _slug_validated: bool = False
@@ -204,6 +218,13 @@ class WikiPageMeta(BaseModel):
     updated_at: str = Field(...)
     last_reviewed_at: str | None = Field(default=None)
     confidence: Literal["low", "medium", "high"] = Field(default="medium")
+    memory_status: Literal[
+        "new",
+        "confirmed",
+        "contradicted",
+        "stale",
+        "needs_user_confirmation",
+    ] = Field(default="new")
     stability: Literal["volatile", "stable", "canonical"] = Field(default="volatile")
     version: int = Field(default=1, ge=1)
 

@@ -192,16 +192,25 @@ If the answer is already excellent, use issue_type excellent and still provide a
                 grouped[item.session_uuid].append(item)
 
         for session_uuid, items in grouped.items():
+            from nanobot.benative.events import refresh_benative_session_summary
+
             notes_dir = workspace / "persona" / "benative" / "sessions" / session_uuid / "notes"
             notes_dir.mkdir(parents=True, exist_ok=True)
             session_jsonl = notes_dir / "review.jsonl"
             if format in ("jsonl", "both"):
+                existing_items = _read_review_items(session_jsonl) if session_jsonl.exists() else []
+                seen = {_review_key(item) for item in existing_items}
                 with session_jsonl.open("a", encoding="utf-8") as fh:
                     for item in items:
+                        key = _review_key(item)
+                        if key in seen:
+                            continue
+                        seen.add(key)
                         fh.write(item.model_dump_json() + "\n")
             if format in ("md", "both"):
                 session_items = _read_review_items(session_jsonl) if session_jsonl.exists() else items
                 (notes_dir / "review.md").write_text(self.to_md(session_items), encoding="utf-8")
+            refresh_benative_session_summary(workspace, session_uuid)
 
 
 def _workspace_from_output(output_path: Path) -> Path:
@@ -222,3 +231,7 @@ def _read_review_items(path: Path) -> list[BenativeReviewOutput]:
             except Exception:
                 continue
     return items
+
+
+def _review_key(item: BenativeReviewOutput) -> tuple[str, str, int]:
+    return (item.session_uuid, item.article_id, item.sentence_index)

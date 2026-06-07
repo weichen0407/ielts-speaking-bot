@@ -72,6 +72,7 @@ def _render_frontmatter(meta: WikiPageMeta) -> str:
         "updated_at": meta.updated_at,
         "last_reviewed_at": meta.last_reviewed_at,
         "confidence": meta.confidence,
+        "memory_status": meta.memory_status,
         "stability": meta.stability,
         "version": meta.version,
     }
@@ -237,6 +238,7 @@ class WikiStore:
             updated_at=fm_dict.get("updated_at", ""),
             last_reviewed_at=fm_dict.get("last_reviewed_at"),
             confidence=fm_dict.get("confidence", "medium"),
+            memory_status=fm_dict.get("memory_status", "new"),
             stability=fm_dict.get("stability", "volatile"),
             version=int(fm_dict.get("version", 1) or 1),
         )
@@ -325,6 +327,7 @@ class WikiStore:
                 created_at=now,
                 updated_at=now,
                 confidence=patch.confidence,
+                memory_status=patch.memory_status,
             )
             body = ""
 
@@ -432,6 +435,7 @@ class WikiStore:
             )
 
         meta.updated_at = now
+        meta.memory_status = _merge_memory_status(meta.memory_status, patch.memory_status)
         # Merge tags/topics/links
         for t in patch.tags:
             if t not in meta.tags:
@@ -474,6 +478,7 @@ class WikiStore:
         )
 
         meta.updated_at = now
+        meta.memory_status = _merge_memory_status(meta.memory_status, patch.memory_status)
         for source_ref in _source_refs(patch.sources):
             if source_ref not in meta.sources:
                 meta.sources.append(source_ref)
@@ -491,6 +496,7 @@ class WikiStore:
         sections[section] = patch.content
         body = self._build_body(sections)
         meta.updated_at = now
+        meta.memory_status = _merge_memory_status(meta.memory_status, patch.memory_status)
         for source_ref in _source_refs(patch.sources):
             if source_ref not in meta.sources:
                 meta.sources.append(source_ref)
@@ -505,6 +511,7 @@ class WikiStore:
             if link not in meta.links:
                 meta.links.append(link)
         meta.updated_at = now
+        meta.memory_status = _merge_memory_status(meta.memory_status, patch.memory_status)
         for source_ref in _source_refs(patch.sources):
             if source_ref not in meta.sources:
                 meta.sources.append(source_ref)
@@ -541,6 +548,7 @@ class WikiStore:
                     body = self._build_body(sections)
                     self.write_sources(patch.slug, sources_data)
         meta.updated_at = now
+        meta.memory_status = "stale"
         self.write_page(meta, body)
 
     def _op_update_summary(
@@ -551,6 +559,7 @@ class WikiStore:
         sections["Summary"] = patch.content
         body = self._build_body(sections)
         meta.updated_at = now
+        meta.memory_status = _merge_memory_status(meta.memory_status, patch.memory_status)
         for source_ref in _source_refs(patch.sources):
             if source_ref not in meta.sources:
                 meta.sources.append(source_ref)
@@ -650,3 +659,15 @@ def _source_refs(sources: list[WikiSource]) -> list[str]:
         if ref not in refs:
             refs.append(ref)
     return refs
+
+
+def _merge_memory_status(current: str, incoming: str) -> str:
+    if incoming == "contradicted" or current == "contradicted":
+        return "contradicted"
+    if incoming == "needs_user_confirmation":
+        return "needs_user_confirmation"
+    if current == "confirmed" or incoming == "confirmed":
+        return "confirmed"
+    if incoming == "stale":
+        return "stale"
+    return incoming or current or "new"

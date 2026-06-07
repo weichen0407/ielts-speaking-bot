@@ -285,6 +285,7 @@ def append_processor_run(
     model: str | None = None,
     input_paths: list[str] | None = None,
     output_path: str | None = None,
+    artifact_paths: list[str] | None = None,
     cursor_kind: str | None = None,
     cursor_before: dict[str, Any] | None = None,
     cursor_after: dict[str, Any] | None = None,
@@ -298,6 +299,12 @@ def append_processor_run(
     """Append one processor run to monitor/processor_runs.jsonl."""
     root = project_root_for(Path(root))
     monitor_dir, log_name = monitor_log(root, "processor_runs", "processor_runs.jsonl")
+    artifacts = list(artifact_paths or [])
+    if output_path and output_path not in artifacts:
+        artifacts.append(output_path)
+        md_path = str(Path(output_path).with_suffix(".md"))
+        if md_path not in artifacts:
+            artifacts.append(md_path)
     record = {
         "timestamp": _now_iso(),
         "trigger_id": trigger_id,
@@ -312,6 +319,7 @@ def append_processor_run(
         "model": model,
         "input_paths": input_paths or [],
         "output_path": output_path,
+        "artifact_paths": artifacts,
         "cursor_kind": cursor_kind,
         "cursor_before": cursor_before or {},
         "cursor_after": cursor_after or {},

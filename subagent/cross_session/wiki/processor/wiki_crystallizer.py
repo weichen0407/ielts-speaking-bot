@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from .schema import WikiPatch, WikiSource
@@ -20,6 +22,7 @@ class CrystallizeResult:
 
     patches: list[WikiPatch]
     applied: list[WikiPatch]
+    queued: list[WikiPatch]
 
 
 class WikiCrystallizer:
@@ -58,6 +61,7 @@ class WikiCrystallizer:
                     links=[],
                     sources=[_source_from_ref(ref) for ref in candidate.source_refs],
                     confidence=candidate.confidence,
+                    memory_status=_memory_status_for_candidate(candidate),
                 )
             )
         return patches
@@ -73,11 +77,17 @@ class WikiCrystallizer:
 
         patches = self.to_patches(analysis, mode=mode, limit=limit)
         applied: list[WikiPatch] = []
+        queued: list[WikiPatch] = []
         for patch in patches:
+            if _needs_review_before_save(patch):
+                queued.append(patch)
+                continue
             if self.store.apply_patch(patch):
                 self.index.index_page(patch.slug)
                 applied.append(patch)
-        return CrystallizeResult(patches=patches, applied=applied)
+        if queued:
+            _append_review_queue(self.wiki_root / "state" / "queue.jsonl", queued)
+        return CrystallizeResult(patches=patches, applied=applied, queued=queued)
 
     def _choose_slug(self, candidate: WikiCandidate) -> str:
         existing = self.query.query(
@@ -129,3 +139,31 @@ def _source_from_ref(ref: str) -> WikiSource:
     if len(parts) == 2:
         return WikiSource(kind=parts[0], session_id=parts[1])
     return WikiSource(kind=ref or "unknown")
+
+
+def _memory_status_for_candidate(candidate: WikiCandidate) -> str:
+    text = f"{candidate.title}\n{candidate.content}".lower()
+    if any(token in text for token in ("contradiction", "conflict", "矛盾", "冲突")):
+        return "contradicted"
+    if candidate.confidence == "high":
+        return "confirmed"
+    if candidate.confidence == "low":
+        return "needs_user_confirmation"
+    return "new"
+
+
+def _needs_review_before_save(patch: WikiPatch) -> bool:
+    return patch.memory_status in {"contradicted", "needs_user_confirmation"}
+
+
+def _append_review_queue(path: Path, patches: list[WikiPatch]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    queued_at = datetime.now().isoformat()
+    with path.open("a", encoding="utf-8") as fh:
+        for patch in patches:
+            payload = {
+                "queued_at": queued_at,
+                "reason": patch.memory_status,
+                "patch": patch.model_dump(mode="json"),
+            }
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")

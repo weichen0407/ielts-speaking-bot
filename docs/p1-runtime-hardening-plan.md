@@ -22,10 +22,10 @@ mode trigger
 
 - [x] 1. Strengthen registry as the runtime control plane.
 - [x] 2. Standardize processor cursor, delta, retry, and partial-write behavior.
-- [ ] 3. Make monitor output session-aware and mode-aware for every processor-mediated subagent.
-- [ ] 4. Harden LLM Wiki ingest / crystallize / lint as a reviewable memory pipeline.
-- [ ] 5. Tighten Be Native runtime data flow and review visibility.
-- [ ] 6. Add a focused P1 regression test matrix.
+- [x] 3. Make monitor output session-aware and mode-aware for every processor-mediated subagent.
+- [x] 4. Harden LLM Wiki ingest / crystallize / lint as a reviewable memory pipeline.
+- [x] 5. Tighten Be Native runtime data flow and review visibility.
+- [x] 6. Add a focused P1 regression test matrix.
 
 ## Task 1: Registry Control Plane
 
@@ -139,6 +139,14 @@ Done when:
 
 - After one user turn, WebUI can show whether each expected trigger ran, skipped, or failed, and where the output was written.
 
+Status:
+
+- Done on 2026-06-07.
+- Processor run records now expose `artifact_paths`, with compatibility backfill for older `output_path`-only records.
+- Admin monitor supports `mode` and `session_uuid` filters for processor runs, subagent runs, and trigger decisions.
+- Admin monitor returns `expected_triggers`, including disabled/skipped/failed/done states and the latest decision/run evidence.
+- Added regression coverage for skipped trigger visibility and artifact path reporting.
+
 ## Task 4: LLM Wiki Memory Pipeline Hardening
 
 Current state:
@@ -170,6 +178,15 @@ Done when:
 
 - Wiki can explain why a memory exists, where it came from, and whether it is confirmed or uncertain.
 
+Status:
+
+- Done on 2026-06-07.
+- Added `memory_status` to `WikiPatch` and page frontmatter: `new`, `confirmed`, `contradicted`, `stale`, `needs_user_confirmation`.
+- Crystallization now routes low-confidence or contradicted candidates into `persona/wiki/state/queue.jsonl` instead of directly writing uncertain memory pages.
+- Wiki sync logs `review_queued`, so monitor/debug output can explain why a candidate did not become a graph node.
+- Lint now checks memory status, weak source refs, missing sidecar fact sources, and schema projection noise in entity/concept pages.
+- Added golden coverage for freechat facts such as basketball, Paris, Arsenal, travel, and IELTS speaking fluency.
+
 ## Task 5: Be Native Runtime Flow
 
 Current state:
@@ -193,6 +210,14 @@ Done when:
 
 - A Be Native session can be replayed from stored records without reading transient UI state.
 
+Status:
+
+- Done on 2026-06-07.
+- Added per-session `summary.json` under `persona/benative/sessions/{session_uuid}/`.
+- The summary tracks article id, current sentence, total sentence count, completed sentence indexes, response count, review count, artifact paths, and latest review status.
+- User answers still advance immediately to the next sentence without waiting for `benative_review`.
+- `benative_review` writes session-local artifacts with dedupe and refreshes the same summary after review output is available.
+
 ## Task 6: P1 Regression Matrix
 
 Minimum tests:
@@ -203,6 +228,11 @@ Minimum tests:
 - Processor re-run does not duplicate old artifacts.
 - Be Native review appends per session and does not block the next sentence.
 - Monitor API returns enough metadata to debug a skipped trigger.
+
+Status:
+
+- Done on 2026-06-07.
+- Added/updated targeted tests for monitor expected triggers, wiki review queue and lint, Be Native immediate turn advancement, session summary, and per-session review dedupe.
 
 ## Verification Commands
 

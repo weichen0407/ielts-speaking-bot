@@ -142,6 +142,7 @@ export interface AdminTrigger {
   input_path?: string | null;
   input_paths?: string[];
   output_path?: string | null;
+  artifact_paths?: string[];
   batch_size?: number | null;
   depends_on?: string | null;
   prompt_file?: string | null;
@@ -222,6 +223,22 @@ export interface AdminProcessorRun {
   usage?: Record<string, unknown>;
   output_preview?: Array<Record<string, unknown>>;
   error?: string | null;
+}
+
+export interface AdminExpectedTrigger {
+  trigger_id: string;
+  name?: string | null;
+  mode?: string | null;
+  enabled: boolean;
+  processor?: string | null;
+  subagent?: string | null;
+  output_path?: string | null;
+  artifact_paths?: string[];
+  status: string;
+  reason?: string | null;
+  latest_decision?: AdminTriggerDecision | null;
+  latest_processor_run?: AdminProcessorRun | null;
+  latest_subagent_run?: AdminSubagentRun | null;
 }
 
 export interface WikiSyncRun {
@@ -343,6 +360,7 @@ export interface AdminMonitorPayload {
   subagent_runs: AdminSubagentRun[];
   processor_runs?: AdminProcessorRun[];
   trigger_decisions?: AdminTriggerDecision[];
+  expected_triggers?: AdminExpectedTrigger[];
   cost_summary?: AdminCostSummary;
   wiki_sync_runs?: WikiSyncRun[];
   recent_activity: AdminActivity[];

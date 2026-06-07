@@ -2565,6 +2565,15 @@ class WebSocketChannel(BaseChannel):
 
         monitor_dir, log_name = monitor_log(root, "processor_runs", "processor_runs.jsonl")
         records = read_monitor_records(monitor_dir, log_name, limit=limit)
+        for record in records:
+            if not record.get("artifact_paths"):
+                output_path = record.get("output_path")
+                if isinstance(output_path, str) and output_path:
+                    artifacts = [output_path]
+                    md_path = str(Path(output_path).with_suffix(".md"))
+                    if md_path not in artifacts:
+                        artifacts.append(md_path)
+                    record["artifact_paths"] = artifacts
         records.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return records
 
@@ -2728,16 +2737,138 @@ class WebSocketChannel(BaseChannel):
         runs.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
         return runs[:limit]
 
+    def _filter_monitor_records(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        mode: str | None,
+        session_uuid: str | None,
+    ) -> list[dict[str, Any]]:
+        if not mode and not session_uuid:
+            return records
+        filtered: list[dict[str, Any]] = []
+        for record in records:
+            record_mode = record.get("mode")
+            if record_mode is None and isinstance(record.get("origin"), dict):
+                record_mode = record["origin"].get("mode")
+            if mode and record_mode != mode:
+                continue
+            record_session_uuid = record.get("session_uuid")
+            if record_session_uuid is None and isinstance(record.get("origin"), dict):
+                record_session_uuid = record["origin"].get("session_uuid")
+            if session_uuid and record_session_uuid != session_uuid:
+                continue
+            filtered.append(record)
+        return filtered
+
+    def _expected_trigger_status(
+        self,
+        triggers: list[dict[str, Any]],
+        *,
+        processor_runs: list[dict[str, Any]],
+        subagent_runs: list[dict[str, Any]],
+        trigger_decisions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        decisions_by_id: dict[str, dict[str, Any]] = {}
+        processors_by_id: dict[str, dict[str, Any]] = {}
+        subagents_by_id: dict[str, dict[str, Any]] = {}
+        for decision in trigger_decisions:
+            trigger_id = str(decision.get("trigger_id") or "")
+            if trigger_id and trigger_id not in decisions_by_id:
+                decisions_by_id[trigger_id] = decision
+        for run in processor_runs:
+            trigger_id = str(run.get("trigger_id") or "")
+            if trigger_id and trigger_id not in processors_by_id:
+                processors_by_id[trigger_id] = run
+        for run in subagent_runs:
+            origin = run.get("origin") if isinstance(run.get("origin"), dict) else {}
+            trigger_id = str(origin.get("trigger_id") or "")
+            if trigger_id and trigger_id not in subagents_by_id:
+                subagents_by_id[trigger_id] = run
+
+        expected: list[dict[str, Any]] = []
+        for trigger in triggers:
+            trigger_id = str(trigger.get("id") or "")
+            latest_decision = decisions_by_id.get(trigger_id)
+            latest_processor_run = processors_by_id.get(trigger_id)
+            latest_subagent_run = subagents_by_id.get(trigger_id)
+            reason = None
+            status = "unknown"
+            if not trigger.get("enabled", True):
+                status = "disabled"
+                reason = "trigger_disabled"
+            elif latest_processor_run:
+                status = str(latest_processor_run.get("status") or "processor_recorded")
+                reason = latest_processor_run.get("error") or latest_processor_run.get("status")
+            elif latest_subagent_run:
+                status = str(latest_subagent_run.get("phase") or "subagent_recorded")
+                reason = latest_subagent_run.get("error") or latest_subagent_run.get("stop_reason")
+            elif latest_decision:
+                status = str(latest_decision.get("decision") or "decision_recorded")
+                reason = latest_decision.get("reason")
+            else:
+                status = "no_recent_activity"
+                reason = "no trigger decision or run has been logged yet"
+            expected.append({
+                "trigger_id": trigger_id,
+                "name": trigger.get("name"),
+                "mode": trigger.get("mode"),
+                "enabled": trigger.get("enabled", True),
+                "processor": trigger.get("processor"),
+                "subagent": trigger.get("subagent"),
+                "output_path": trigger.get("output_path"),
+                "artifact_paths": [
+                    path
+                    for path in [
+                        trigger.get("output_path"),
+                        str(Path(str(trigger.get("output_path"))).with_suffix(".md"))
+                        if trigger.get("output_path")
+                        else None,
+                    ]
+                    if path
+                ],
+                "status": status,
+                "reason": reason,
+                "latest_decision": latest_decision,
+                "latest_processor_run": latest_processor_run,
+                "latest_subagent_run": latest_subagent_run,
+            })
+        return expected
+
     def _handle_admin_monitor(self, request: WsRequest) -> Response:
         """GET /api/admin/monitor - trigger, prompt, and recent execution overview."""
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         try:
             root = self._project_root()
+            query = _parse_query(request.path)
+            mode = str(_query_first(query, "mode") or "").strip() or None
+            session_uuid = str(_query_first(query, "session_uuid") or "").strip() or None
             triggers, trigger_prompts = self._monitor_triggers(root)
             subagent_runs = self._monitor_subagent_runs(root)
             processor_runs = self._monitor_processor_runs(root)
             trigger_decisions = self._monitor_trigger_decisions(root)
+            if mode or session_uuid:
+                triggers = [
+                    trigger
+                    for trigger in triggers
+                    if (not mode or trigger.get("mode") == mode)
+                ]
+                subagent_runs = self._filter_monitor_records(
+                    subagent_runs,
+                    mode=mode,
+                    session_uuid=session_uuid,
+                )
+                processor_runs = self._filter_monitor_records(
+                    processor_runs,
+                    mode=mode,
+                    session_uuid=session_uuid,
+                )
+                trigger_decisions = self._filter_monitor_records(
+                    trigger_decisions,
+                    mode=mode,
+                    session_uuid=session_uuid,
+                )
             known_prompt_ids = {p["id"] for p in trigger_prompts}
             extra_prompts: list[dict[str, Any]] = []
             for path in self._monitor_context_prompt_files(root):
@@ -2773,6 +2904,12 @@ class WebSocketChannel(BaseChannel):
                 "subagent_runs": subagent_runs,
                 "processor_runs": processor_runs,
                 "trigger_decisions": trigger_decisions,
+                "expected_triggers": self._expected_trigger_status(
+                    triggers,
+                    processor_runs=processor_runs,
+                    subagent_runs=subagent_runs,
+                    trigger_decisions=trigger_decisions,
+                ),
                 "cost_summary": self._monitor_cost_summary(subagent_runs + processor_runs),
                 "wiki_sync_runs": self._wiki_sync_runs(root),
                 "recent_activity": self._monitor_recent_activity(root),

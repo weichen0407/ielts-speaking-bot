@@ -1,5 +1,29 @@
 # Update Log
 
+## 2026-06-07 - P1-3 到 P1-6 Runtime Hardening
+
+- 标记 `docs/p1-runtime-hardening-plan.md` 的 P1-3、P1-4、P1-5、P1-6 为 done。
+- 增强 monitor 可观测性：
+  - `processor_runs.jsonl` 支持 `artifact_paths`，并对旧 `output_path` 记录做兼容回填。
+  - `/api/admin/monitor` 支持按 `mode` 与 `session_uuid` 过滤 processor/subagent/trigger decision。
+  - 新增 `expected_triggers`，展示每个触发器的 disabled/skipped/failed/done/no_recent_activity 状态和最新证据。
+- 加固 LLM Wiki pipeline：
+  - Wiki patch/page frontmatter 增加 `memory_status`。
+  - 低置信或疑似矛盾候选进入 `persona/wiki/state/queue.jsonl`，不直接污染长期记忆正文。
+  - Wiki sync 记录 `review_queued`。
+  - Wiki lint 增加 source refs、sidecar fact sources、memory status、schema projection noise 检查。
+  - 增加 basketball、Paris、Arsenal、travel、IELTS fluency 的 freechat golden test。
+- 加固 Be Native runtime flow：
+  - 新增 `persona/benative/sessions/{session_uuid}/summary.json`。
+  - 用户回答后立即刷新 session summary，不等待 `benative_review`。
+  - `benative_review` session-local review artifacts 改为去重追加，并刷新同一 summary。
+- 增加/更新 P1 regression tests：
+  - monitor skipped trigger 可解释性。
+  - wiki review queue 与 semantic lint。
+  - Be Native 练习不阻塞下一句、session summary、review dedupe。
+
+---
+
 ## 2026-06-07 - P1-2 Processor Cursor And Delta Semantics
 
 - 标记 `docs/p1-runtime-hardening-plan.md` 的 P1-2 为 done。
