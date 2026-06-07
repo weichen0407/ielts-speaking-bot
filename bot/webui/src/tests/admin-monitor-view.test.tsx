@@ -132,10 +132,22 @@ describe("AdminMonitorView", () => {
         wiki_sync_runs: [],
         cost_summary: {
           currency: "USD",
-          estimated_usd: 0,
-          prompt_tokens: 0,
+          estimated_usd: 0.001,
+          prompt_tokens: 1200,
           cached_tokens: 0,
-          completion_tokens: 0,
+          completion_tokens: 180,
+          modes: [
+            {
+              mode: "benative",
+              prompt_tokens: 800,
+              cached_tokens: 0,
+              completion_tokens: 120,
+              estimated_usd: 0.0007,
+              runs: 2,
+              budget_usd: 0.2,
+              budget_used_pct: 0.35,
+            },
+          ],
           models: [],
         },
       })),
@@ -149,6 +161,9 @@ describe("AdminMonitorView", () => {
 
     expect(await screen.findByText("Be Native Review")).toBeInTheDocument();
     expect(screen.getAllByText("article article_001 · sentence 2 · grammar").length).toBeGreaterThan(0);
+    expect(screen.getByText("按模式预算")).toBeInTheDocument();
+    expect(screen.getByText("budget $0.2000")).toBeInTheDocument();
+    expect(screen.getByText("0.35%")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Filter monitor runs by mode"), {
       target: { value: "benative" },

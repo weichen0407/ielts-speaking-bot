@@ -229,6 +229,7 @@ Status:
 - Done on 2026-06-07.
 - Added `bot/webui/scripts/smoke-gateway.mjs` and `bun run smoke:gateway`.
 - The smoke script checks bootstrap JSON, wiki graph nodes/edges shape, and admin monitor trigger arrays against a running gateway.
+- Added Vitest smoke coverage for Wiki graph memory-status API serialization, Wiki Memory panel filter propagation, monitor mode-budget rendering, and mode-specific session notes tabs.
 - Screenshot-level Playwright tests are still future polish; this smoke path catches the previous HTML-instead-of-JSON class of failure.
 
 ## Task 6: Channel Expansion Surfaces

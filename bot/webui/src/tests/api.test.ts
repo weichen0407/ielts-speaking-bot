@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
+  fetchWikiGraph,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
@@ -150,6 +151,28 @@ describe("webui API helpers", () => {
     ]);
     expect(fetch).toHaveBeenCalledWith(
       "/api/commands",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes wiki graph memory status filters", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ nodes: [], edges: [] }),
+    } as Response);
+
+    await fetchWikiGraph("tok", {
+      mode: "freechat",
+      topic: "sports",
+      type: "synthesis",
+      tags: "arsenal",
+      memory_status: "uncertain",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/wiki/graph?mode=freechat&topic=sports&type=synthesis&tags=arsenal&memory_status=uncertain",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

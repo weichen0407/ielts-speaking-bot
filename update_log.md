@@ -20,6 +20,7 @@
   - 新增 `docs/data-lifecycle-and-export.md`，说明 raw events、derived artifacts、long-term memory、observability logs 的边界。
 - Smoke / channel expansion：
   - 新增 `bot/webui/scripts/smoke-gateway.mjs` 和 `bun run smoke:gateway`。
+  - 新增 WebUI Vitest smoke 覆盖：Wiki graph memory filter API、Wiki Memory panel filter 传递、monitor mode budget 展示、Session Notes 按 mode 切换 artifact tab。
   - 新增 `docs/channel-event-contract.md`，定义 channel-neutral event shape 和 channel adapter 边界。
 
 ---
